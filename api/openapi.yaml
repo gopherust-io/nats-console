@@ -1,0 +1,982 @@
+openapi: 3.1.0
+info:
+  title: NATS Consol API
+  version: 0.2.0
+  description: Self-hosted admin console for NATS JetStream — cluster-scoped REST and WebSocket API.
+
+servers:
+  - url: /api/v1
+    description: API v1 base path
+
+security:
+  - basicAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /clusters:
+    get:
+      tags: [Clusters]
+      summary: List clusters
+      responses:
+        "200":
+          description: Cluster list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClusterListResponse"
+    post:
+      tags: [Clusters]
+      summary: Create cluster
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClusterCreateRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cluster"
+
+  /clusters/{clusterId}:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [Clusters]
+      summary: Get cluster
+      responses:
+        "200":
+          description: Cluster details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cluster"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Clusters]
+      summary: Update cluster
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClusterUpdateRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cluster"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Clusters]
+      summary: Delete cluster
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /clusters/{clusterId}/test:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    post:
+      tags: [Clusters]
+      summary: Test cluster connectivity
+      responses:
+        "200":
+          description: Connection test result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClusterTestResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /clusters/{clusterId}/account:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [JetStream]
+      summary: JetStream account info
+      responses:
+        "200":
+          description: Account info
+          content:
+            application/json:
+              schema:
+                type: object
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /clusters/{clusterId}/monitoring/varz:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [Monitoring]
+      summary: NATS varz
+      responses:
+        "200":
+          description: varz JSON
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /clusters/{clusterId}/monitoring/jsz:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [Monitoring]
+      summary: NATS jsz
+      parameters:
+        - name: acc
+          in: query
+          schema:
+            type: string
+        - name: streams
+          in: query
+          schema:
+            type: boolean
+        - name: consumers
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: jsz JSON
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /clusters/{clusterId}/streams:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [Streams]
+      summary: List streams
+      responses:
+        "200":
+          description: Stream list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamListResponse"
+    post:
+      tags: [Streams]
+      summary: Create stream
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StreamConfig"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /clusters/{clusterId}/streams/{name}:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/streamName"
+    get:
+      tags: [Streams]
+      summary: Get stream
+      responses:
+        "200":
+          description: Stream info
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Streams]
+      summary: Update stream
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StreamConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+    delete:
+      tags: [Streams]
+      summary: Delete stream
+      responses:
+        "204":
+          description: Deleted
+
+  /clusters/{clusterId}/streams/{name}/purge:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/streamName"
+    post:
+      tags: [Streams]
+      summary: Purge stream
+      responses:
+        "204":
+          description: Purged
+
+  /clusters/{clusterId}/streams/{name}/consumers:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/streamName"
+    get:
+      tags: [Consumers]
+      summary: List consumers
+      responses:
+        "200":
+          description: Consumer list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsumerListResponse"
+    post:
+      tags: [Consumers]
+      summary: Create consumer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsumerConfig"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /clusters/{clusterId}/streams/{name}/consumers/{consumer}:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/streamName"
+      - $ref: "#/components/parameters/consumerName"
+    get:
+      tags: [Consumers]
+      summary: Get consumer
+      responses:
+        "200":
+          description: Consumer info
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Consumers]
+      summary: Delete consumer
+      responses:
+        "204":
+          description: Deleted
+
+  /clusters/{clusterId}/streams/{name}/messages:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/streamName"
+    get:
+      tags: [Messages]
+      summary: Get message by sequence with optional navigation
+      parameters:
+        - name: seq
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [next, prev]
+      responses:
+        "200":
+          description: Raw stream message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RawStreamMessage"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /clusters/{clusterId}/live/ws:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [Live]
+      summary: Live message tail WebSocket
+      description: |
+        Upgrades to WebSocket. Query params: stream (required), subject (optional filter), from_seq (optional).
+        Client may send JSON control frames: {"action":"pause"}, {"action":"resume"}, {"action":"clear"}.
+      parameters:
+        - name: stream
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: subject
+          in: query
+          schema:
+            type: string
+        - name: from_seq
+          in: query
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "101":
+          description: Switching Protocols
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /clusters/{clusterId}/kv/buckets:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [KV]
+      summary: List KV buckets
+      responses:
+        "200":
+          description: Bucket list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KVBucketListResponse"
+    post:
+      tags: [KV]
+      summary: Create KV bucket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KVBucketConfig"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KVBucketInfo"
+
+  /clusters/{clusterId}/kv/buckets/{bucket}:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/bucketName"
+    get:
+      tags: [KV]
+      summary: Get KV bucket info
+      responses:
+        "200":
+          description: Bucket info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KVBucketInfo"
+    delete:
+      tags: [KV]
+      summary: Delete KV bucket
+      responses:
+        "204":
+          description: Deleted
+
+  /clusters/{clusterId}/kv/buckets/{bucket}/keys:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/bucketName"
+    get:
+      tags: [KV]
+      summary: List keys in KV bucket
+      responses:
+        "200":
+          description: Key list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KVKeyListResponse"
+
+  /clusters/{clusterId}/kv/buckets/{bucket}/keys/{key}:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/bucketName"
+      - $ref: "#/components/parameters/keyName"
+    get:
+      tags: [KV]
+      summary: Get KV entry
+      responses:
+        "200":
+          description: KV entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KVEntry"
+    put:
+      tags: [KV]
+      summary: Put KV entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KVPutRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KVEntry"
+    delete:
+      tags: [KV]
+      summary: Delete KV entry
+      responses:
+        "204":
+          description: Deleted
+
+  /clusters/{clusterId}/kv/buckets/{bucket}/keys/{key}/history:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/bucketName"
+      - $ref: "#/components/parameters/keyName"
+    get:
+      tags: [KV]
+      summary: Get KV key history
+      responses:
+        "200":
+          description: Key history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KVHistoryResponse"
+
+  /clusters/{clusterId}/objects/buckets:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [ObjectStore]
+      summary: List object store buckets
+      responses:
+        "200":
+          description: Bucket list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectBucketListResponse"
+    post:
+      tags: [ObjectStore]
+      summary: Create object store bucket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ObjectBucketConfig"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectBucketInfo"
+
+  /clusters/{clusterId}/objects/buckets/{bucket}:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/bucketName"
+    get:
+      tags: [ObjectStore]
+      summary: Get object store bucket info
+      responses:
+        "200":
+          description: Bucket info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectBucketInfo"
+    delete:
+      tags: [ObjectStore]
+      summary: Delete object store bucket
+      responses:
+        "204":
+          description: Deleted
+
+  /clusters/{clusterId}/objects/buckets/{bucket}/objects:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/bucketName"
+    get:
+      tags: [ObjectStore]
+      summary: List objects in bucket
+      responses:
+        "200":
+          description: Object list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectListResponse"
+
+  /clusters/{clusterId}/objects/buckets/{bucket}/objects/{objectName}:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/bucketName"
+      - $ref: "#/components/parameters/objectName"
+    get:
+      tags: [ObjectStore]
+      summary: Get object metadata and data
+      responses:
+        "200":
+          description: Object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectInfo"
+    put:
+      tags: [ObjectStore]
+      summary: Put object
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ObjectPutRequest"
+      responses:
+        "200":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectInfo"
+    delete:
+      tags: [ObjectStore]
+      summary: Delete object
+      responses:
+        "204":
+          description: Deleted
+
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+
+  parameters:
+    clusterId:
+      name: clusterId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    streamName:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+    consumerName:
+      name: consumer
+      in: path
+      required: true
+      schema:
+        type: string
+    bucketName:
+      name: bucket
+      in: path
+      required: true
+      schema:
+        type: string
+    keyName:
+      name: key
+      in: path
+      required: true
+      schema:
+        type: string
+    objectName:
+      name: objectName
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    BadGateway:
+      description: Upstream NATS error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+
+    Cluster:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        nats_url:
+          type: string
+        monitoring_url:
+          type: string
+        has_creds:
+          type: boolean
+        has_token:
+          type: boolean
+        is_default:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ClusterCreateRequest:
+      type: object
+      required: [name, nats_url]
+      properties:
+        name:
+          type: string
+        nats_url:
+          type: string
+        monitoring_url:
+          type: string
+        creds_file_path:
+          type: string
+        token:
+          type: string
+        is_default:
+          type: boolean
+
+    ClusterUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        nats_url:
+          type: string
+        monitoring_url:
+          type: string
+        creds_file_path:
+          type: string
+        token:
+          type: string
+        is_default:
+          type: boolean
+
+    ClusterListResponse:
+      type: object
+      properties:
+        clusters:
+          type: array
+          items:
+            $ref: "#/components/schemas/Cluster"
+        total:
+          type: integer
+
+    ClusterTestResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        server_name:
+          type: string
+        jetstream:
+          type: boolean
+
+    StreamConfig:
+      type: object
+      properties:
+        name:
+          type: string
+        subjects:
+          type: array
+          items:
+            type: string
+        retention:
+          type: string
+        storage:
+          type: string
+        max_msgs:
+          type: integer
+          format: int64
+        max_bytes:
+          type: integer
+          format: int64
+        max_age:
+          type: integer
+          format: int64
+          description: Nanoseconds
+
+    StreamListResponse:
+      type: object
+      properties:
+        streams:
+          type: array
+          items:
+            type: object
+        total:
+          type: integer
+
+    ConsumerConfig:
+      type: object
+      properties:
+        durable_name:
+          type: string
+        deliver_policy:
+          type: string
+        ack_policy:
+          type: string
+        filter_subject:
+          type:    string
+        max_deliver:
+          type: integer
+        ack_wait:
+          type: integer
+          format: int64
+
+    ConsumerListResponse:
+      type: object
+      properties:
+        consumers:
+          type: array
+          items:
+            type: object
+        total:
+          type: integer
+
+    RawStreamMessage:
+      type: object
+      properties:
+        message:
+          type: object
+          properties:
+            seq:
+              type: integer
+            subject:
+              type: string
+            time:
+              type: string
+            data:
+              type: string
+              description: Base64-encoded payload
+            hdrs:
+              type: array
+              items:
+                type: integer
+        navigation:
+          type: object
+          properties:
+            prev_seq:
+              type: integer
+            next_seq:
+              type: integer
+
+    KVBucketConfig:
+      type: object
+      required: [bucket]
+      properties:
+        bucket:
+          type: string
+        description:
+          type: string
+        max_value_size:
+          type: integer
+        history:
+          type: integer
+        ttl:
+          type: integer
+          format: int64
+
+    KVBucketInfo:
+      type: object
+      properties:
+        bucket:
+          type: string
+        values:
+          type: integer
+        history:
+          type: integer
+
+    KVBucketListResponse:
+      type: object
+      properties:
+        buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/KVBucketInfo"
+        total:
+          type: integer
+
+    KVKeyListResponse:
+      type: object
+      properties:
+        keys:
+          type: array
+          items:
+            type: string
+        total:
+          type: integer
+
+    KVEntry:
+      type: object
+      properties:
+        bucket:
+          type: string
+        key:
+          type: string
+        value:
+          type: string
+          description: Base64-encoded value
+        revision:
+          type: integer
+        created:
+          type: string
+          format: date-time
+
+    KVPutRequest:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
+          description: Base64-encoded value
+
+    KVHistoryResponse:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/KVEntry"
+        total:
+          type: integer
+
+    ObjectBucketConfig:
+      type: object
+      required: [bucket]
+      properties:
+        bucket:
+          type: string
+        description:
+          type: string
+        max_bytes:
+          type: integer
+          format: int64
+
+    ObjectBucketInfo:
+      type: object
+      properties:
+        bucket:
+          type: string
+        description:
+          type: string
+        size:
+          type: integer
+          format: int64
+
+    ObjectBucketListResponse:
+      type: object
+      properties:
+        buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/ObjectBucketInfo"
+        total:
+          type: integer
+
+    ObjectListResponse:
+      type: object
+      properties:
+        objects:
+          type: array
+          items:
+            type: string
+        total:
+          type: integer
+
+    ObjectInfo:
+      type: object
+      properties:
+        bucket:
+          type: string
+        name:
+          type: string
+        size:
+          type: integer
+          format: int64
+        data:
+          type: string
+          description: Base64-encoded object data
+        modified:
+          type: string
+          format: date-time
+
+    ObjectPutRequest:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: string
+          description: Base64-encoded object data
