@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import Pager, { DEFAULT_PAGE_SIZE, pageQuery } from "../components/Pager";
@@ -55,8 +55,8 @@ export default function ObjectBucketPage() {
     }
   }
 
-  const payload = selected ? decodeBase64(selected.data) : "";
-  const parsed = tryParseJSON(payload);
+  const payload = useMemo(() => (selected ? decodeBase64(selected.data) : ""), [selected]);
+  const parsed = useMemo(() => tryParseJSON(payload), [payload]);
   const truncated = !showFull && payload.length > PREVIEW_LIMIT;
   const displayPayload = truncated ? `${payload.slice(0, PREVIEW_LIMIT)}\n…` : payload;
 

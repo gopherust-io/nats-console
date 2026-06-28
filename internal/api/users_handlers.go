@@ -137,6 +137,7 @@ func (h *UsersHandler) Update(ctx *fasthttp.RequestCtx) {
 		writeUserMgmtError(ctx, err)
 		return
 	}
+	h.svc.Auth.InvalidateUser(userID)
 	serializer.WriteJSON(ctx, fasthttp.StatusOK, user)
 }
 
@@ -155,6 +156,7 @@ func (h *UsersHandler) Delete(ctx *fasthttp.RequestCtx) {
 		writeUserMgmtError(ctx, err)
 		return
 	}
+	h.svc.Auth.InvalidateUser(userID)
 	ctx.SetStatusCode(fasthttp.StatusNoContent)
 }
 
@@ -185,6 +187,7 @@ func (h *UsersHandler) SetRoles(ctx *fasthttp.RequestCtx) {
 		writeUserMgmtError(ctx, err)
 		return
 	}
+	h.svc.Auth.InvalidateUser(userID)
 	serializer.WriteJSON(ctx, fasthttp.StatusOK, user)
 }
 

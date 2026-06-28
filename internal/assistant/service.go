@@ -68,13 +68,9 @@ func (s *Service) Chat(ctx context.Context, clusterID string, req ChatRequest) (
 		return ChatResponse{}, err
 	}
 
-	clusterCtx, err := s.context.Build(ctx, clusterID, req.Page)
+	contextBlock, err := s.context.BuildContextBlock(ctx, clusterID, req.Page)
 	if err != nil {
 		return ChatResponse{}, newAssistantError(CodeContext, "Could not load cluster context. Check NATS connectivity.", true, 0)
-	}
-	contextBlock, err := FormatContextBlock(clusterCtx)
-	if err != nil {
-		return ChatResponse{}, newAssistantError(CodeContext, "Could not prepare cluster context for the assistant.", true, 0)
 	}
 
 	history := trimHistory(SanitizeHistory(req.History), 12)

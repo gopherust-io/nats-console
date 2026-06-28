@@ -49,6 +49,11 @@ var (
 		Name: "nats_consol_metrics_snapshot_errors_total",
 		Help: "Failed metric snapshot collections by cluster.",
 	}, []string{"cluster"})
+
+	LiveWSFramesDroppedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "nats_consol_live_ws_frames_dropped_total",
+		Help: "Live WebSocket frames dropped due to rate limiting.",
+	})
 )
 
 func ObserveHTTP(method, path string, status int, duration time.Duration) {
@@ -83,4 +88,8 @@ func IncSnapshotSuccess(clusterID string) {
 
 func IncSnapshotErrors(clusterID string) {
 	MetricsSnapshotErrorsTotal.WithLabelValues(clusterID).Inc()
+}
+
+func IncLiveWSFramesDropped() {
+	LiveWSFramesDroppedTotal.Inc()
 }

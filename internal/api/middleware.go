@@ -23,7 +23,10 @@ import (
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 )
 
-const requestIDKey = "request_id"
+const (
+	requestIDKey = "request_id"
+	pathKey      = "path"
+)
 
 func isAPIPath(path string) bool {
 	return strings.HasPrefix(path, "/api/")
@@ -46,11 +49,13 @@ func chain(mws ...middleware) middleware {
 
 func requestIDMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
+		path := string(ctx.Path())
+		ctx.SetUserValue(pathKey, path)
 		id := string(ctx.Request.Header.Peek("X-Request-ID"))
 		if id == "" {
-			b := make([]byte, 8)
-			_, _ = rand.Read(b)
-			id = hex.EncodeToString(b)
+			var b [8]byte
+			_, _ = rand.Read(b[:])
+			id = hex.EncodeToString(b[:])
 		}
 		ctx.SetUserValue(requestIDKey, id)
 		ctx.Response.Header.Set("X-Request-ID", id)
@@ -58,10 +63,17 @@ func requestIDMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 	}
 }
 
+func requestPath(ctx *fasthttp.RequestCtx) string {
+	if path, ok := ctx.UserValue(pathKey).(string); ok && path != "" {
+		return path
+	}
+	return string(ctx.Path())
+}
+
 func timeoutMiddleware(timeout time.Duration) middleware {
 	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(ctx *fasthttp.RequestCtx) {
-			if isLongRunningProfilePath(string(ctx.Path())) {
+			if isLongRunningProfilePath(requestPath(ctx)) {
 				next(ctx)
 				return
 			}
@@ -75,7 +87,7 @@ func timeoutMiddleware(timeout time.Duration) middleware {
 
 func requestLogMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
-		path := string(ctx.Path())
+		path := requestPath(ctx)
 		if !isAPIPath(path) {
 			next(ctx)
 			return
@@ -95,7 +107,7 @@ func requestLogMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler 
 
 func metricsMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
-		if !isAPIPath(string(ctx.Path())) {
+		if !isAPIPath(requestPath(ctx)) {
 			next(ctx)
 			return
 		}
@@ -106,7 +118,7 @@ func metricsMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 }
 
 func routeLabel(ctx *fasthttp.RequestCtx) string {
-	path := string(ctx.Path())
+	path := requestPath(ctx)
 	if strings.HasPrefix(path, "/api/v1/clusters/") {
 		return "/api/v1/clusters/{clusterId}"
 	}
@@ -149,7 +161,7 @@ func corsMiddleware(cfg config.Config) middleware {
 func authMiddleware(cfg config.Config, authSvc *auth.Service) middleware {
 	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(ctx *fasthttp.RequestCtx) {
-			path := string(ctx.Path())
+			path := requestPath(ctx)
 			if !requiresAuth(path) {
 				next(ctx)
 				return
@@ -184,7 +196,7 @@ func authMiddleware(cfg config.Config, authSvc *auth.Service) middleware {
 
 func rbacMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
-		path := string(ctx.Path())
+		path := requestPath(ctx)
 		if !requiresAuth(path) {
 			next(ctx)
 			return
@@ -283,8 +295,8 @@ func auditMiddleware(auditWriter *audit.Writer) middleware {
 	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(ctx *fasthttp.RequestCtx) {
 			method := string(ctx.Method())
-			path := string(ctx.Path())
-			if method == fasthttp.MethodGet || method == fasthttp.MethodHead || method == fasthttp.MethodOptions || isPublicPath(path) {
+	path := requestPath(ctx)
+	if method == fasthttp.MethodGet || method == fasthttp.MethodHead || method == fasthttp.MethodOptions || isPublicPath(path) {
 				next(ctx)
 				return
 			}
@@ -327,7 +339,7 @@ func authenticate(ctx *fasthttp.RequestCtx, authSvc *auth.Service) (store.User, 
 	}
 
 	authHeader := string(ctx.Request.Header.Peek("Authorization"))
-	if strings.Contains(string(ctx.Path()), "/live/ws") {
+	if strings.Contains(requestPath(ctx), "/live/ws") {
 		qAuth := string(ctx.QueryArgs().Peek("authorization"))
 		if qAuth != "" {
 			if !strings.HasPrefix(qAuth, "Basic ") {

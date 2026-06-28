@@ -2390,6 +2390,15 @@ body {
   border: 1px solid var(--border-subtle);
 }
 
+.topology-overview__virtual .virtual-table {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+}
+
+.topology-overview__virtual .topology-overview__stream-btn--selected {
+  font-weight: 600;
+}
+
 .topology-overview__table {
   width: 100%;
   border-collapse: collapse;

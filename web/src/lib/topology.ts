@@ -67,6 +67,25 @@ type ConsumerListResponse = {
 };
 
 const PAGE_SIZE = TOPOLOGY_PAGE_SIZE;
+const CONSUMER_FETCH_CONCURRENCY = 6;
+
+async function mapConcurrent<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await fn(items[index]);
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
 
 function consumerHealthStatus(pending: number, ackPending: number): TopologyNode["status"] {
   if (pending > 0 || ackPending > 0) return "warning";
@@ -223,31 +242,30 @@ async function fetchAllConsumers(clusterId: string, streamName: string): Promise
 
 async function buildTopologyFromAPI(clusterId: string, clusterName: string): Promise<TopologyNode> {
   const streams = await fetchAllStreams(clusterId);
-  const streamNodes: TopologyNode[] = [];
-
-  for (const stream of streams) {
+  const consumerLists = await mapConcurrent(streams, CONSUMER_FETCH_CONCURRENCY, (stream) =>
+    fetchAllConsumers(clusterId, stream.config.name),
+  );
+  const streamNodes: TopologyNode[] = streams.map((stream, index) => {
     const name = stream.config.name;
-    const consumers = await fetchAllConsumers(clusterId, name);
-    streamNodes.push(
-      createStreamTopologyNode(
-        {
-          name,
-          subjects: stream.config.subjects ?? [],
-          messages: stream.state.messages,
-          consumerCount: stream.state.consumerCount,
-          storage: stream.config.storage,
-          retention: stream.config.retention,
-        },
-        consumers.map((consumer) => ({
-          name: consumer.name,
-          filterSubject: consumer.config.filterSubject,
-          pending: consumer.numPending,
-          ackPending: consumer.numAckPending,
-          deliverPolicy: consumer.config.deliverPolicy,
-        })),
-      ),
+    const consumers = consumerLists[index] ?? [];
+    return createStreamTopologyNode(
+      {
+        name,
+        subjects: stream.config.subjects ?? [],
+        messages: stream.state.messages,
+        consumerCount: stream.state.consumerCount,
+        storage: stream.config.storage,
+        retention: stream.config.retention,
+      },
+      consumers.map((consumer) => ({
+        name: consumer.name,
+        filterSubject: consumer.config.filterSubject,
+        pending: consumer.numPending,
+        ackPending: consumer.numAckPending,
+        deliverPolicy: consumer.config.deliverPolicy,
+      })),
     );
-  }
+  });
 
   streamNodes.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -308,12 +326,29 @@ export function filterTopology(node: TopologyNode, filterQuery: string): Topolog
 }
 
 export function countTopology(node: TopologyNode) {
-  const flattened = flattenTopology(node);
-  return {
-    streams: flattened.filter((node) => node.kind === "stream").length,
-    subjects: flattened.filter((node) => node.kind === "subject").length,
-    consumers: flattened.filter((node) => node.kind === "consumer").length,
-  };
+  let streams = 0;
+  let subjects = 0;
+  let consumers = 0;
+
+  function walk(current: TopologyNode) {
+    switch (current.kind) {
+      case "stream":
+        streams += 1;
+        break;
+      case "subject":
+        subjects += 1;
+        break;
+      case "consumer":
+        consumers += 1;
+        break;
+    }
+    for (const child of current.children) {
+      walk(child);
+    }
+  }
+
+  walk(node);
+  return { streams, subjects, consumers };
 }
 
 export function getStreamNodes(root: TopologyNode): TopologyNode[] {

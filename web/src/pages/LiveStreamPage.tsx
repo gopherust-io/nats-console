@@ -1,4 +1,5 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Link, useParams } from "react-router-dom";
 import { decodeBase64, getAuthHeader, getWebSocketURL, tryParseJSON } from "../lib/api";
 import { useCluster } from "../lib/cluster";
@@ -14,6 +15,8 @@ type LiveMessage = {
 };
 
 const MAX_MESSAGES = LIVE_STREAM_MAX_MESSAGES;
+const WS_BATCH_MS = 100;
+const ESTIMATED_ROW_HEIGHT = 120;
 
 const LiveMessageRow = memo(function LiveMessageRow({
   msg,
@@ -51,10 +54,26 @@ export default function LiveStreamPage() {
   const [rawMode, setRawMode] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const pausedRef = useRef(false);
+  const pendingRef = useRef<LiveMessage[]>([]);
+  const flushTimerRef = useRef<number | null>(null);
+  const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     pausedRef.current = paused;
   }, [paused]);
+
+  const flushPending = useCallback(() => {
+    const batch = pendingRef.current;
+    if (batch.length === 0) return;
+    pendingRef.current = [];
+    setMessages((prev) => {
+      const combined = prev.concat(batch);
+      if (combined.length <= MAX_MESSAGES) {
+        return combined;
+      }
+      return combined.slice(combined.length - MAX_MESSAGES);
+    });
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSubjectFilter(subjectInput.trim()), LIVE_SUBJECT_FILTER_DEBOUNCE_MS);
@@ -68,6 +87,11 @@ export default function LiveStreamPage() {
     const ws = new WebSocket(url);
     wsRef.current = ws;
     setStatus("connecting");
+    pendingRef.current = [];
+    if (flushTimerRef.current !== null) {
+      window.clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
 
     ws.onopen = () => setStatus("connected");
     ws.onclose = () => setStatus("disconnected");
@@ -82,24 +106,51 @@ export default function LiveStreamPage() {
       }
       if (frame.type === "message") {
         if (pausedRef.current) return;
-        setMessages((prev) => {
-          const next = prev.length >= MAX_MESSAGES ? prev.slice(1) : prev.slice();
-          next.push(frame);
-          return next;
-        });
+        pendingRef.current.push(frame);
+        if (flushTimerRef.current === null) {
+          flushTimerRef.current = window.setTimeout(() => {
+            flushTimerRef.current = null;
+            flushPending();
+          }, WS_BATCH_MS);
+        }
       } else if (frame.type === "error") {
         setStatus(frame.error ?? "error");
       }
     };
 
-    return () => ws.close();
-  }, [clusterId, name, subjectFilter]);
+    return () => {
+      if (flushTimerRef.current !== null) {
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      ws.close();
+    };
+  }, [clusterId, name, subjectFilter, flushPending]);
+
+  const virtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => logRef.current,
+    estimateSize: () => ESTIMATED_ROW_HEIGHT,
+    overscan: 8,
+  });
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    virtualizer.scrollToIndex(messages.length - 1, { align: "end" });
+  }, [messages.length, virtualizer]);
 
   function sendAction(action: string) {
     wsRef.current?.send(JSON.stringify({ action }));
     if (action === "pause") setPaused(true);
     if (action === "resume") setPaused(false);
-    if (action === "clear") setMessages([]);
+    if (action === "clear") {
+      pendingRef.current = [];
+      if (flushTimerRef.current !== null) {
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      setMessages([]);
+    }
   }
 
   return (
@@ -134,11 +185,31 @@ export default function LiveStreamPage() {
         </button>
       </div>
 
-      <div className="live-log">
+      <div className="live-log" ref={logRef}>
         {messages.length === 0 && <div className="text-muted">Waiting for messages...</div>}
-        {messages.map((msg) => (
-          <LiveMessageRow key={msg.seq ?? `${msg.time}-${msg.subject}`} msg={msg} rawMode={rawMode} />
-        ))}
+        {messages.length > 0 && (
+          <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
+            {virtualizer.getVirtualItems().map((item) => {
+              const msg = messages[item.index];
+              return (
+                <div
+                  key={msg.seq ?? `${msg.time}-${msg.subject}-${item.index}`}
+                  ref={virtualizer.measureElement}
+                  data-index={item.index}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${item.start}px)`,
+                  }}
+                >
+                  <LiveMessageRow msg={msg} rawMode={rawMode} />
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {!getAuthHeader() && (

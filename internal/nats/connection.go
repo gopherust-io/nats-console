@@ -216,10 +216,17 @@ func (m *Manager) sweepExpired() {
 			expired = append(expired, id)
 			entry.client.Close()
 			delete(m.cache, id)
+			delete(m.status, id)
 		} else if !entry.client.IsAlive() {
 			expired = append(expired, id)
 			entry.client.Close()
 			delete(m.cache, id)
+			delete(m.status, id)
+		}
+	}
+	for id, entry := range m.credCache {
+		if now.Sub(entry.fetchedAt) >= ttl {
+			delete(m.credCache, id)
 		}
 	}
 	m.mu.Unlock()

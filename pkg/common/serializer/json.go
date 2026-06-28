@@ -4,20 +4,27 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/valyala/fasthttp"
 
-	"github.com/gopherust-io/nats-consol/pkg/common/jsonkeys"
+	"github.com/gopherust-io/nats-consol/pkg/common/bufpool"
 )
 
 const (
 	jsonContentType = "application/json"
 )
 
-func WriteJSON(ctx *fasthttp.RequestCtx, status int, v any) {
-	data, err := sonic.Marshal(v)
-	if err != nil {
-		WriteError(ctx, fasthttp.StatusInternalServerError, err)
-		return
+func marshalJSON(v any) ([]byte, error) {
+	buf := bufpool.GetBuffer()
+	defer bufpool.PutBuffer(buf)
+	enc := sonic.ConfigDefault.NewEncoder(buf)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
 	}
-	data, err = jsonkeys.ToCamelCaseJSON(data)
+	out := make([]byte, buf.Len())
+	copy(out, buf.Bytes())
+	return out, nil
+}
+
+func WriteJSON(ctx *fasthttp.RequestCtx, status int, v any) {
+	data, err := marshalJSON(v)
 	if err != nil {
 		WriteError(ctx, fasthttp.StatusInternalServerError, err)
 		return
@@ -43,15 +50,4 @@ func WriteError(ctx *fasthttp.RequestCtx, status int, err error) {
 
 func UnmarshalRequest(body []byte, v any) error {
 	return sonic.Unmarshal(body, v)
-}
-
-func UnmarshalNATSRequest(body []byte, v any) error {
-	if len(body) == 0 {
-		return sonic.Unmarshal(body, v)
-	}
-	snakeBody, err := jsonkeys.FromCamelCaseJSON(body)
-	if err != nil {
-		return err
-	}
-	return sonic.Unmarshal(snakeBody, v)
 }

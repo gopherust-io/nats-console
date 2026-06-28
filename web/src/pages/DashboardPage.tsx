@@ -1,15 +1,25 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Alert from "../components/ui/Alert";
 import PageHeader from "../components/ui/PageHeader";
 import StatCard from "../components/ui/StatCard";
-import MetricsTimeSeriesChart from "../components/metrics/MetricsTimeSeriesChart";
 import TimeRangeSelector from "../components/metrics/TimeRangeSelector";
 import { useClusterMetricsHistory } from "../hooks/useClusterMetricsHistory";
 import { AccountInfo, api, clusterPath } from "../lib/api";
 import { MetricsRangePreset } from "../lib/metricsHistory";
 import { useCluster } from "../lib/cluster";
 import { clusterQueryKey } from "../lib/query";
+
+const MetricsTimeSeriesChart = lazy(() => import("../components/metrics/MetricsTimeSeriesChart"));
+
+const dashboardPollOptions = {
+  refetchInterval: 30_000,
+  refetchOnWindowFocus: false,
+  refetchIntervalInBackground: false,
+} as const;
+
+const dashboardHistoryMetrics =
+  "jetstream.storage_bytes,jetstream.memory_bytes,jsz.messages,server.connections,server.in_msgs_total,server.out_msgs_total";
 
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
@@ -42,34 +52,24 @@ export default function DashboardPage() {
     queryKey: clusterQueryKey(clusterId, "account"),
     queryFn: () => api<AccountInfo>(clusterPath(clusterId!, "/account")),
     enabled: Boolean(clusterId),
-    refetchInterval: 30_000,
+    ...dashboardPollOptions,
   });
 
   const varzQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "varz"),
     queryFn: () => api<Record<string, unknown>>(clusterPath(clusterId!, "/monitoring/varz")),
     enabled: Boolean(clusterId),
-    refetchInterval: 30_000,
+    ...dashboardPollOptions,
   });
 
   const jszQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "jsz"),
     queryFn: () => api<JSZResponse>(clusterPath(clusterId!, "/monitoring/jsz?streams=1&consumers=1")),
     enabled: Boolean(clusterId),
-    refetchInterval: 30_000,
+    ...dashboardPollOptions,
   });
 
-  const capacityHistory = useClusterMetricsHistory(
-    clusterId,
-    range,
-    "jetstream.storage_bytes,jetstream.memory_bytes",
-  );
-  const messagesHistory = useClusterMetricsHistory(clusterId, range, "jsz.messages");
-  const trafficHistory = useClusterMetricsHistory(
-    clusterId,
-    range,
-    "server.connections,server.in_msgs_total,server.out_msgs_total",
-  );
+  const historyQuery = useClusterMetricsHistory(clusterId, range, dashboardHistoryMetrics);
 
   const error =
     (accountQuery.error instanceof Error && accountQuery.error.message) ||
@@ -88,18 +88,18 @@ export default function DashboardPage() {
         key: "jetstream.storage_bytes",
         label: "Storage",
         color: "var(--accent)",
-        points: seriesPoints(capacityHistory.data, "jetstream.storage_bytes"),
+        points: seriesPoints(historyQuery.data, "jetstream.storage_bytes"),
         formatValue: formatBytes,
       },
       {
         key: "jetstream.memory_bytes",
         label: "Memory",
         color: "#f59e0b",
-        points: seriesPoints(capacityHistory.data, "jetstream.memory_bytes"),
+        points: seriesPoints(historyQuery.data, "jetstream.memory_bytes"),
         formatValue: formatBytes,
       },
     ],
-    [capacityHistory.data],
+    [historyQuery.data],
   );
 
   const messagesSeries = useMemo(
@@ -108,10 +108,10 @@ export default function DashboardPage() {
         key: "jsz.messages",
         label: "Messages",
         color: "#10b981",
-        points: seriesPoints(messagesHistory.data, "jsz.messages"),
+        points: seriesPoints(historyQuery.data, "jsz.messages"),
       },
     ],
-    [messagesHistory.data],
+    [historyQuery.data],
   );
 
   const trafficSeries = useMemo(
@@ -120,22 +120,22 @@ export default function DashboardPage() {
         key: "server.connections",
         label: "Connections",
         color: "var(--accent)",
-        points: seriesPoints(trafficHistory.data, "server.connections"),
+        points: seriesPoints(historyQuery.data, "server.connections"),
       },
       {
         key: "server.in_msgs_total",
         label: "In msgs / step",
         color: "#8b5cf6",
-        points: seriesPoints(trafficHistory.data, "server.in_msgs_total"),
+        points: seriesPoints(historyQuery.data, "server.in_msgs_total"),
       },
       {
         key: "server.out_msgs_total",
         label: "Out msgs / step",
         color: "#06b6d4",
-        points: seriesPoints(trafficHistory.data, "server.out_msgs_total"),
+        points: seriesPoints(historyQuery.data, "server.out_msgs_total"),
       },
     ],
-    [trafficHistory.data],
+    [historyQuery.data],
   );
 
   return (
@@ -199,11 +199,13 @@ export default function DashboardPage() {
             <h2 className="section__title">Trends</h2>
             <TimeRangeSelector value={range} onChange={setRange} />
           </div>
-          <div className="metrics-chart-grid">
-            <MetricsTimeSeriesChart title="Storage & memory" series={capacitySeries} variant="area" />
-            <MetricsTimeSeriesChart title="Messages" series={messagesSeries} />
-            <MetricsTimeSeriesChart title="Connections & message rate" series={trafficSeries} />
-          </div>
+          <Suspense fallback={<div className="skeleton skeleton--chart" />}>
+            <div className="metrics-chart-grid">
+              <MetricsTimeSeriesChart title="Storage & memory" series={capacitySeries} variant="area" />
+              <MetricsTimeSeriesChart title="Messages" series={messagesSeries} />
+              <MetricsTimeSeriesChart title="Connections & message rate" series={trafficSeries} />
+            </div>
+          </Suspense>
         </section>
       )}
 

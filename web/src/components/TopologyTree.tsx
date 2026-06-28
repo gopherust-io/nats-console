@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import type { TopologyNode, TopologyNodeKind } from "../lib/topology";
 import { splitStreamChildren } from "../lib/topology";
@@ -20,6 +20,7 @@ const kindIcons: Record<TopologyNodeKind, string> = {
 type TopologyTreeProps = {
   root: TopologyNode;
   defaultExpanded?: boolean;
+  expandAll?: boolean;
   selectedStreamId?: string | null;
 };
 
@@ -123,11 +124,13 @@ function StreamGroups({
   stream,
   depth,
   defaultExpanded,
+  expandAll,
   selectedStreamId,
 }: {
   stream: TopologyNode;
   depth: number;
   defaultExpanded: boolean;
+  expandAll?: boolean;
   selectedStreamId?: string | null;
 }) {
   const { subjects, consumers } = splitStreamChildren(stream);
@@ -135,6 +138,13 @@ function StreamGroups({
   const [streamOpen, setStreamOpen] = useState(() => defaultExpanded || isSelected);
   const [subjectsOpen, setSubjectsOpen] = useState(() => isSelected || subjects.length <= 4);
   const [consumersOpen, setConsumersOpen] = useState(() => isSelected || consumers.length <= 4);
+
+  useEffect(() => {
+    if (expandAll === undefined) return;
+    setStreamOpen(expandAll);
+    setSubjectsOpen(expandAll);
+    setConsumersOpen(expandAll);
+  }, [expandAll]);
 
   return (
     <li className="topology-branch topology-branch--last" data-depth={depth}>
@@ -206,6 +216,7 @@ function TreeBranch({
   depth,
   isLast,
   defaultExpanded,
+  expandAll,
   selectedStreamId,
   branchIndex = 0,
 }: {
@@ -213,10 +224,16 @@ function TreeBranch({
   depth: number;
   isLast: boolean;
   defaultExpanded: boolean;
+  expandAll?: boolean;
   selectedStreamId?: string | null;
   branchIndex?: number;
 }) {
   const [expanded, setExpanded] = useState(() => depth === 0 || defaultExpanded);
+
+  useEffect(() => {
+    if (expandAll === undefined) return;
+    setExpanded(expandAll);
+  }, [expandAll]);
 
   if (node.kind === "stream") {
     return (
@@ -224,6 +241,7 @@ function TreeBranch({
         stream={node}
         depth={depth}
         defaultExpanded={defaultExpanded}
+        expandAll={expandAll}
         selectedStreamId={selectedStreamId}
       />
     );
@@ -256,6 +274,7 @@ function TreeBranch({
               depth={depth + 1}
               isLast={index === node.children.length - 1}
               defaultExpanded={defaultExpanded}
+              expandAll={expandAll}
               selectedStreamId={selectedStreamId}
               branchIndex={index}
             />
@@ -269,6 +288,7 @@ function TreeBranch({
 export default function TopologyTree({
   root,
   defaultExpanded = false,
+  expandAll,
   selectedStreamId = null,
 }: TopologyTreeProps) {
   const legend = useMemo(
@@ -305,6 +325,7 @@ export default function TopologyTree({
             depth={0}
             isLast
             defaultExpanded={defaultExpanded}
+            expandAll={expandAll}
             selectedStreamId={selectedStreamId}
           />
         </ul>
