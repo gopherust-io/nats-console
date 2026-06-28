@@ -34,7 +34,7 @@ type Config struct {
 	OIDCGoogleClientID        string        `env:"OIDC_GOOGLE_CLIENT_ID"`
 	StaticDir                 string        `env:"STATIC_DIR"`
 	AdminUsername             string        `default:"admin"                                                                      env:"ADMIN_USERNAME"`
-	AdminPassword             string        `default:"admin"                                                                      env:"ADMIN_PASSWORD"             sensitive:"true"`
+	AdminPassword             string        `default:"admin"                                                                      env:"ADMIN_PASSWORD"                    sensitive:"true"`
 	PublicBaseURL             string        `default:"http://localhost:8080"                                                      env:"PUBLIC_BASE_URL"`
 	DefaultClusterName        string        `default:"default"                                                                    env:"DEFAULT_CLUSTER_NAME"`
 	Env                       string        `default:"development"                                                                env:"ENV"`
@@ -76,7 +76,10 @@ type Config struct {
 	PprofAuthEnabled          bool          `default:"true"                                                                       env:"PPROF_AUTH_ENABLED"`
 	PprofContinuousEnabled    bool          `default:"true"                                                                       env:"PPROF_CONTINUOUS"`
 	PprofContinuousInterval   time.Duration `default:"15s"                                                                        env:"PPROF_CONTINUOUS_INTERVAL"`
-	PprofContinuousCPUSlice   time.Duration `default:"5s"                                                                         env:"PPROF_CONTINUOUS_CPU_SLICE"`
+	PprofContinuousCPUSlice        time.Duration `default:"5s"                                                                         env:"PPROF_CONTINUOUS_CPU_SLICE"`
+	MetricsSnapshotInterval        time.Duration `default:"60s"                                                                        env:"METRICS_SNAPSHOT_INTERVAL"`
+	MetricsSnapshotRetention       time.Duration `default:"168h"                                                                       env:"METRICS_SNAPSHOT_RETENTION"`
+	MetricsSnapshotCleanupInterval time.Duration `default:"1h"                                                                         env:"METRICS_SNAPSHOT_CLEANUP_INTERVAL"`
 	BasicAuthEnabled          bool          `default:"true"                                                                       env:"BASIC_AUTH_ENABLED"`
 	OIDCEnabled               bool          `default:"false"                                                                      env:"OIDC_ENABLED"`
 	OIDCMicrosoftEnabled      bool          `default:"false"                                                                      env:"OIDC_MICROSOFT_ENABLED"`
@@ -84,6 +87,7 @@ type Config struct {
 	OIDCGitHubEnabled         bool          `default:"false"                                                                      env:"OIDC_GITHUB_ENABLED"`
 	OIDCGoogleEnabled         bool          `default:"false"                                                                      env:"OIDC_GOOGLE_ENABLED"`
 	AuthEnabled               bool          `default:"true"                                                                       env:"AUTH_ENABLED"`
+	MetricsSnapshotEnabled    bool          `default:"true"                                                                       env:"METRICS_SNAPSHOT_ENABLED"`
 }
 
 func (c Config) IsProduction() bool {
@@ -223,4 +227,29 @@ func (c Config) ContinuousPprofCPUSlice() time.Duration {
 		return 5 * time.Second
 	}
 	return c.PprofContinuousCPUSlice
+}
+
+func (c Config) MetricsSnapshotActive() bool {
+	return c.MetricsSnapshotEnabled
+}
+
+func (c Config) SnapshotInterval() time.Duration {
+	if c.MetricsSnapshotInterval <= 0 {
+		return 60 * time.Second
+	}
+	return c.MetricsSnapshotInterval
+}
+
+func (c Config) SnapshotRetention() time.Duration {
+	if c.MetricsSnapshotRetention <= 0 {
+		return 168 * time.Hour
+	}
+	return c.MetricsSnapshotRetention
+}
+
+func (c Config) SnapshotCleanupInterval() time.Duration {
+	if c.MetricsSnapshotCleanupInterval <= 0 {
+		return time.Hour
+	}
+	return c.MetricsSnapshotCleanupInterval
 }

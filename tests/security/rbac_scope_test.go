@@ -52,6 +52,13 @@ func TestScopedViewerCannotAccessOtherCluster(t *testing.T) {
 	require.NoError(t, err)
 	_ = resp.Body.Close()
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+
+	req, _ = http.NewRequest(http.MethodGet, srv.BaseURL(otherCluster)+"/metrics/history", nil)
+	req.Header.Set("Authorization", basicAuth("scoped-viewer", "scoped-pass"))
+	resp, err = srv.Client.Do(req)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 }
 
 func TestScopedAdminCannotCreateCluster(t *testing.T) {

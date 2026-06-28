@@ -16,6 +16,7 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/crypto"
 	"github.com/gopherust-io/nats-consol/internal/log"
 	"github.com/gopherust-io/nats-consol/internal/profiler"
+	"github.com/gopherust-io/nats-consol/internal/snapshot"
 )
 
 func main() {
@@ -50,6 +51,11 @@ func main() {
 			CPUSlice: cfg.ContinuousPprofCPUSlice(),
 		})
 		defer profiler.StopDefault()
+	}
+
+	metricsCollector := snapshot.Start(app.UoW.Raw(), app.NATSManager, cfg)
+	if metricsCollector != nil {
+		defer metricsCollector.Stop()
 	}
 
 	server := newHTTPServer(cfg, app)

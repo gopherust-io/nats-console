@@ -1,8 +1,13 @@
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Alert from "../components/ui/Alert";
 import PageHeader from "../components/ui/PageHeader";
 import StatCard from "../components/ui/StatCard";
+import MetricsTimeSeriesChart from "../components/metrics/MetricsTimeSeriesChart";
+import TimeRangeSelector from "../components/metrics/TimeRangeSelector";
+import { useClusterMetricsHistory } from "../hooks/useClusterMetricsHistory";
 import { AccountInfo, api, clusterPath } from "../lib/api";
+import { MetricsRangePreset } from "../lib/metricsHistory";
 import { useCluster } from "../lib/cluster";
 import { clusterQueryKey } from "../lib/query";
 
@@ -21,8 +26,16 @@ type JSZResponse = {
   };
 };
 
+function seriesPoints(
+  history: ReturnType<typeof useClusterMetricsHistory>["data"],
+  metric: string,
+) {
+  return history?.series.find((item) => item.metric === metric)?.points ?? [];
+}
+
 export default function DashboardPage() {
   const { clusterId, cluster } = useCluster();
+  const [range, setRange] = useState<MetricsRangePreset>("24h");
   const loading = !clusterId;
 
   const accountQuery = useQuery({
@@ -46,6 +59,18 @@ export default function DashboardPage() {
     refetchInterval: 30_000,
   });
 
+  const capacityHistory = useClusterMetricsHistory(
+    clusterId,
+    range,
+    "jetstream.storage_bytes,jetstream.memory_bytes",
+  );
+  const messagesHistory = useClusterMetricsHistory(clusterId, range, "jsz.messages");
+  const trafficHistory = useClusterMetricsHistory(
+    clusterId,
+    range,
+    "server.connections,server.in_msgs_total,server.out_msgs_total",
+  );
+
   const error =
     (accountQuery.error instanceof Error && accountQuery.error.message) ||
     (varzQuery.error instanceof Error && varzQuery.error.message) ||
@@ -56,6 +81,62 @@ export default function DashboardPage() {
   const varz = varzQuery.data ?? null;
   const jsz = jszQuery.data ?? null;
   const isFetching = accountQuery.isFetching || varzQuery.isFetching;
+
+  const capacitySeries = useMemo(
+    () => [
+      {
+        key: "jetstream.storage_bytes",
+        label: "Storage",
+        color: "var(--accent)",
+        points: seriesPoints(capacityHistory.data, "jetstream.storage_bytes"),
+        formatValue: formatBytes,
+      },
+      {
+        key: "jetstream.memory_bytes",
+        label: "Memory",
+        color: "#f59e0b",
+        points: seriesPoints(capacityHistory.data, "jetstream.memory_bytes"),
+        formatValue: formatBytes,
+      },
+    ],
+    [capacityHistory.data],
+  );
+
+  const messagesSeries = useMemo(
+    () => [
+      {
+        key: "jsz.messages",
+        label: "Messages",
+        color: "#10b981",
+        points: seriesPoints(messagesHistory.data, "jsz.messages"),
+      },
+    ],
+    [messagesHistory.data],
+  );
+
+  const trafficSeries = useMemo(
+    () => [
+      {
+        key: "server.connections",
+        label: "Connections",
+        color: "var(--accent)",
+        points: seriesPoints(trafficHistory.data, "server.connections"),
+      },
+      {
+        key: "server.in_msgs_total",
+        label: "In msgs / step",
+        color: "#8b5cf6",
+        points: seriesPoints(trafficHistory.data, "server.in_msgs_total"),
+      },
+      {
+        key: "server.out_msgs_total",
+        label: "Out msgs / step",
+        color: "#06b6d4",
+        points: seriesPoints(trafficHistory.data, "server.out_msgs_total"),
+      },
+    ],
+    [trafficHistory.data],
+  );
 
   return (
     <div className="page">
@@ -108,6 +189,20 @@ export default function DashboardPage() {
             <StatCard label="JSZ Streams" value={jsz.total.streams ?? 0} accent="sky" />
             <StatCard label="JSZ Consumers" value={jsz.total.consumers ?? 0} accent="violet" />
             <StatCard label="Messages" value={jsz.total.messages ?? 0} accent="emerald" />
+          </div>
+        </section>
+      )}
+
+      {clusterId && (
+        <section className="section">
+          <div className="section__header">
+            <h2 className="section__title">Trends</h2>
+            <TimeRangeSelector value={range} onChange={setRange} />
+          </div>
+          <div className="metrics-chart-grid">
+            <MetricsTimeSeriesChart title="Storage & memory" series={capacitySeries} variant="area" />
+            <MetricsTimeSeriesChart title="Messages" series={messagesSeries} />
+            <MetricsTimeSeriesChart title="Connections & message rate" series={trafficSeries} />
           </div>
         </section>
       )}

@@ -1092,3 +1092,59 @@ tr:hover td {
   border-bottom: 1px solid var(--border-subtle);
   vertical-align: middle;
 }
+
+.section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.metrics-range {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-input);
+}
+
+.metrics-range__btn {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.metrics-range__btn--active {
+  background: var(--accent);
+  color: var(--bg-page, #fff);
+}
+
+.metrics-chart-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.metrics-chart__canvas {
+  width: 100%;
+  min-height: 240px;
+}
+
+.metrics-chart__empty {
+  padding: 24px 20px;
+}
+
+@media (min-width: 960px) {
+  .metrics-chart-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metrics-chart-grid .metrics-chart:last-child {
+    grid-column: 1 / -1;
+  }
+}

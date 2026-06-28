@@ -2,6 +2,19 @@
 
 All notable changes to NATS Consol are documented in this file.
 
+## [0.7.0] - 2026-06-28
+
+### Added
+
+- **Historical metrics** — background Postgres snapshots of JetStream account, varz, and jsz metrics
+- `GET /api/v1/clusters/{id}/metrics/history` with downsampling and counter deltas
+- Dashboard **Trends** section with time-range charts (1h / 6h / 24h / 7d)
+- Migration `007_cluster_metrics.sql`, retention cleanup, Prometheus snapshot counters
+
+### Changed
+
+- Configurable snapshot collector via `METRICS_SNAPSHOT_*` env vars
+
 ## [0.6.0] - 2026-06-28
 
 ### Added

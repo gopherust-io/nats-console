@@ -39,6 +39,16 @@ var (
 		Name: "nats_consol_nats_reconnects_total",
 		Help: "Total NATS client reconnects by cluster.",
 	}, []string{"cluster"})
+
+	MetricsSnapshotSuccessTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "nats_consol_metrics_snapshot_success_total",
+		Help: "Successful metric snapshot collections by cluster.",
+	}, []string{"cluster"})
+
+	MetricsSnapshotErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "nats_consol_metrics_snapshot_errors_total",
+		Help: "Failed metric snapshot collections by cluster.",
+	}, []string{"cluster"})
 )
 
 func ObserveHTTP(method, path string, status int, duration time.Duration) {
@@ -65,4 +75,12 @@ func IncNATSDialError(clusterID string) {
 
 func IncNATSReconnect(clusterID string) {
 	NATSReconnectsTotal.WithLabelValues(clusterID).Inc()
+}
+
+func IncSnapshotSuccess(clusterID string) {
+	MetricsSnapshotSuccessTotal.WithLabelValues(clusterID).Inc()
+}
+
+func IncSnapshotErrors(clusterID string) {
+	MetricsSnapshotErrorsTotal.WithLabelValues(clusterID).Inc()
 }

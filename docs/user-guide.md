@@ -59,6 +59,9 @@ Your home base. Shows for the active cluster:
 - JetStream memory / storage usage  
 - Stream and consumer counts  
 - Server info from NATS monitoring  
+- **Trends** — historical charts for storage, memory, messages, and server traffic (1h–7d ranges)
+
+Historical metrics are collected in the background and stored in PostgreSQL. New deployments show “Collecting data…” until the first samples arrive.
 
 If numbers look stale, switch cluster away and back, or refresh the page.
 

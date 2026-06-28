@@ -33,6 +33,7 @@ func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
 	auditH := NewAuditHandler(deps.Services, deps.Config)
 	adminH := NewAdminHandler(deps.Store)
 	resolverH := NewResolverHandler(deps.Store)
+	metricsH := NewMetricsHistoryHandler(deps.Store)
 	liveHub := live.NewHub(deps.Services.JetStream, deps.Config)
 	r := router.New()
 
@@ -80,6 +81,7 @@ func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
 	r.GET("/api/v1/clusters/{clusterId}/connection", h.GetClusterConnection)
 
 	r.GET(prefix+"/account", h.AccountInfo)
+	r.GET(prefix+"/metrics/history", metricsH.History)
 	r.GET(prefix+"/monitoring/varz", h.Varz)
 	r.GET(prefix+"/monitoring/jsz", h.Jsz)
 	r.GET(prefix+"/monitoring/{endpoint}", h.Monitoring)

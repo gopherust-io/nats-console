@@ -276,6 +276,23 @@ Rotation fails closed if any stored secret cannot be decrypted with `currentKey`
 
 ---
 
+## Historical metrics snapshots
+
+Background collector stores normalized JetStream/varz samples in PostgreSQL for Dashboard trends.
+
+| Env | Default | Purpose |
+|-----|---------|---------|
+| `METRICS_SNAPSHOT_ENABLED` | `true` | Enable background collector |
+| `METRICS_SNAPSHOT_INTERVAL` | `60s` | Scrape interval per cluster |
+| `METRICS_SNAPSHOT_RETENTION` | `168h` | Sample TTL (7 days) |
+| `METRICS_SNAPSHOT_CLEANUP_INTERVAL` | `1h` | Purge job frequency |
+
+Rough sizing: ~14 metric keys × 1 sample/min/cluster ≈ 20k rows/cluster/day. With 7-day retention, plan ~140k rows per cluster unless you shorten retention.
+
+Query history via `GET /api/v1/clusters/{id}/metrics/history?from=&to=&step=`.
+
+---
+
 ## Upgrades
 
 1. Backup PostgreSQL  
