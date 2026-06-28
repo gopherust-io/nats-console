@@ -2,11 +2,11 @@ package natsclient
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"time"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/pkg/common/b64util"
 	"github.com/nats-io/nats.go"
 )
 
@@ -114,7 +114,7 @@ func (c *Client) PutKVEntry(ctx context.Context, bucket, key string, value []byt
 		return &domain.KVEntry{
 			Bucket:   bucket,
 			Key:      key,
-			Value:    base64.StdEncoding.EncodeToString(value),
+			Value:    b64util.EncodeToString(value),
 			Revision: revision,
 			Created:  time.Now().UTC(),
 		}, nil
@@ -150,7 +150,7 @@ func kvEntryFromNats(bucket string, entry nats.KeyValueEntry) *domain.KVEntry {
 	return &domain.KVEntry{
 		Bucket:   bucket,
 		Key:      entry.Key(),
-		Value:    base64.StdEncoding.EncodeToString(entry.Value()),
+		Value:    b64util.EncodeToString(entry.Value()),
 		Revision: entry.Revision(),
 		Created:  entry.Created(),
 	}

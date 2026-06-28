@@ -6,7 +6,6 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/store"
-	"github.com/nats-io/nats.go"
 )
 
 type paginationMeta struct {
@@ -16,17 +15,17 @@ type paginationMeta struct {
 }
 
 type StreamsListResponse struct {
-	Streams []*nats.StreamInfo `json:"streams"`
-	Total   int                `json:"total"`
-	Offset  int                `json:"offset"`
-	Limit   int                `json:"limit"`
+	Streams []domain.StreamInfo `json:"streams"`
+	Total   int                 `json:"total"`
+	Offset  int                 `json:"offset"`
+	Limit   int                 `json:"limit"`
 }
 
 type ConsumersListResponse struct {
-	Consumers []*nats.ConsumerInfo `json:"consumers"`
-	Total     int                  `json:"total"`
-	Offset    int                  `json:"offset"`
-	Limit     int                  `json:"limit"`
+	Consumers []domain.ConsumerInfo `json:"consumers"`
+	Total     int                   `json:"total"`
+	Offset    int                   `json:"offset"`
+	Limit     int                   `json:"limit"`
 }
 
 type KeysListResponse struct {

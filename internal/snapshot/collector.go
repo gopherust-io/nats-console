@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/log"
 	"github.com/gopherust-io/nats-consol/internal/metrics"
@@ -88,9 +90,16 @@ func (c *Collector) sample() {
 	}
 
 	capturedAt := time.Now().UTC()
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(6)
 	for _, cluster := range clusters {
-		c.sampleCluster(ctx, cluster.ID, capturedAt)
+		clusterID := cluster.ID
+		group.Go(func() error {
+			c.sampleCluster(groupCtx, clusterID, capturedAt)
+			return nil
+		})
 	}
+	_ = group.Wait()
 }
 
 func (c *Collector) sampleCluster(ctx context.Context, clusterID string, capturedAt time.Time) {

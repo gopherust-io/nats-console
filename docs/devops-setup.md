@@ -45,6 +45,8 @@ Before pointing real users at the console:
 - [ ] Network: console → NATS `:4222` and monitoring `:8222` only from private networks  
 - [ ] Set `METRICS_AUTH_ENABLED=true` in production (required when `ENV=production`)
 - [ ] Keep `PPROF_ENABLED=false` unless admins need runtime profiling
+- [ ] Set `PPROF_CONTINUOUS=false` in production (continuous CPU profiling can use 20–35% CPU)
+- [ ] Consider `LOG_LEVEL=warn` and `METRICS_SNAPSHOT_INTERVAL=120s` under load
 
 The server **refuses to start** in production if encryption key, session secret, or weak admin password is missing.
 
@@ -238,6 +240,7 @@ Structured JSON logs include request ID, path, status, duration.
 ```bash
 PPROF_ENABLED=true
 PPROF_AUTH_ENABLED=true   # required in production
+PPROF_CONTINUOUS=false    # keep false in production unless actively debugging
 PPROF_CPU_MAX_SECONDS=120
 HTTP_WRITE_TIMEOUT=125s   # must be >= PPROF_CPU_MAX_SECONDS + buffer
 ```
@@ -314,7 +317,7 @@ Background collector stores normalized JetStream/varz samples in PostgreSQL for 
 | Env | Default | Purpose |
 |-----|---------|---------|
 | `METRICS_SNAPSHOT_ENABLED` | `true` | Enable background collector |
-| `METRICS_SNAPSHOT_INTERVAL` | `60s` | Scrape interval per cluster |
+| `METRICS_SNAPSHOT_INTERVAL` | `60s` | Scrape interval per cluster (use `120s` in production to halve monitoring + DB load) |
 | `METRICS_SNAPSHOT_RETENTION` | `168h` | Sample TTL (7 days) |
 | `METRICS_SNAPSHOT_CLEANUP_INTERVAL` | `1h` | Purge job frequency |
 

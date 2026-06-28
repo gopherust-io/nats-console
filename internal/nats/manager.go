@@ -201,6 +201,7 @@ func (m *Manager) evict(clusterID string) {
 		delete(m.cache, clusterID)
 	}
 	delete(m.credCache, clusterID)
+	delete(m.status, clusterID)
 }
 
 func ConnectCluster(cluster store.Cluster, timeout time.Duration, hooks ConnectionHooks) (*Client, error) {

@@ -2,10 +2,9 @@ package natsclient
 
 import (
 	"context"
-	"encoding/base64"
-	"io"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/pkg/common/b64util"
 	"github.com/nats-io/nats.go"
 )
 
@@ -102,7 +101,7 @@ func (c *Client) GetObject(ctx context.Context, bucket, name string) (*domain.Ob
 	}
 	defer func() { _ = result.Close() }()
 
-	data, err := io.ReadAll(result)
+	data, err := readBodyPooled(result)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +110,7 @@ func (c *Client) GetObject(ctx context.Context, bucket, name string) (*domain.Ob
 		Bucket:   bucket,
 		Name:     name,
 		Size:     info.Size,
-		Data:     base64.StdEncoding.EncodeToString(data),
+		Data:     b64util.EncodeToString(data),
 		Modified: info.ModTime,
 	}, nil
 }
@@ -129,7 +128,7 @@ func (c *Client) PutObject(ctx context.Context, bucket, name string, data []byte
 		Bucket:   bucket,
 		Name:     name,
 		Size:     info.Size,
-		Data:     base64.StdEncoding.EncodeToString(data),
+		Data:     b64util.EncodeToString(data),
 		Modified: info.ModTime,
 	}, nil
 }

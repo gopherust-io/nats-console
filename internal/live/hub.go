@@ -2,7 +2,6 @@ package live
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"strconv"
 	"sync"
@@ -204,6 +203,7 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, str
 			return
 		}
 		if !lastSent.IsZero() && time.Since(lastSent) < h.liveWSRateLimit() {
+			metrics.IncLiveWSFramesDropped()
 			mu.Unlock()
 			return
 		}
@@ -215,13 +215,7 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, str
 		if meta, metaErr := msg.Metadata(); metaErr == nil && meta != nil {
 			seq = meta.Sequence.Stream
 		}
-		if !send(liveFrame{
-			Type:    "message",
-			Seq:     seq,
-			Subject: msg.Subject,
-			Time:    time.Now().UTC().Format(time.RFC3339Nano),
-			Data:    base64.StdEncoding.EncodeToString(msg.Data),
-		}) {
+		if !send(messageLiveFrame(seq, msg.Subject, msg.Data, time.Now())) {
 			return
 		}
 	}, subOpts...)
@@ -305,7 +299,7 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, str
 }
 
 func (h *Hub) writeFrame(conn *websocket.Conn, frame liveFrame) error {
-	data, err := sonic.Marshal(frame)
+	data, err := encodeLiveFrame(frame)
 	if err != nil {
 		return err
 	}
