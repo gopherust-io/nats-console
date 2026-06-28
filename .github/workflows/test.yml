@@ -10,13 +10,16 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
+# Deny by default; each job declares least privilege below.
+permissions: {}
 
 jobs:
   go:
     name: Go
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -35,6 +38,9 @@ jobs:
   web:
     name: Web
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
     defaults:
       run:
         working-directory: web
@@ -53,6 +59,9 @@ jobs:
   regression:
     name: Regression (${{ matrix.suite }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
     strategy:
       fail-fast: true
       matrix:
@@ -70,6 +79,9 @@ jobs:
     name: Race (live WebSocket)
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -83,6 +95,9 @@ jobs:
     name: Performance baseline
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -111,6 +126,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [go, web, regression, race-live]
     if: always()
+    permissions: {}
     steps:
       - name: Verify required jobs
         run: |
