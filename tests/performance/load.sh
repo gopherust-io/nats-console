@@ -40,13 +40,26 @@ cat "$REPORT"
 MIN_RPS="${PERF_MIN_RPS:-10}"
 MAX_P99_MS="${PERF_MAX_P99_MS:-2000}"
 
-success_rate="$(grep 'Success' "$REPORT" | awk '{print $3}' | tr -d '%')"
-p99_ms="$(grep '99%' "$REPORT" | awk '{print $2}' | sed 's/ms//')"
+success_rate="$(grep '^Success' "$REPORT" | awk '{print $NF}' | tr -d '%')"
+throughput="$(grep '^Requests' "$REPORT" | sed -E 's/^Requests[[:space:]]+\[[^]]+\][[:space:]]+//' | awk -F',' '{gsub(/ /, "", $2); print $2}')"
+p99_ms="$(grep '^Latencies' "$REPORT" | sed -E 's/^Latencies[[:space:]]+\[[^]]+\][[:space:]]+//' | awk -F',' '{gsub(/ms| /, "", $4); print $4}')"
+
+if [[ -z "$success_rate" || -z "$throughput" || -z "$p99_ms" ]]; then
+  echo "failed to parse vegeta report" >&2
+  exit 1
+fi
 
 if awk -v s="$success_rate" -v min=99 'BEGIN { exit (s+0 >= min) ? 0 : 1 }'; then
   echo "success rate OK (${success_rate}%)"
 else
   echo "success rate below 99%: ${success_rate}%" >&2
+  exit 1
+fi
+
+if awk -v r="$throughput" -v min="$MIN_RPS" 'BEGIN { exit (r+0 >= min) ? 0 : 1 }'; then
+  echo "throughput OK (${throughput} req/s >= ${MIN_RPS} req/s)"
+else
+  echo "throughput below threshold: ${throughput} req/s < ${MIN_RPS} req/s" >&2
   exit 1
 fi
 
