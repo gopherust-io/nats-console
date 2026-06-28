@@ -48,6 +48,8 @@ jobs:
           go-version-file: go.mod
       - name: Install vegeta
         run: go install github.com/tsenart/vegeta@latest
+      - name: Add Go bin to PATH
+        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
       - name: Start stack
         run: docker compose up --build -d
       - name: Wait for health
@@ -59,6 +61,4 @@ jobs:
           docker compose logs console
           exit 1
       - name: Performance baseline
-        run: ./tests/performance/load.sh
-        env:
-          PATH: ${{ env.PATH }}:${{ env.HOME }}/go/bin
+        run: bash ./tests/performance/load.sh
