@@ -1,6 +1,6 @@
 .PHONY: dev dev-web build run docker-up docker-down tidy generate \
 	test test-unit test-integration test-contract test-security test-regression \
-	test-e2e test-smoke test-performance lint lint-go lint-go-fix lint-web lint-web-docker lint-web-local
+	test-e2e test-smoke test-performance ci lint lint-go lint-go-fix lint-web lint-web-docker lint-web-local
 
 NODE_IMAGE ?= node:22-alpine
 WEB_DIR := web
@@ -41,16 +41,16 @@ tidy:
 test: test-unit
 
 test-unit:
-	go test $(UNIT_PKGS) -count=1
+	go test $(UNIT_PKGS) -count=1 -p $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 test-integration:
-	go test -tags=integration ./tests/integration/... -count=1 -v
+	go test -tags=integration ./tests/integration/... -count=1
 
 test-contract:
-	go test -tags=integration ./tests/contract/... -count=1 -v
+	go test -tags=integration ./tests/contract/... -count=1
 
 test-security:
-	go test -tags=integration ./tests/security/... -count=1 -v
+	go test -tags=integration ./tests/security/... -count=1
 
 test-regression: test-integration test-contract test-security
 
@@ -59,6 +59,9 @@ test-e2e test-smoke:
 
 test-performance:
 	./tests/performance/load.sh
+
+# Targets run on every pull request in GitHub Actions (.github/workflows/test.yml).
+ci: lint-go lint-web test-unit test-regression
 
 lint: lint-go lint-web
 

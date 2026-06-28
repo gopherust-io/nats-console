@@ -1,54 +1,70 @@
-name: Test
+name: CI
 
 on:
   push:
     branches: [main, master]
   pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  lint:
+  go:
+    name: Go
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-      - name: Lint Go
-        run: make lint-go
-
-  unit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+          cache: true
+      - uses: golangci/golangci-lint-action@v7
         with:
-          go-version-file: go.mod
+          version: latest
+          args: ./...
       - name: Unit tests
         run: make test-unit
+      - name: Build server
+        run: go build -o /dev/null ./cmd/server
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint, typecheck, and build
+        run: npm run lint && npm run typecheck && npm run build
+
+  regression:
+    name: Regression (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        suite: [integration, contract, security]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run ${{ matrix.suite }} tests
+        run: make test-${{ matrix.suite }}
 
   race-live:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Race detector (live WebSocket)
-        run: go test -race -count=1 -tags=integration ./internal/live/... ./tests/integration/... -run TestLiveWS
-
-  integration:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Integration, contract, security, database (regression)
-        run: make test-regression
-
-  performance:
+    name: Race (live WebSocket)
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     steps:
@@ -56,6 +72,20 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
+      - name: Race detector (live WebSocket)
+        run: go test -race -count=1 -tags=integration ./internal/live/... ./tests/integration/... -run TestLiveWS
+
+  performance:
+    name: Performance baseline
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: Install vegeta
         run: go install github.com/tsenart/vegeta@latest
       - name: Add Go bin to PATH
@@ -72,3 +102,33 @@ jobs:
           exit 1
       - name: Performance baseline
         run: bash ./tests/performance/load.sh
+
+  ci-success:
+    name: All checks passed
+    runs-on: ubuntu-latest
+    needs: [go, web, regression, race-live]
+    if: always()
+    steps:
+      - name: Verify required jobs
+        run: |
+          check() {
+            local name="$1"
+            local result="$2"
+            if [ "$result" != "success" ]; then
+              echo "Required job '$name' did not succeed (result: $result)"
+              exit 1
+            fi
+          }
+
+          check "Go" "${{ needs.go.result }}"
+          check "Web" "${{ needs.web.result }}"
+          check "Regression" "${{ needs.regression.result }}"
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            check "Race (live WebSocket)" "${{ needs.race-live.result }}"
+          elif [ "${{ needs.race-live.result }}" != "skipped" ]; then
+            echo "Race job should be skipped on pull requests (result: ${{ needs.race-live.result }})"
+            exit 1
+          fi
+
+          echo "All required CI checks passed."

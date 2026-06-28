@@ -175,7 +175,7 @@ make lint          # Go + web
 make lint-go-fix   # auto-fix struct alignment, modernize, etc.
 ```
 
-CI runs lint + `test-regression` on every PR (`.github/workflows/test.yml`).
+CI runs on every pull request to `main` (`.github/workflows/test.yml`): Go lint/tests/build, web lint/typecheck/build, and parallel regression suites, plus an **All checks passed** gate. Race detector and performance baseline run on pushes to `main` only.
 
 ---
 

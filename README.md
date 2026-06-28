@@ -440,7 +440,7 @@ Environment variables for smoke/performance scripts:
 | `PERF_MIN_RPS` | (derived) | Performance script checks success rate ≥ 99% |
 | `PERF_MAX_P99_MS` | `2000` | Max p99 latency (ms) for health/config/clusters |
 
-CI (`.github/workflows/test.yml`) runs unit + regression on every PR; performance runs on pushes to `main`.
+CI (`.github/workflows/test.yml`) runs on every pull request to `main`: Go lint/tests/build, web lint/typecheck/build, and regression suites in parallel. The **All checks passed** job must succeed before merge. Race detector and performance baseline run on pushes to `main` only.
 
 ## Roadmap (v0.8+)
 
