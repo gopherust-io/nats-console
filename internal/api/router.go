@@ -129,7 +129,7 @@ func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
 
 	mws := []middleware{
 		requestIDMiddleware,
-		securityHeadersMiddleware(deps.Config),
+		securityHeadersMiddleware(buildCSP(deps.Config), deps.Config.TLSEnabled()),
 		bodySizeLimitMiddleware(deps.Config.MaxBodyBytes()),
 		authRateLimitMiddleware(deps.Config),
 		metricsMiddleware,

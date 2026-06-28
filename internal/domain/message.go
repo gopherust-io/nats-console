@@ -1,9 +1,9 @@
 package domain
 
 import (
-	"encoding/base64"
 	"time"
 
+	"github.com/gopherust-io/nats-consol/pkg/common/b64util"
 	"github.com/nats-io/nats.go"
 )
 
@@ -44,7 +44,7 @@ func StreamMessageFromRaw(msg *nats.RawStreamMsg) StreamMessage {
 		Seq:     msg.Sequence,
 		Subject: msg.Subject,
 		Time:    msg.Time.UTC().Format(time.RFC3339Nano),
-		Data:    base64.StdEncoding.EncodeToString(msg.Data),
+		Data:    b64util.EncodeToString(msg.Data),
 	}
 	return out
 }

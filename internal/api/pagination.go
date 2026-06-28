@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/nats-io/nats.go"
 	"github.com/valyala/fasthttp"
 )
@@ -21,7 +22,7 @@ func parsePaginationParams(ctx *fasthttp.RequestCtx, cfg config.Config) (offset,
 func newStreamsListResponse(streams []*nats.StreamInfo, total, offset, limit int) StreamsListResponse {
 	meta := paginationMeta{Total: total, Offset: offset, Limit: limit}
 	return StreamsListResponse{
-		Streams: nonNilSlice(streams),
+		Streams: domain.StreamInfosFromNATS(streams),
 		Total:   meta.Total,
 		Offset:  meta.Offset,
 		Limit:   meta.Limit,
@@ -31,7 +32,7 @@ func newStreamsListResponse(streams []*nats.StreamInfo, total, offset, limit int
 func newConsumersListResponse(consumers []*nats.ConsumerInfo, total, offset, limit int) ConsumersListResponse {
 	meta := paginationMeta{Total: total, Offset: offset, Limit: limit}
 	return ConsumersListResponse{
-		Consumers: nonNilSlice(consumers),
+		Consumers: domain.ConsumerInfosFromNATS(consumers),
 		Total:     meta.Total,
 		Offset:    meta.Offset,
 		Limit:     meta.Limit,

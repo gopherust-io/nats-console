@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import type { StreamOverviewSort, TopologyNode } from "../lib/topology";
 import { splitStreamChildren, streamMessageCount } from "../lib/topology";
+import VirtualTable, { type VirtualTableColumn } from "./VirtualTable";
 
 type TopologyStreamOverviewProps = {
   streams: TopologyNode[];
@@ -22,6 +23,15 @@ function statusLabel(status: TopologyNode["status"]) {
   if (status === "idle") return "Idle";
   return "Active";
 }
+
+const columns: VirtualTableColumn[] = [
+  { id: "stream", header: "Stream", width: "minmax(160px, 1.4fr)" },
+  { id: "subjects", header: "Subjects", width: "minmax(120px, 1fr)" },
+  { id: "consumers", header: "Consumers", width: "minmax(120px, 1fr)" },
+  { id: "messages", header: "Messages", width: "100px", align: "right" },
+  { id: "status", header: "Status", width: "100px" },
+  { id: "actions", header: "", width: "88px", align: "right" },
+];
 
 export default function TopologyStreamOverview({
   streams,
@@ -51,74 +61,78 @@ export default function TopologyStreamOverview({
         </label>
       </div>
 
-      <div className="topology-overview__table-wrap">
-        <table className="topology-overview__table">
-          <thead>
-            <tr>
-              <th>Stream</th>
-              <th>Subjects</th>
-              <th>Consumers</th>
-              <th>Messages</th>
-              <th>Status</th>
-              <th aria-hidden />
-            </tr>
-          </thead>
-          <tbody>
-            {streams.map((stream) => {
-              const { subjects, consumers } = splitStreamChildren(stream);
-              const selected = stream.id === selectedStreamId;
-              return (
-                <tr
-                  key={stream.id}
-                  className={`topology-overview__row${selected ? " topology-overview__row--selected" : ""}`}
-                >
-                  <td>
-                    <button
-                      type="button"
-                      className="topology-overview__stream-btn"
-                      onClick={() => onSelectStream(stream.id)}
-                      aria-pressed={selected}
-                    >
-                      <span className="topology-overview__stream-icon" aria-hidden>
-                        ▤
-                      </span>
-                      <span className="topology-overview__stream-name">{stream.name}</span>
-                    </button>
-                  </td>
-                  <td>
+      <div className="topology-overview__virtual">
+        <VirtualTable
+          columns={columns}
+          items={streams}
+          rowHeight={56}
+          maxHeight={560}
+          empty="No streams in this cluster"
+          getKey={(stream) => stream.id}
+          renderCell={(stream, columnId) => {
+            const { subjects, consumers } = splitStreamChildren(stream);
+            const selected = stream.id === selectedStreamId;
+
+            switch (columnId) {
+              case "stream":
+                return (
+                  <button
+                    type="button"
+                    className={`topology-overview__stream-btn${selected ? " topology-overview__stream-btn--selected" : ""}`}
+                    onClick={() => onSelectStream(stream.id)}
+                    aria-pressed={selected}
+                  >
+                    <span className="topology-overview__stream-icon" aria-hidden>
+                      ▤
+                    </span>
+                    <span className="topology-overview__stream-name">{stream.name}</span>
+                  </button>
+                );
+              case "subjects":
+                return (
+                  <>
                     <span className="topology-overview__count">{subjects.length}</span>
                     {subjects.length > 0 && (
                       <span className="topology-overview__hint" title={subjects.map((s) => s.name).join(", ")}>
                         {subjects.length === 1 ? subjects[0].name : `${subjects[0].name} +${subjects.length - 1}`}
                       </span>
                     )}
-                  </td>
-                  <td>
+                  </>
+                );
+              case "consumers":
+                return (
+                  <>
                     <span className="topology-overview__count">{consumers.length}</span>
                     {consumers.length > 0 && (
                       <span className="topology-overview__hint" title={consumers.map((c) => c.name).join(", ")}>
                         {consumers.length === 1 ? consumers[0].name : `${consumers[0].name} +${consumers.length - 1}`}
                       </span>
                     )}
-                  </td>
-                  <td className="topology-overview__messages">{streamMessageCount(stream).toLocaleString()}</td>
-                  <td>
-                    <span className={`topology-overview__status topology-overview__status--${stream.status ?? "healthy"}`}>
-                      {statusLabel(stream.status)}
-                    </span>
-                  </td>
-                  <td className="topology-overview__actions">
-                    {stream.href && (
-                      <Link className="btn btn--secondary btn--small" to={stream.href}>
-                        Open
-                      </Link>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  </>
+                );
+              case "messages":
+                return (
+                  <span className="topology-overview__messages">{streamMessageCount(stream).toLocaleString()}</span>
+                );
+              case "status":
+                return (
+                  <span
+                    className={`topology-overview__status topology-overview__status--${stream.status ?? "healthy"}`}
+                  >
+                    {statusLabel(stream.status)}
+                  </span>
+                );
+              case "actions":
+                return stream.href ? (
+                  <Link className="btn btn--secondary btn--small" to={stream.href}>
+                    Open
+                  </Link>
+                ) : null;
+              default:
+                return null;
+            }
+          }}
+        />
       </div>
     </section>
   );

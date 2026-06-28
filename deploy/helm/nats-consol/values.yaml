@@ -53,9 +53,12 @@ env:
   ENV: production
   AUTH_ENABLED: "true"
   LOG_JSON: "true"
+  LOG_LEVEL: warn
   OIDC_ENABLED: "false"
   BASIC_AUTH_ENABLED: "true"
   METRICS_AUTH_ENABLED: "true"
+  PPROF_CONTINUOUS: "false"
+  METRICS_SNAPSHOT_INTERVAL: 120s
 
 secrets:
   databaseUrl: ""

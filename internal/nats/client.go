@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/gopherust-io/nats-consol/internal/config"
@@ -67,7 +68,7 @@ func Connect(cfg config.Config, hooks ConnectionHooks) (*Client, error) {
 		nc:             nc,
 		js:             js,
 		monitoring:     cfg.MonitoringURL,
-		httpClient:     &http.Client{Timeout: cfg.RequestTimeout},
+		httpClient:     monitoringHTTPClient(cfg.RequestTimeout),
 		requestTimeout: cfg.RequestTimeout,
 	}, nil
 }
@@ -107,7 +108,7 @@ func (c *Client) AccountInfo(ctx context.Context) (*nats.AccountInfo, error) {
 
 func (c *Client) StreamNames(ctx context.Context) ([]string, error) {
 	ch := c.js.StreamNames()
-	var names []string
+	names := make([]string, 0, 64)
 	for name := range ch {
 		names = append(names, name)
 	}
@@ -124,21 +125,26 @@ func sliceStrings(items []string, offset, limit int) ([]string, int) {
 }
 
 func (c *Client) ListStreams(ctx context.Context, offset, limit int) ([]*nats.StreamInfo, int, error) {
-	streams := make([]*nats.StreamInfo, 0)
-	for info := range c.js.Streams() {
-		streams = append(streams, info)
+	names, err := c.StreamNames(ctx)
+	if err != nil {
+		return nil, 0, err
 	}
-	page, total := slicePageStreams(streams, offset, limit)
-	return page, total, nil
-}
-
-func slicePageStreams(items []*nats.StreamInfo, offset, limit int) ([]*nats.StreamInfo, int) {
-	total := len(items)
+	sort.Strings(names)
+	total := len(names)
 	if offset >= total {
-		return []*nats.StreamInfo{}, total
+		return []*nats.StreamInfo{}, total, nil
 	}
 	end := min(offset+limit, total)
-	return items[offset:end], total
+	pageNames := names[offset:end]
+	streams := make([]*nats.StreamInfo, 0, len(pageNames))
+	for _, name := range pageNames {
+		info, err := c.js.StreamInfo(name)
+		if err != nil {
+			return nil, total, err
+		}
+		streams = append(streams, info)
+	}
+	return streams, total, nil
 }
 
 func (c *Client) StreamInfo(ctx context.Context, name string) (*nats.StreamInfo, error) {
@@ -163,7 +169,7 @@ func (c *Client) PurgeStream(ctx context.Context, name string) error {
 
 func (c *Client) ConsumerNames(ctx context.Context, stream string) ([]string, error) {
 	ch := c.js.ConsumerNames(stream)
-	var names []string
+	names := make([]string, 0, 64)
 	for name := range ch {
 		names = append(names, name)
 	}
@@ -171,21 +177,26 @@ func (c *Client) ConsumerNames(ctx context.Context, stream string) ([]string, er
 }
 
 func (c *Client) ListConsumers(ctx context.Context, stream string, offset, limit int) ([]*nats.ConsumerInfo, int, error) {
-	consumers := make([]*nats.ConsumerInfo, 0)
-	for info := range c.js.Consumers(stream) {
-		consumers = append(consumers, info)
+	names, err := c.ConsumerNames(ctx, stream)
+	if err != nil {
+		return nil, 0, err
 	}
-	page, total := slicePageConsumers(consumers, offset, limit)
-	return page, total, nil
-}
-
-func slicePageConsumers(items []*nats.ConsumerInfo, offset, limit int) ([]*nats.ConsumerInfo, int) {
-	total := len(items)
+	sort.Strings(names)
+	total := len(names)
 	if offset >= total {
-		return []*nats.ConsumerInfo{}, total
+		return []*nats.ConsumerInfo{}, total, nil
 	}
 	end := min(offset+limit, total)
-	return items[offset:end], total
+	pageNames := names[offset:end]
+	consumers := make([]*nats.ConsumerInfo, 0, len(pageNames))
+	for _, name := range pageNames {
+		info, err := c.js.ConsumerInfo(stream, name)
+		if err != nil {
+			return nil, total, err
+		}
+		consumers = append(consumers, info)
+	}
+	return consumers, total, nil
 }
 
 func (c *Client) ConsumerInfo(ctx context.Context, stream, consumer string) (*nats.ConsumerInfo, error) {
@@ -296,7 +307,7 @@ func (c *Client) Monitoring(ctx context.Context, path string) ([]byte, error) {
 		return nil, fmt.Errorf("monitoring %s: status %d: %s", path, resp.StatusCode, string(body))
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readBodyPooled(resp.Body)
 	if err != nil {
 		return nil, err
 	}

@@ -12,7 +12,6 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/port"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 
-	"github.com/nats-io/nats.go"
 	"github.com/valyala/fasthttp"
 )
 
@@ -33,7 +32,11 @@ func (h *Handler) Health(ctx *fasthttp.RequestCtx) {
 func (h *Handler) AccountInfo(ctx *fasthttp.RequestCtx) {
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.AccountInfo(c)
-		return info, fasthttp.StatusOK, err
+		if err != nil {
+			return nil, 0, err
+		}
+		out := domain.AccountInfoFromNATS(info)
+		return out, fasthttp.StatusOK, nil
 	})
 }
 
@@ -59,21 +62,26 @@ func (h *Handler) GetStream(ctx *fasthttp.RequestCtx) {
 		if err != nil {
 			return nil, fasthttp.StatusNotFound, err
 		}
-		return info, fasthttp.StatusOK, nil
+		return domain.StreamInfoFromNATS(info), fasthttp.StatusOK, nil
 	})
 }
 
 func (h *Handler) CreateStream(ctx *fasthttp.RequestCtx) {
-	var cfg nats.StreamConfig
-	if err := serializer.UnmarshalNATSRequest(ctx.PostBody(), &cfg); err != nil {
+	var req streamConfigRequest
+	if err := parseJSONBody(ctx, &req); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if cfg.Name == "" {
+	if req.Name == "" {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("name"))
 		return
 	}
-	if err := validateResourceName(cfg.Name); err != nil {
+	if err := validateResourceName(req.Name); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	cfg, err := req.toNATS()
+	if err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
@@ -82,25 +90,30 @@ func (h *Handler) CreateStream(ctx *fasthttp.RequestCtx) {
 		if err != nil {
 			return nil, fasthttp.StatusBadRequest, err
 		}
-		return info, fasthttp.StatusCreated, nil
+		return domain.StreamInfoFromNATS(info), fasthttp.StatusCreated, nil
 	})
 }
 
 func (h *Handler) UpdateStream(ctx *fasthttp.RequestCtx) {
-	var cfg nats.StreamConfig
-	if err := serializer.UnmarshalNATSRequest(ctx.PostBody(), &cfg); err != nil {
+	var req streamConfigRequest
+	if err := parseJSONBody(ctx, &req); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if cfg.Name == "" {
-		cfg.Name = routeParam(ctx, "name")
+	if req.Name == "" {
+		req.Name = routeParam(ctx, "name")
+	}
+	cfg, err := req.toNATS()
+	if err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
 	}
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.UpdateStream(c, &cfg)
 		if err != nil {
 			return nil, fasthttp.StatusBadRequest, err
 		}
-		return info, fasthttp.StatusOK, nil
+		return domain.StreamInfoFromNATS(info), fasthttp.StatusOK, nil
 	})
 }
 
@@ -136,14 +149,19 @@ func (h *Handler) GetConsumer(ctx *fasthttp.RequestCtx) {
 		if err != nil {
 			return nil, fasthttp.StatusNotFound, err
 		}
-		return info, fasthttp.StatusOK, nil
+		return domain.ConsumerInfoFromNATS(info), fasthttp.StatusOK, nil
 	})
 }
 
 func (h *Handler) CreateConsumer(ctx *fasthttp.RequestCtx) {
 	stream := routeParam(ctx, "name")
-	var cfg nats.ConsumerConfig
-	if err := serializer.UnmarshalNATSRequest(ctx.PostBody(), &cfg); err != nil {
+	var req consumerConfigRequest
+	if err := parseJSONBody(ctx, &req); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	cfg, err := req.toNATS()
+	if err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
@@ -152,7 +170,7 @@ func (h *Handler) CreateConsumer(ctx *fasthttp.RequestCtx) {
 		if err != nil {
 			return nil, fasthttp.StatusBadRequest, err
 		}
-		return info, fasthttp.StatusCreated, nil
+		return domain.ConsumerInfoFromNATS(info), fasthttp.StatusCreated, nil
 	})
 }
 
@@ -243,15 +261,16 @@ func (h *Handler) ListKVBuckets(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) CreateKVBucket(ctx *fasthttp.RequestCtx) {
-	var cfg nats.KeyValueConfig
-	if err := serializer.UnmarshalNATSRequest(ctx.PostBody(), &cfg); err != nil {
+	var req bucketCreateRequest
+	if err := parseJSONBody(ctx, &req); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if cfg.Bucket == "" {
+	if req.Bucket == "" {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("bucket"))
 		return
 	}
+	cfg := req.toKVConfig()
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.CreateKVBucket(c, &cfg)
 		if err != nil {
@@ -360,15 +379,16 @@ func (h *Handler) ListObjectBuckets(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) CreateObjectBucket(ctx *fasthttp.RequestCtx) {
-	var cfg nats.ObjectStoreConfig
-	if err := serializer.UnmarshalNATSRequest(ctx.PostBody(), &cfg); err != nil {
+	var req bucketCreateRequest
+	if err := parseJSONBody(ctx, &req); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if cfg.Bucket == "" {
+	if req.Bucket == "" {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("bucket"))
 		return
 	}
+	cfg := req.toObjectConfig()
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.CreateObjectBucket(c, &cfg)
 		if err != nil {
