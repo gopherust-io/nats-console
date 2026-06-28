@@ -2,6 +2,7 @@ package natsclient
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -240,6 +241,42 @@ func (c *Client) GetMessageNav(ctx context.Context, stream string, seq uint64, d
 		result.Navigation.NextSeq = &next
 	}
 	return result, nil
+}
+
+func (c *Client) PublishStreamMessage(ctx context.Context, stream string, in domain.PublishMessageRequest) (domain.PublishMessageResult, error) {
+	info, err := c.js.StreamInfo(stream)
+	if err != nil {
+		return domain.PublishMessageResult{}, err
+	}
+
+	data, err := base64.StdEncoding.DecodeString(in.Data)
+	if err != nil {
+		return domain.PublishMessageResult{}, fmt.Errorf("decode data: %w", err)
+	}
+
+	subject, err := ResolvePublishSubject(in.Subject, info.Config.Subjects)
+	if err != nil {
+		return domain.PublishMessageResult{}, err
+	}
+
+	msg := &nats.Msg{Subject: subject, Data: data}
+	for k, v := range in.Headers {
+		if msg.Header == nil {
+			msg.Header = nats.Header{}
+		}
+		msg.Header.Set(k, v)
+	}
+
+	ack, err := c.js.PublishMsg(msg)
+	if err != nil {
+		return domain.PublishMessageResult{}, err
+	}
+
+	return domain.PublishMessageResult{
+		Stream:  stream,
+		Subject: subject,
+		Seq:     ack.Sequence,
+	}, nil
 }
 
 func (c *Client) Monitoring(ctx context.Context, path string) ([]byte, error) {

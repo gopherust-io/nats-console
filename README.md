@@ -7,10 +7,13 @@ Manage streams, consumers, browse messages, tail live traffic, manage KV/Object 
 **📖 Documentation:** friendly guides for everyone — [docs/README.md](docs/README.md)
 - [Getting started](docs/getting-started.md) · [User guide](docs/user-guide.md) · [DevOps setup](docs/devops-setup.md) · [Developer setup](docs/developer-setup.md)
 
-## Features (v0.5)
+## Features (v0.6)
 
 - **Multi-cluster registry** with PostgreSQL persistence
-- **Multi-tenant RBAC** — operator/viewer/admin scoped by `accessRules.clusterIds`; root and legacy unscoped admin retain full access
+- **Multi-tenant RBAC** — operator/viewer/admin scoped by `accessRules.clusterIds`
+- **Message publish** — publish to JetStream streams from UI and API
+- **JWT resolver** — import/manage account JWTs per cluster
+- **Encryption key rotation** — root API to re-encrypt stored credentials
 - **Enterprise security** — AES-GCM credential encryption, audit log, OIDC SSO, hardened pprof/metrics
 - Dashboard with JetStream account usage, server info, and jsz metrics
 - Stream list, create, update, delete, purge
@@ -431,13 +434,11 @@ Environment variables for smoke/performance scripts:
 
 CI (`.github/workflows/test.yml`) runs unit + regression on every PR; performance runs on pushes to `main`.
 
-## Roadmap (v0.4+)
+## Roadmap (v0.7+)
 
-- Account/JWT NATS resolver management
-- Message publish API + UI
-- Credential key rotation endpoint
-- OpenAPI-generated CLI
 - Historical metrics (long-term TSDB)
+- OpenAPI-generated CLI
+- Account/JWT operator key generation UI
 
 ## License
 

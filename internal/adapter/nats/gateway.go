@@ -155,6 +155,10 @@ func (e *Executor) GetMessageNav(ctx context.Context, stream string, seq uint64,
 	return e.client.GetMessageNav(ctx, stream, seq, direction)
 }
 
+func (e *Executor) PublishStreamMessage(ctx context.Context, stream string, in domain.PublishMessageRequest) (domain.PublishMessageResult, error) {
+	return e.client.PublishStreamMessage(ctx, stream, in)
+}
+
 func (e *Executor) Monitoring(ctx context.Context, path string) ([]byte, error) {
 	return e.client.Monitoring(ctx, path)
 }

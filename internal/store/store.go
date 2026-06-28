@@ -147,6 +147,10 @@ func (s *Store) decryptToken(token string) (string, error) {
 	return s.encryptor.Decrypt(token)
 }
 
+func (s *Store) DecryptCredential(value string) (string, error) {
+	return s.decryptToken(value)
+}
+
 func (s *Store) ReencryptCredentials(ctx context.Context) error {
 	rows, err := s.pool.Query(ctx, `SELECT id, token FROM clusters WHERE token <> ''`)
 	if err != nil {

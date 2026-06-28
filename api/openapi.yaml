@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: NATS Consol API
-  version: 0.5.0
+  version: 0.6.0
   description: Self-hosted admin console for NATS JetStream — cluster-scoped REST and WebSocket API.
 
 servers:
@@ -471,6 +471,116 @@ paths:
                 $ref: "#/components/schemas/RawStreamMessage"
         "404":
           $ref: "#/components/responses/NotFound"
+    post:
+      tags: [Messages]
+      summary: Publish a message to a stream
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishMessageRequest"
+      responses:
+        "201":
+          description: Published message ack
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishMessageResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/admin/rotate-encryption-key:
+    post:
+      tags: [Administration]
+      summary: Re-encrypt stored secrets with a new encryption key (root only)
+      parameters:
+        - name: dryRun
+          in: query
+          schema:
+            type: boolean
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RotateEncryptionKeyRequest"
+      responses:
+        "200":
+          description: Rotation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RotateEncryptionKeyResult"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/clusters/{clusterId}/resolver/accounts:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [JWT Resolver]
+      summary: List imported account JWTs (metadata only)
+      responses:
+        "200":
+          description: Account JWT list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JWTAccount"
+    post:
+      tags: [JWT Resolver]
+      summary: Import an account JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JWTAccountImport"
+      responses:
+        "201":
+          description: Imported account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JWTAccount"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/clusters/{clusterId}/resolver/accounts/{name}:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      tags: [JWT Resolver]
+      summary: Delete an imported account JWT
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/clusters/{clusterId}/resolver/export:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [JWT Resolver]
+      summary: Export resolver bundle for file resolver (admin)
+      responses:
+        "200":
+          description: JWT export bundle
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JWTResolverExport"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /api/v1/clusters/{clusterId}/live/ws:
     parameters:
@@ -790,6 +900,12 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
     HealthResponse:
@@ -978,6 +1094,95 @@ components:
               type: integer
             next_seq:
               type: integer
+
+    PublishMessageRequest:
+      type: object
+      required: [data]
+      properties:
+        subject:
+          type: string
+        data:
+          type: string
+          description: Base64-encoded payload
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+
+    PublishMessageResult:
+      type: object
+      properties:
+        stream:
+          type: string
+        subject:
+          type: string
+        seq:
+          type: integer
+          format: int64
+
+    JWTAccount:
+      type: object
+      properties:
+        id:
+          type: string
+        clusterId:
+          type: string
+        name:
+          type: string
+        hasJwt:
+          type: boolean
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    JWTAccountImport:
+      type: object
+      required: [jwt]
+      properties:
+        jwt:
+          type: string
+        name:
+          type: string
+
+    JWTResolverExport:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              jwt:
+                type: string
+
+    RotateEncryptionKeyRequest:
+      type: object
+      required: [currentKey, newKey]
+      properties:
+        currentKey:
+          type: string
+        newKey:
+          type: string
+
+    RotateEncryptionKeyResult:
+      type: object
+      properties:
+        clustersUpdated:
+          type: integer
+        jwtUpdated:
+          type: integer
+        dryRun:
+          type: boolean
+        message:
+          type: string
 
     KVBucketConfig:
       type: object

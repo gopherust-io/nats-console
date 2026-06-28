@@ -42,6 +42,7 @@ Sidebar
 │   └── Object Stores
 └── Administration
     ├── Settings
+    ├── JWT Resolver   ← import account JWTs per cluster (operator+)
     ├── Audit Log      ← admins
     ├── Users & Roles  ← admins
     └── Profiling      ← admins (if enabled)
@@ -97,9 +98,19 @@ Create, edit, delete, and purge streams. Lists respect pagination — use search
 |--------------|---------|
 | **Overview** | Config, state, subjects |
 | **Consumers** | Create and inspect pull/push consumers |
-| **Messages** | Fetch by sequence; prev/next navigation |
+| **Messages** | Fetch by sequence; prev/next navigation; **publish** test messages (operator+) |
 | **Live** | WebSocket tail — watch messages as they arrive |
 | **Purge** | Delete all messages (operator+) |
+
+### Publish messages
+
+On the **Messages** tab, operators can publish directly to the stream:
+
+1. Choose a **subject** (dropdown lists stream subjects; required when the stream uses wildcards)
+2. Enter payload as **JSON** or **raw text** (sent as base64 to the API)
+3. Click **Publish** — the ack shows the new sequence number
+
+Useful for smoke tests without leaving the console. Viewers do not see the publish form.
 
 ### Live mode
 
@@ -155,6 +166,20 @@ A visual tree of streams and their consumers — helpful when onboarding or debu
 - **JetStream meta / replication** — when present  
 
 If you see "Standalone cluster", your NATS server simply isn't configured with routes/gateways yet — that's normal for single-node dev setups. Supercluster **configuration** still happens in NATS server config files, not in this UI.
+
+---
+
+## JWT Resolver
+
+Manage **account JWTs** for NATS JWT authentication per cluster (operator+).
+
+1. **JWT Resolver** in the sidebar — select cluster if needed  
+2. **Import** — paste an account JWT; Consol validates structure and stores it encrypted  
+3. **List** — see account name, expiry, and metadata (JWT body is never shown in list)  
+4. **Delete** — remove an imported JWT  
+5. **Export** (admin) — download a bundle for NATS file resolver setups  
+
+Consol stores JWTs in PostgreSQL; configure your NATS server resolver separately (HTTP/file). Full operator key generation remains a future enhancement — use `nsc` for complex hierarchies.
 
 ---
 

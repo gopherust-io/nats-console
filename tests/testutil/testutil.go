@@ -22,6 +22,7 @@ import (
 	pgadapter "github.com/gopherust-io/nats-consol/internal/adapter/postgres"
 	"github.com/gopherust-io/nats-consol/internal/api"
 	"github.com/gopherust-io/nats-consol/internal/app"
+	"github.com/gopherust-io/nats-consol/internal/audit"
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
@@ -242,8 +243,10 @@ func (s *Stack) NewServer(t *testing.T, mutate func(*config.Config)) *Server {
 	services.JetStream = gateway
 
 	handler := api.NewRouter(api.RouterDeps{
-		Config:   cfg,
-		Services: services,
+		Config:      cfg,
+		Services:    services,
+		AuditWriter: audit.NewWriter(s.Store),
+		Store:       s.Store,
 	})
 
 	ln := fasthttputil.NewInmemoryListener()

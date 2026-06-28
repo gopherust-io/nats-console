@@ -15,11 +15,13 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/live"
+	"github.com/gopherust-io/nats-consol/internal/store"
 )
 
 type RouterDeps struct {
 	Services    *app.Services
 	AuditWriter *audit.Writer
+	Store       *store.Store
 	Config      config.Config
 }
 
@@ -29,6 +31,8 @@ func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
 	assistantH := NewAssistantHandler(deps.Services.Assistant)
 	usersH := NewUsersHandler(deps.Services, deps.Config)
 	auditH := NewAuditHandler(deps.Services, deps.Config)
+	adminH := NewAdminHandler(deps.Store)
+	resolverH := NewResolverHandler(deps.Store)
 	liveHub := live.NewHub(deps.Services.JetStream, deps.Config)
 	r := router.New()
 
@@ -52,6 +56,13 @@ func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
 	r.DELETE("/api/v1/users/{userId}", usersH.Delete)
 	r.PUT("/api/v1/users/{userId}/roles", usersH.SetRoles)
 	r.GET("/api/v1/audit", auditH.List)
+	r.POST("/api/v1/admin/rotate-encryption-key", adminH.RotateEncryptionKey)
+
+	prefix := "/api/v1/clusters/{clusterId}"
+	r.GET(prefix+"/resolver/accounts", resolverH.ListAccounts)
+	r.POST(prefix+"/resolver/accounts", resolverH.ImportAccount)
+	r.DELETE(prefix+"/resolver/accounts/{name}", resolverH.DeleteAccount)
+	r.GET(prefix+"/resolver/export", resolverH.ExportAccounts)
 
 	r.GET("/api/v1/pprof/config", h.PprofConfig)
 	r.GET("/api/v1/pprof/continuous", h.PprofContinuous)
@@ -68,7 +79,6 @@ func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
 	r.POST("/api/v1/clusters/{clusterId}/test", h.TestCluster)
 	r.GET("/api/v1/clusters/{clusterId}/connection", h.GetClusterConnection)
 
-	prefix := "/api/v1/clusters/{clusterId}"
 	r.GET(prefix+"/account", h.AccountInfo)
 	r.GET(prefix+"/monitoring/varz", h.Varz)
 	r.GET(prefix+"/monitoring/jsz", h.Jsz)
@@ -86,6 +96,7 @@ func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
 	r.GET(prefix+"/streams/{name}/consumers/{consumer}", h.GetConsumer)
 	r.DELETE(prefix+"/streams/{name}/consumers/{consumer}", h.DeleteConsumer)
 	r.GET(prefix+"/streams/{name}/messages", h.GetMessage)
+	r.POST(prefix+"/streams/{name}/messages", h.PublishMessage)
 
 	r.GET(prefix+"/live/ws", liveHub.Handle)
 	r.POST(prefix+"/assistant/chat", assistantH.Chat)

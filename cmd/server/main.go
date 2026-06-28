@@ -83,6 +83,7 @@ func newHTTPServer(cfg config.Config, app *bootstrap.Application) *fasthttp.Serv
 			Config:      cfg,
 			Services:    app.Services,
 			AuditWriter: app.AuditWriter,
+			Store:       app.UoW.Raw(),
 		}),
 		ReadTimeout:       cfg.HTTPReadTimeout,
 		WriteTimeout:      cfg.HTTPWriteTimeout,

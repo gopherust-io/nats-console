@@ -33,6 +33,9 @@ export default function StreamDetailPage() {
   const [seq, setSeq] = useState("");
   const [message, setMessage] = useState<RawMessage | null>(null);
   const [rawMode, setRawMode] = useState(false);
+  const [publishSubject, setPublishSubject] = useState("");
+  const [publishPayload, setPublishPayload] = useState('{"hello":"world"}');
+  const [publishRawMode, setPublishRawMode] = useState(false);
   const [error, setError] = useState("");
   const [showConsumerForm, setShowConsumerForm] = useState(false);
   const [consumerName, setConsumerName] = useState("");
@@ -45,6 +48,11 @@ export default function StreamDetailPage() {
     api<StreamInfo>(clusterPath(clusterId, `/streams/${encodeURIComponent(name)}`))
       .then((streamInfo) => {
         setStream(streamInfo);
+        setPublishSubject(
+          streamInfo.config.subjects?.find((s) => !s.includes("*") && !s.includes(">")) ??
+            streamInfo.config.subjects?.[0] ??
+            "",
+        );
         setSeq((current) =>
           current || (streamInfo.state.lastSeq > 0 ? String(streamInfo.state.lastSeq) : ""),
         );
@@ -238,6 +246,68 @@ export default function StreamDetailPage() {
       <Pager total={consumerTotal} offset={consumerOffset} limit={limit} onPageChange={setConsumerOffset} />
 
       <h2 className="mt-32">Message Browser</h2>
+
+      {canWrite && (
+        <form
+          className="form-grid card mb-16"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            if (!clusterId) return;
+            try {
+              const body =
+                publishRawMode || !tryParseJSON(publishPayload).isJSON
+                  ? publishPayload
+                  : JSON.stringify(tryParseJSON(publishPayload).parsed);
+              const data = btoa(unescape(encodeURIComponent(body)));
+              const result = await api<{ seq: number }>(
+                clusterPath(clusterId, `/streams/${encodeURIComponent(name)}/messages`),
+                {
+                  method: "POST",
+                  body: JSON.stringify({
+                    subject: publishSubject,
+                    data,
+                  }),
+                },
+              );
+              setSeq(String(result.seq));
+              await loadMessage(String(result.seq));
+              setError("");
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Failed to publish message");
+            }
+          }}
+        >
+          <h3 className="section-title">Publish Message</h3>
+          <label>
+            Subject
+            <input
+              value={publishSubject}
+              onChange={(e) => setPublishSubject(e.target.value)}
+              placeholder={stream.config.subjects?.join(", ")}
+              required
+            />
+          </label>
+          <label className="form-grid__full">
+            Payload
+            <textarea
+              rows={6}
+              value={publishPayload}
+              onChange={(e) => setPublishPayload(e.target.value)}
+              placeholder='{"hello":"world"}'
+              required
+            />
+          </label>
+          <div className="form-grid__full">
+            <button className="btn secondary" type="button" onClick={() => setPublishRawMode((v) => !v)}>
+              {publishRawMode ? "JSON mode" : "Raw mode"}
+            </button>
+            <button className="btn" type="submit">
+              Publish
+            </button>
+          </div>
+        </form>
+      )}
+
       <div className="form-grid form-grid--inline">
         <label>
           Sequence

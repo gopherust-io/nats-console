@@ -250,6 +250,32 @@ Full list: [README configuration table](../README.md#configuration).
 
 ---
 
+## Encryption key rotation
+
+Root-only API to re-encrypt cluster tokens and stored JWTs when rotating `ENCRYPTION_KEY`:
+
+```bash
+# Dry-run (count rows, no writes)
+curl -X POST -b cookies.txt -H "Content-Type: application/json" \
+  "https://consol.example/api/v1/admin/rotate-encryption-key?dryRun=true" \
+  -d '{"currentKey":"old-key-at-least-16-ch","newKey":"new-key-at-least-16-ch"}'
+
+# Apply rotation
+curl -X POST -b cookies.txt -H "Content-Type: application/json" \
+  "https://consol.example/api/v1/admin/rotate-encryption-key" \
+  -d '{"currentKey":"old-key-at-least-16-ch","newKey":"new-key-at-least-16-ch"}'
+```
+
+After a successful rotation:
+
+1. Update `ENCRYPTION_KEY` in your deployment (Helm values, env file, etc.)
+2. Restart all Consol instances so the new key is loaded
+3. Verify login and cluster connectivity
+
+Rotation fails closed if any stored secret cannot be decrypted with `currentKey`.
+
+---
+
 ## Upgrades
 
 1. Backup PostgreSQL  

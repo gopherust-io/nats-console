@@ -165,6 +165,9 @@ export default function Layout() {
             <SidebarLink to="/supercluster" icon="supercluster">
               Supercluster
             </SidebarLink>
+            <SidebarLink to="/resolver" icon="clusters">
+              JWT Resolver
+            </SidebarLink>
             <SidebarLink to="/streams" icon="streams">
               Streams
             </SidebarLink>

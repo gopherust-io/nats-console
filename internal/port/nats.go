@@ -24,6 +24,7 @@ type JetStreamExecutor interface {
 	DeleteConsumer(ctx context.Context, stream, consumer string) error
 	GetMessage(ctx context.Context, stream string, seq uint64) (*nats.RawStreamMsg, error)
 	GetMessageNav(ctx context.Context, stream string, seq uint64, direction string) (*domain.MessageResult, error)
+	PublishStreamMessage(ctx context.Context, stream string, in domain.PublishMessageRequest) (domain.PublishMessageResult, error)
 	Monitoring(ctx context.Context, path string) ([]byte, error)
 	ListKVBuckets(ctx context.Context) ([]domain.KVBucketInfo, error)
 	CreateKVBucket(ctx context.Context, cfg *nats.KeyValueConfig) (*domain.KVBucketInfo, error)

@@ -24,6 +24,18 @@ type StreamMessage struct {
 	Seq     uint64 `json:"seq"`
 }
 
+type PublishMessageRequest struct {
+	Headers map[string]string `json:"headers,omitempty"`
+	Subject string            `json:"subject"`
+	Data    string            `json:"data"`
+}
+
+type PublishMessageResult struct {
+	Stream  string `json:"stream"`
+	Subject string `json:"subject"`
+	Seq     uint64 `json:"seq"`
+}
+
 func StreamMessageFromRaw(msg *nats.RawStreamMsg) StreamMessage {
 	if msg == nil {
 		return StreamMessage{}

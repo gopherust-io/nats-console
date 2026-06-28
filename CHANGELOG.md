@@ -2,6 +2,19 @@
 
 All notable changes to NATS Consol are documented in this file.
 
+## [0.6.0] - 2026-06-28
+
+### Added
+
+- **Message publish** — `POST /api/v1/clusters/{id}/streams/{name}/messages` and publish form on stream detail page
+- **Encryption key rotation** — root-only `POST /api/v1/admin/rotate-encryption-key` with dry-run support
+- **JWT resolver** — import/list/delete/export account JWTs per cluster (`/resolver/*`) + JWT Resolver UI page
+- Integration tests for publish, resolver, and encryption rotation guard
+
+### Changed
+
+- Router passes store to admin/resolver handlers; OpenAPI documents publish and admin endpoints
+
 ## [0.5.0] - 2026-06-28
 
 ### Added

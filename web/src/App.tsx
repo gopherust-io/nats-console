@@ -10,6 +10,7 @@ const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const ClustersPage = lazy(() => import("./pages/ClustersPage"));
 const TopologyPage = lazy(() => import("./pages/TopologyPage"));
 const SuperclusterPage = lazy(() => import("./pages/SuperclusterPage"));
+const ResolverPage = lazy(() => import("./pages/ResolverPage"));
 const StreamsPage = lazy(() => import("./pages/StreamsPage"));
 const StreamDetailPage = lazy(() => import("./pages/StreamDetailPage"));
 const LiveStreamPage = lazy(() => import("./pages/LiveStreamPage"));
@@ -113,6 +114,14 @@ export default function App() {
             element={
               <Suspense fallback={<PageLoaderFallback />}>
                 <SuperclusterPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="resolver"
+            element={
+              <Suspense fallback={<PageLoaderFallback />}>
+                <ResolverPage />
               </Suspense>
             }
           />

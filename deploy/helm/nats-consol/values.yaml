@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: registry.gitlab.time2go.tech/gopherust-io/nats-consol
-  tag: "0.5.0"
+  tag: "0.6.0"
   pullPolicy: IfNotPresent
 
 service:

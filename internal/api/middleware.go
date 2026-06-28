@@ -198,6 +198,12 @@ func rbacMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 		}
 		method := string(ctx.Method())
 
+		if strings.HasPrefix(path, "/api/v1/admin") && !user.IsRoot {
+			ctx.SetStatusCode(fasthttp.StatusForbidden)
+			ctx.SetBodyString("forbidden")
+			return
+		}
+
 		if method == fasthttp.MethodGet || method == fasthttp.MethodHead || method == fasthttp.MethodOptions {
 			if strings.HasPrefix(path, "/api/v1/audit") && !auth.CanViewAudit(user) {
 				ctx.SetStatusCode(fasthttp.StatusForbidden)
@@ -210,6 +216,11 @@ func rbacMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 				return
 			}
 			if strings.HasPrefix(path, "/api/v1/pprof") && !auth.CanViewProfiling(user) {
+				ctx.SetStatusCode(fasthttp.StatusForbidden)
+				ctx.SetBodyString("forbidden")
+				return
+			}
+			if strings.Contains(path, "/resolver/export") && !auth.CanViewProfiling(user) {
 				ctx.SetStatusCode(fasthttp.StatusForbidden)
 				ctx.SetBodyString("forbidden")
 				return

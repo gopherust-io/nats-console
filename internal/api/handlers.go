@@ -194,6 +194,32 @@ func (h *Handler) GetMessage(ctx *fasthttp.RequestCtx) {
 	})
 }
 
+func (h *Handler) PublishMessage(ctx *fasthttp.RequestCtx) {
+	stream := routeParam(ctx, "name")
+	if err := validateResourceName(stream); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+
+	var req domain.PublishMessageRequest
+	if err := serializer.UnmarshalRequest(ctx.PostBody(), &req); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	if req.Data == "" {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("data"))
+		return
+	}
+
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
+		result, err := client.PublishStreamMessage(c, stream, req)
+		if err != nil {
+			return nil, fasthttp.StatusBadRequest, err
+		}
+		return result, fasthttp.StatusCreated, nil
+	})
+}
+
 func (h *Handler) Varz(ctx *fasthttp.RequestCtx) {
 	h.natsRaw(ctx, "/varz")
 }
