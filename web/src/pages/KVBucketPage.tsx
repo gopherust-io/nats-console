@@ -1,25 +1,37 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
+import Pager, { DEFAULT_PAGE_SIZE, pageQuery } from "../components/Pager";
+import VirtualTable from "../components/VirtualTable";
 import { api, clusterPath } from "../lib/api";
 import { useCluster } from "../lib/cluster";
+import { clusterQueryKey } from "../lib/query";
 
 type KeyListResponse = {
   keys: string[];
   total: number;
+  offset: number;
+  limit: number;
 };
 
 export default function KVBucketPage() {
   const { bucket = "" } = useParams();
   const { clusterId } = useCluster();
-  const [keys, setKeys] = useState<string[]>([]);
-  const [error, setError] = useState("");
+  const [offset, setOffset] = useState(0);
+  const limit = DEFAULT_PAGE_SIZE;
 
-  useEffect(() => {
-    if (!clusterId || !bucket) return;
-    api<KeyListResponse>(clusterPath(clusterId, `/kv/buckets/${encodeURIComponent(bucket)}/keys`))
-      .then((data) => setKeys(data.keys))
-      .catch((err: Error) => setError(err.message));
-  }, [clusterId, bucket]);
+  const keysQuery = useQuery({
+    queryKey: clusterQueryKey(clusterId, `kv-keys:${bucket}:${offset}`),
+    queryFn: () =>
+      api<KeyListResponse>(
+        clusterPath(clusterId!, `/kv/buckets/${encodeURIComponent(bucket)}/keys${pageQuery(offset, limit)}`),
+      ),
+    enabled: Boolean(clusterId && bucket),
+  });
+
+  const keys = keysQuery.data?.keys ?? [];
+  const total = keysQuery.data?.total ?? 0;
+  const error = keysQuery.error instanceof Error ? keysQuery.error.message : "";
 
   return (
     <div>
@@ -35,28 +47,20 @@ export default function KVBucketPage() {
       {error && <div className="error">{error}</div>}
 
       <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Key</th>
-            </tr>
-          </thead>
-          <tbody>
-            {keys.map((key) => (
-              <tr key={key}>
-                <td>
-                  <Link to={`/kv/${bucket}/${encodeURIComponent(key)}`}>{key}</Link>
-                </td>
-              </tr>
-            ))}
-            {keys.length === 0 && (
-              <tr>
-                <td className="text-muted">No keys</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <VirtualTable
+          columns={[{ id: "key", header: "Key", width: "minmax(0, 1fr)" }]}
+          items={keys}
+          empty="No keys"
+          getKey={(key) => key}
+          renderCell={(key) => (
+            <Link to={`/kv/${bucket}/${encodeURIComponent(key)}`} className="mono virtual-table__truncate">
+              {key}
+            </Link>
+          )}
+        />
       </div>
+
+      <Pager total={total} offset={offset} limit={limit} onPageChange={setOffset} />
     </div>
   );
 }

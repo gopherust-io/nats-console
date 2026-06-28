@@ -20,15 +20,25 @@ var (
 		Buckets: prometheus.DefBuckets,
 	}, []string{"method", "path"})
 
-	NATSOperationsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "nats_consol_nats_operations_total",
-		Help: "Total NATS operations.",
-	}, []string{"cluster", "operation", "result"})
-
 	WSConnectionsActive = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "nats_consol_ws_connections_active",
 		Help: "Active WebSocket connections.",
 	})
+
+	NATSConnectionsActive = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "nats_consol_nats_connections_active",
+		Help: "Active cached NATS client connections.",
+	})
+
+	NATSDialErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "nats_consol_nats_dial_errors_total",
+		Help: "Total NATS dial errors by cluster.",
+	}, []string{"cluster"})
+
+	NATSReconnectsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "nats_consol_nats_reconnects_total",
+		Help: "Total NATS client reconnects by cluster.",
+	}, []string{"cluster"})
 )
 
 func ObserveHTTP(method, path string, status int, duration time.Duration) {
@@ -37,14 +47,22 @@ func ObserveHTTP(method, path string, status int, duration time.Duration) {
 	HTTPRequestDuration.WithLabelValues(method, path).Observe(duration.Seconds())
 }
 
-func ObserveNATS(cluster, operation, result string) {
-	NATSOperationsTotal.WithLabelValues(cluster, operation, result).Inc()
-}
-
 func IncWS() {
 	WSConnectionsActive.Inc()
 }
 
 func DecWS() {
 	WSConnectionsActive.Dec()
+}
+
+func SetNATSConnectionsActive(count int) {
+	NATSConnectionsActive.Set(float64(count))
+}
+
+func IncNATSDialError(clusterID string) {
+	NATSDialErrorsTotal.WithLabelValues(clusterID).Inc()
+}
+
+func IncNATSReconnect(clusterID string) {
+	NATSReconnectsTotal.WithLabelValues(clusterID).Inc()
 }

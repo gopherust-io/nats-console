@@ -76,7 +76,7 @@ func (e *Encryptor) Decrypt(value string) (string, error) {
 
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(value, encryptedPrefix))
 	if err != nil {
-		return "", fmt.Errorf("%w: base64: %v", ErrDecrypt, err)
+		return "", fmt.Errorf("%w: base64: %w", ErrDecrypt, err)
 	}
 
 	nonceSize := e.gcm.NonceSize()
@@ -87,7 +87,7 @@ func (e *Encryptor) Decrypt(value string) (string, error) {
 	nonce, ciphertext := raw[:nonceSize], raw[nonceSize:]
 	plaintext, err := e.gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrDecrypt, err)
+		return "", fmt.Errorf("%w: %w", ErrDecrypt, err)
 	}
 	return string(plaintext), nil
 }

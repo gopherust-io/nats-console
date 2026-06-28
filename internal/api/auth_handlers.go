@@ -9,21 +9,26 @@ import (
 	"github.com/valyala/fasthttp"
 
 	"github.com/gopherust-io/nats-consol/internal/auth"
+	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 )
 
 type AuthHandler struct {
 	auth *auth.Service
+	cfg  config.Config
 }
 
-func NewAuthHandler(authSvc *auth.Service) *AuthHandler {
-	return &AuthHandler{auth: authSvc}
+func NewAuthHandler(authSvc *auth.Service, cfg config.Config) *AuthHandler {
+	return &AuthHandler{auth: authSvc, cfg: cfg}
 }
 
 func (h *AuthHandler) Config(ctx *fasthttp.RequestCtx) {
-	writeJSON(ctx, fasthttp.StatusOK, map[string]any{
-		"oidc_enabled":  h.auth.OIDCEnabled(),
-		"basic_enabled": h.auth.BasicAuthEnabled(),
-		"auth_enabled":  h.auth.AuthEnabled(),
+	serializer.WriteJSON(ctx, fasthttp.StatusOK, AuthConfigResponse{
+		OIDCEnabled:   h.auth.OIDCEnabled(),
+		OIDCProviders: h.auth.SSOProviders(),
+		BasicEnabled:  h.auth.BasicAuthEnabled(),
+		AuthEnabled:   h.auth.AuthEnabled(),
+		AIEnabled:     h.cfg.AIActive(),
 	})
 }
 
@@ -39,7 +44,7 @@ func (h *AuthHandler) Me(ctx *fasthttp.RequestCtx) {
 
 func (h *AuthHandler) Login(ctx *fasthttp.RequestCtx) {
 	if !h.auth.BasicAuthEnabled() {
-		writeError(ctx, fasthttp.StatusNotFound, auth.ErrUnauthorized)
+		serializer.WriteError(ctx, fasthttp.StatusNotFound, auth.ErrUnauthorized)
 		return
 	}
 	var req struct {
@@ -47,7 +52,7 @@ func (h *AuthHandler) Login(ctx *fasthttp.RequestCtx) {
 		Password string `json:"password"`
 	}
 	if err := parseJSONBody(ctx, &req); err != nil {
-		writeError(ctx, fasthttp.StatusBadRequest, err)
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	user, err := h.auth.AuthenticateBasic(requestContext(ctx), req.Username, req.Password)
@@ -58,69 +63,112 @@ func (h *AuthHandler) Login(ctx *fasthttp.RequestCtx) {
 	}
 	token, err := h.auth.CreateSession(user)
 	if err != nil {
-		writeError(ctx, fasthttp.StatusInternalServerError, err)
+		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
+		return
+	}
+	csrf, err := h.auth.NewCSRFToken()
+	if err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
 		return
 	}
 	setCookie(ctx, h.auth.SessionCookie(token))
+	setCookie(ctx, h.auth.CSRFCookie(csrf))
 	writeUserJSON(ctx, fasthttp.StatusOK, user)
 }
 
 func (h *AuthHandler) Logout(ctx *fasthttp.RequestCtx) {
 	setCookie(ctx, h.auth.ClearSessionCookie())
+	setCookie(ctx, h.auth.ClearCSRFCookie())
 	ctx.SetStatusCode(fasthttp.StatusNoContent)
 }
 
 func (h *AuthHandler) OIDCLogin(ctx *fasthttp.RequestCtx) {
+	h.ssoLogin(ctx, auth.ProviderLegacy)
+}
+
+func (h *AuthHandler) SSOProviderLogin(ctx *fasthttp.RequestCtx) {
+	provider, _ := ctx.UserValue("provider").(string)
+	h.ssoLogin(ctx, provider)
+}
+
+func (h *AuthHandler) ssoLogin(ctx *fasthttp.RequestCtx, provider string) {
 	if !h.auth.OIDCEnabled() {
-		writeError(ctx, fasthttp.StatusNotFound, auth.ErrUnauthorized)
+		serializer.WriteError(ctx, fasthttp.StatusNotFound, auth.ErrUnauthorized)
 		return
 	}
 	state, err := auth.NewOAuthState()
 	if err != nil {
-		writeError(ctx, fasthttp.StatusInternalServerError, err)
+		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
+		return
+	}
+	authURL, err := h.auth.SSOAuthURL(provider, state)
+	if err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
 		return
 	}
 	setCookie(ctx, h.auth.OAuthStateCookie(state))
-	ctx.Redirect(h.auth.OIDCAuthURL(state), fasthttp.StatusFound)
+	setCookie(ctx, h.auth.OAuthProviderCookie(provider))
+	ctx.Redirect(authURL, fasthttp.StatusFound)
 }
 
 func (h *AuthHandler) OIDCCallback(ctx *fasthttp.RequestCtx) {
+	h.ssoCallback(ctx, auth.ProviderLegacy)
+}
+
+func (h *AuthHandler) SSOProviderCallback(ctx *fasthttp.RequestCtx) {
+	provider, _ := ctx.UserValue("provider").(string)
+	h.ssoCallback(ctx, provider)
+}
+
+func (h *AuthHandler) ssoCallback(ctx *fasthttp.RequestCtx, provider string) {
 	if !h.auth.OIDCEnabled() {
-		writeError(ctx, fasthttp.StatusNotFound, auth.ErrUnauthorized)
+		serializer.WriteError(ctx, fasthttp.StatusNotFound, auth.ErrUnauthorized)
 		return
 	}
 	if errMsg := string(ctx.QueryArgs().Peek("error")); errMsg != "" {
-		setCookie(ctx, h.auth.ClearOAuthStateCookie())
+		h.clearOAuthCookies(ctx)
 		ctx.Redirect("/login?error="+url.QueryEscape(errMsg), fasthttp.StatusFound)
 		return
 	}
 	state := string(ctx.QueryArgs().Peek("state"))
 	cookieState := string(ctx.Request.Header.Cookie("nats_consol_oauth_state"))
-	if state == "" || cookieState == "" || state != cookieState {
-		setCookie(ctx, h.auth.ClearOAuthStateCookie())
+	cookieProvider := string(ctx.Request.Header.Cookie("nats_consol_oauth_provider"))
+	if state == "" || cookieState == "" || state != cookieState || cookieProvider != provider {
+		h.clearOAuthCookies(ctx)
 		ctx.Redirect("/login?error=invalid_state", fasthttp.StatusFound)
 		return
 	}
 	code := string(ctx.QueryArgs().Peek("code"))
 	if code == "" {
-		setCookie(ctx, h.auth.ClearOAuthStateCookie())
+		h.clearOAuthCookies(ctx)
 		ctx.Redirect("/login?error=missing_code", fasthttp.StatusFound)
 		return
 	}
-	user, err := h.auth.HandleOIDCCallback(requestContext(ctx), code)
+	user, err := h.auth.HandleSSOCallback(requestContext(ctx), provider, code)
 	if err != nil {
-		setCookie(ctx, h.auth.ClearOAuthStateCookie())
+		h.clearOAuthCookies(ctx)
 		ctx.Redirect("/login?error="+url.QueryEscape("oidc_failed"), fasthttp.StatusFound)
 		return
 	}
 	token, err := h.auth.CreateSession(user)
 	if err != nil {
-		writeError(ctx, fasthttp.StatusInternalServerError, err)
+		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
+		return
+	}
+	csrf, err := h.auth.NewCSRFToken()
+	if err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
 		return
 	}
 	setCookie(ctx, h.auth.SessionCookie(token))
-	setCookie(ctx, h.auth.ClearOAuthStateCookie())
+	setCookie(ctx, h.auth.CSRFCookie(csrf))
+	h.clearOAuthCookies(ctx)
 	ctx.Redirect("/", fasthttp.StatusFound)
+}
+
+func (h *AuthHandler) clearOAuthCookies(ctx *fasthttp.RequestCtx) {
+	setCookie(ctx, h.auth.ClearOAuthStateCookie())
+	setCookie(ctx, h.auth.ClearOAuthProviderCookie())
 }
 
 func setCookie(ctx *fasthttp.RequestCtx, cookie *http.Cookie) {

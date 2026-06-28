@@ -28,10 +28,37 @@ services:
     volumes:
       - nats-data:/data
 
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    entrypoint: ["/bin/sh", "/opt/keycloak/entrypoint.sh"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "8180:8080"
+    volumes:
+      - ./deploy/keycloak/nats-consol-realm.json:/opt/keycloak/data/import/nats-consol-realm.json
+      - ./deploy/keycloak/entrypoint.sh:/opt/keycloak/entrypoint.sh
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000; echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; cat <&3 | grep -q UP"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
   console:
     build: .
     ports:
       - "8080:8080"
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgres://natsconsol:natsconsol@postgres:5432/natsconsol?sslmode=disable
       NATS_URL: nats://nats:4222
@@ -41,11 +68,36 @@ services:
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: admin
       AUTH_ENABLED: "true"
+      ENCRYPTION_KEY: dev-encryption-key-min-16-chars
+      SESSION_SECRET: dev-session-secret-min-16-chars
+      OIDC_PUBLIC_URL: http://localhost:8080
+      OIDC_ENABLED: "true"
+      OIDC_ISSUER: http://localhost:8180/realms/nats-consol
+      OIDC_DISCOVERY_URL: http://keycloak:8080/realms/nats-consol
+      OIDC_CLIENT_ID: nats-consol
+      OIDC_CLIENT_SECRET: nats-consol-dev-secret
+      OIDC_REDIRECT_URL: http://localhost:8080/api/v1/auth/oidc/callback
+      BASIC_AUTH_ENABLED: "true"
+      AI_ENABLED: ${AI_ENABLED:-false}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-gemini-2.5-flash}
+      PPROF_ENABLED: ${PPROF_ENABLED:-true}
+      PPROF_AUTH_ENABLED: ${PPROF_AUTH_ENABLED:-true}
+      PPROF_CONTINUOUS: ${PPROF_CONTINUOUS:-true}
+      PPROF_CONTINUOUS_INTERVAL: ${PPROF_CONTINUOUS_INTERVAL:-15s}
+      PPROF_CONTINUOUS_CPU_SLICE: ${PPROF_CONTINUOUS_CPU_SLICE:-5s}
+      # Optional social SSO — add client id/secret for each provider:
+      # OIDC_GOOGLE_ENABLED: "true"
+      # OIDC_GITHUB_ENABLED: "true"
+      # OIDC_GITLAB_ENABLED: "true"
+      # OIDC_MICROSOFT_ENABLED: "true"
     depends_on:
       postgres:
         condition: service_healthy
       nats:
         condition: service_started
+      keycloak:
+        condition: service_healthy
 
 volumes:
   nats-data:

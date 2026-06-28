@@ -1,0 +1,37 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - copyloopvar
+    - embeddedstructfieldcheck
+    - errcheck
+    - errorlint
+    - exptostd
+    - gosec
+    - intrange
+    - misspell
+    - modernize
+    - perfsprint
+    - staticcheck
+    - tagalign
+    - unused
+  settings:
+    gosec:
+      excludes:
+        - G104 # audit unhandled errors separately via errcheck
+    govet:
+      enable:
+        - fieldalignment
+  exclusions:
+    paths:
+      - internal/config/config_env_gen.go
+      - web
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - fieldalignment

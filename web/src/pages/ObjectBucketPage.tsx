@@ -1,26 +1,45 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
+import Pager, { DEFAULT_PAGE_SIZE, pageQuery } from "../components/Pager";
+import VirtualTable from "../components/VirtualTable";
+import Alert from "../components/ui/Alert";
+import PageHeader from "../components/ui/PageHeader";
 import { api, clusterPath, decodeBase64, ObjectInfo, tryParseJSON } from "../lib/api";
 import { useCluster } from "../lib/cluster";
+import { clusterQueryKey } from "../lib/query";
 
 type ObjectListResponse = {
   objects: string[];
   total: number;
+  offset: number;
+  limit: number;
 };
+
+const PREVIEW_LIMIT = 8192;
 
 export default function ObjectBucketPage() {
   const { bucket = "" } = useParams();
   const { clusterId } = useCluster();
-  const [objects, setObjects] = useState<string[]>([]);
+  const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<ObjectInfo | null>(null);
-  const [error, setError] = useState("");
+  const [showFull, setShowFull] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const limit = DEFAULT_PAGE_SIZE;
 
-  useEffect(() => {
-    if (!clusterId || !bucket) return;
-    api<ObjectListResponse>(clusterPath(clusterId, `/objects/buckets/${encodeURIComponent(bucket)}/objects`))
-      .then((data) => setObjects(data.objects))
-      .catch((err: Error) => setError(err.message));
-  }, [clusterId, bucket]);
+  const objectsQuery = useQuery({
+    queryKey: clusterQueryKey(clusterId, `objects:${bucket}:${offset}`),
+    queryFn: () =>
+      api<ObjectListResponse>(
+        clusterPath(clusterId!, `/objects/buckets/${encodeURIComponent(bucket)}/objects${pageQuery(offset, limit)}`),
+      ),
+    enabled: Boolean(clusterId && bucket),
+  });
+
+  const objects = objectsQuery.data?.objects ?? [];
+  const total = objectsQuery.data?.total ?? 0;
+  const error =
+    actionError || (objectsQuery.error instanceof Error ? objectsQuery.error.message : "");
 
   async function loadObject(name: string) {
     if (!clusterId) return;
@@ -29,68 +48,75 @@ export default function ObjectBucketPage() {
         clusterPath(clusterId, `/objects/buckets/${encodeURIComponent(bucket)}/objects/${encodeURIComponent(name)}`),
       );
       setSelected(info);
-      setError("");
+      setShowFull(false);
+      setActionError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load object");
+      setActionError(err instanceof Error ? err.message : "Failed to load object");
     }
   }
 
   const payload = selected ? decodeBase64(selected.data) : "";
   const parsed = tryParseJSON(payload);
+  const truncated = !showFull && payload.length > PREVIEW_LIMIT;
+  const displayPayload = truncated ? `${payload.slice(0, PREVIEW_LIMIT)}\n…` : payload;
 
   return (
-    <div>
-      <div className="page-header">
-        <div>
-          <Link to="/objects" className="link-back">
-            ← Back to Object Stores
+    <div className="page">
+      <PageHeader
+        eyebrow="Object store"
+        title={bucket}
+        subtitle="Browse objects in this bucket and inspect payloads."
+        actions={
+          <Link to="/objects" className="btn btn--secondary">
+            ← All buckets
           </Link>
-          <h1>{bucket}</h1>
-        </div>
-      </div>
+        }
+      />
 
-      {error && <div className="error">{error}</div>}
+      <Alert variant="error">{error}</Alert>
 
-      <div className="split-view">
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Object</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {objects.map((name) => (
-                <tr key={name}>
-                  <td>{name}</td>
-                  <td>
-                    <button className="btn secondary" onClick={() => loadObject(name)}>
-                      View
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {objects.length === 0 && (
-                <tr>
-                  <td colSpan={2} className="text-muted">
-                    No objects
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+      {objectsQuery.isLoading && <div className="skeleton skeleton--table" />}
 
-        {selected && (
-          <div className="card">
-            <div className="card-label">
-              {selected.name} · {selected.size} bytes · {selected.modified}
-            </div>
-            <pre className="mono">{parsed.isJSON ? JSON.stringify(parsed.parsed, null, 2) : payload}</pre>
+      {!objectsQuery.isLoading && (
+        <div className="split-view">
+          <div className="table-wrap">
+            <VirtualTable
+              columns={[
+                { id: "object", header: "Object", width: "minmax(0, 1fr)" },
+                { id: "actions", header: "", width: "96px", align: "right" },
+              ]}
+              items={objects}
+              empty="No objects in this bucket"
+              getKey={(name) => name}
+              renderCell={(name, columnId) => {
+                if (columnId === "object") {
+                  return <span className="mono virtual-table__truncate">{name}</span>;
+                }
+                return (
+                  <button className="btn btn--secondary btn--small" type="button" onClick={() => loadObject(name)}>
+                    View
+                  </button>
+                );
+              }}
+            />
+            <Pager total={total} offset={offset} limit={limit} onPageChange={setOffset} />
           </div>
-        )}
-      </div>
+
+          {selected && (
+            <div className="card panel">
+              <div className="card-label">
+                {selected.name} · {selected.size} bytes · {selected.modified}
+              </div>
+              {truncated && (
+                <button className="btn btn--secondary btn--small" type="button" onClick={() => setShowFull(true)}>
+                  Show full payload
+                </button>
+              )}
+              <pre className="mono">{parsed.isJSON && !truncated ? JSON.stringify(parsed.parsed, null, 2) : displayPayload}</pre>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

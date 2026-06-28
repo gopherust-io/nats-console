@@ -4,12 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NATS Consol</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
     <script>
       (function () {
         var t = localStorage.getItem("nats-consol-theme");
-        var themes = ["dark","light","nord","dracula","solarized","midnight","catppuccin","latte","gruvbox","tokyo","onedark","rosepine","dawn","forest","ocean","graphite","monokai","github","amber","crimson"];
+        var themes = ["aurora","dark","light","nord","dracula","solarized","midnight","catppuccin","latte","gruvbox","tokyo","onedark","rosepine","dawn","forest","ocean","graphite","monokai","github","amber","crimson"];
         if (!t || themes.indexOf(t) === -1) {
-          t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+          t = "aurora";
         }
         document.documentElement.setAttribute("data-theme", t);
       })();

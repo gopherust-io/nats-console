@@ -5,64 +5,51 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/oauth2"
 
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/store"
 )
 
+type contextKey string
+
 const (
-	SessionCookie = "nats_consol_session"
-	ContextUser   = "auth_user"
-	ContextRoles  = "auth_roles"
+	SessionCookie            = "nats_consol_session"
+	CSRFCookie               = "nats_consol_csrf"
+	ContextUser   contextKey = "auth_user"
 )
 
 var (
-	ErrUnauthorized = errors.New("unauthorized")
-	ErrForbidden    = errors.New("forbidden")
+	ErrUnauthorized    = errors.New("unauthorized")
+	ErrForbidden       = errors.New("forbidden")
+	ErrUnknownProvider = errors.New("unknown sso provider")
 )
 
 type Claims struct {
+	jwt.RegisteredClaims
+
 	UserID   string   `json:"uid"`
 	Username string   `json:"usr"`
 	Roles    []string `json:"roles"`
-	jwt.RegisteredClaims
+	IsRoot   bool     `json:"isRoot"`
 }
 
 type Service struct {
-	cfg      config.Config
-	store    *store.Store
-	verifier *oidc.IDTokenVerifier
-	oauth    *oauth2.Config
+	store     *store.Store
+	providers map[string]*oauthProvider
+	cfg       config.Config
 }
 
 func NewService(cfg config.Config, st *store.Store) (*Service, error) {
-	s := &Service{cfg: cfg, store: st}
-	if cfg.OIDCEnabled {
-		if cfg.OIDCIssuer == "" || cfg.OIDCClientID == "" || cfg.OIDCRedirectURL == "" {
-			return nil, fmt.Errorf("OIDC_ENABLED requires OIDC_ISSUER, OIDC_CLIENT_ID, and OIDC_REDIRECT_URL")
-		}
-		provider, err := oidc.NewProvider(context.Background(), cfg.OIDCIssuer)
-		if err != nil {
-			return nil, fmt.Errorf("oidc provider: %w", err)
-		}
-		s.verifier = provider.Verifier(&oidc.Config{ClientID: cfg.OIDCClientID})
-		s.oauth = &oauth2.Config{
-			ClientID:     cfg.OIDCClientID,
-			ClientSecret: cfg.OIDCClientSecret,
-			RedirectURL:  cfg.OIDCRedirectURL,
-			Endpoint:     provider.Endpoint(),
-			Scopes:       []string{oidc.ScopeOpenID, "profile", "email"},
-		}
+	providers, err := buildProviders(cfg)
+	if err != nil {
+		return nil, err
 	}
-	return s, nil
+	return &Service{cfg: cfg, store: st, providers: providers}, nil
 }
 
 func (s *Service) SeedAdmin(ctx context.Context) error {
@@ -78,8 +65,16 @@ func (s *Service) SeedAdmin(ctx context.Context) error {
 		Email:    s.cfg.AdminUsername + "@local",
 		Password: s.cfg.AdminPassword,
 		Roles:    []string{store.RoleAdmin},
+		IsRoot:   true,
 	})
 	return err
+}
+
+func (s *Service) LoadUser(ctx context.Context, userID string) (store.User, error) {
+	if userID == "" {
+		return store.User{}, ErrUnauthorized
+	}
+	return s.store.GetUserByID(ctx, userID)
 }
 
 func (s *Service) AuthenticateBasic(ctx context.Context, username, password string) (store.User, error) {
@@ -89,6 +84,7 @@ func (s *Service) AuthenticateBasic(ctx context.Context, username, password stri
 			return store.User{
 				Username: username,
 				Roles:    []string{store.RoleAdmin},
+				IsRoot:   true,
 			}, nil
 		}
 		return store.User{}, ErrUnauthorized
@@ -109,6 +105,7 @@ func (s *Service) CreateSession(user store.User) (string, error) {
 		UserID:   user.ID,
 		Username: user.Username,
 		Roles:    user.Roles,
+		IsRoot:   user.IsRoot,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.cfg.SessionTTL)),
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -138,11 +135,31 @@ func (s *Service) ParseSession(tokenStr string) (store.User, error) {
 		ID:       claims.UserID,
 		Username: claims.Username,
 		Roles:    claims.Roles,
+		IsRoot:   claims.IsRoot,
 	}, nil
 }
 
 func (s *Service) OIDCEnabled() bool {
-	return s.cfg.OIDCEnabled && s.oauth != nil
+	return len(s.providers) > 0
+}
+
+func (s *Service) SSOProviders() []ProviderInfo {
+	order := []string{ProviderGoogle, ProviderGitHub, ProviderGitLab, ProviderMicrosoft, ProviderLegacy}
+	out := make([]ProviderInfo, 0, len(s.providers))
+	for _, id := range order {
+		if p, ok := s.providers[id]; ok {
+			out = append(out, ProviderInfo{ID: p.id, Name: p.name})
+		}
+	}
+	return out
+}
+
+func (s *Service) provider(id string) (*oauthProvider, error) {
+	p, ok := s.providers[id]
+	if !ok {
+		return nil, ErrUnknownProvider
+	}
+	return p, nil
 }
 
 func (s *Service) AuthEnabled() bool {
@@ -159,50 +176,36 @@ func (s *Service) BasicAuthEnabled() bool {
 	return s.cfg.BasicAuthEnabled
 }
 
-func (s *Service) OIDCAuthURL(state string) string {
-	if s.oauth == nil {
-		return ""
+func (s *Service) SSOAuthURL(providerID, state string) (string, error) {
+	p, err := s.provider(providerID)
+	if err != nil {
+		return "", err
 	}
-	return s.oauth.AuthCodeURL(state, oauth2.AccessTypeOffline)
+	return p.authURL(state), nil
 }
 
-func (s *Service) HandleOIDCCallback(ctx context.Context, code string) (store.User, error) {
-	if s.oauth == nil || s.verifier == nil {
-		return store.User{}, fmt.Errorf("oidc not configured")
-	}
-	token, err := s.oauth.Exchange(ctx, code)
+func (s *Service) HandleSSOCallback(ctx context.Context, providerID, code string) (store.User, error) {
+	p, err := s.provider(providerID)
 	if err != nil {
-		return store.User{}, fmt.Errorf("oidc exchange: %w", err)
-	}
-	rawIDToken, ok := token.Extra("id_token").(string)
-	if !ok {
-		return store.User{}, fmt.Errorf("missing id_token")
-	}
-	idToken, err := s.verifier.Verify(ctx, rawIDToken)
-	if err != nil {
-		return store.User{}, fmt.Errorf("verify id_token: %w", err)
+		return store.User{}, err
 	}
 
-	var profile struct {
-		Email    string `json:"email"`
-		Username string `json:"preferred_username"`
-		Name     string `json:"name"`
+	var username, email, sub string
+	if p.github {
+		username, email, sub, err = p.userFromGitHub(ctx, code)
+	} else {
+		username, email, sub, err = p.userFromOIDC(ctx, code)
 	}
-	_ = idToken.Claims(&profile)
+	if err != nil {
+		return store.User{}, err
+	}
 
-	user, err := s.store.GetUserByOIDCSub(ctx, idToken.Subject)
+	user, err := s.store.GetUserByOIDCSub(ctx, sub)
 	if errors.Is(err, store.ErrNotFound) {
-		username := profile.Username
-		if username == "" {
-			username = profile.Email
-		}
-		if username == "" {
-			username = idToken.Subject
-		}
 		user, err = s.store.CreateUser(ctx, store.UserCreate{
 			Username: username,
-			Email:    profile.Email,
-			OIDCSub:  idToken.Subject,
+			Email:    email,
+			OIDCSub:  sub,
 			Roles:    []string{store.RoleViewer},
 		})
 	}
@@ -213,48 +216,51 @@ func (s *Service) HandleOIDCCallback(ctx context.Context, code string) (store.Us
 }
 
 func (s *Service) SessionCookie(token string) *http.Cookie {
-	return &http.Cookie{
-		Name:     SessionCookie,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   s.cfg.IsProduction(),
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(s.cfg.SessionTTL.Seconds()),
-	}
+	return s.newCookie(SessionCookie, token, int(s.cfg.SessionTTL.Seconds()), true)
 }
 
 func (s *Service) ClearSessionCookie() *http.Cookie {
-	return &http.Cookie{
-		Name:     SessionCookie,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   s.cfg.IsProduction(),
-		MaxAge:   -1,
-	}
+	return s.newCookie(SessionCookie, "", -1, true)
+}
+
+func (s *Service) CSRFCookie(token string) *http.Cookie {
+	return s.newCookie(CSRFCookie, token, int(s.cfg.SessionTTL.Seconds()), false)
+}
+
+func (s *Service) ClearCSRFCookie() *http.Cookie {
+	return s.newCookie(CSRFCookie, "", -1, false)
+}
+
+func (s *Service) NewCSRFToken() (string, error) {
+	return NewOAuthState()
 }
 
 func (s *Service) OAuthStateCookie(state string) *http.Cookie {
-	return &http.Cookie{
-		Name:     "nats_consol_oauth_state",
-		Value:    state,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   s.cfg.IsProduction(),
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   600,
-	}
+	return s.newCookie("nats_consol_oauth_state", state, 600, true)
+}
+
+func (s *Service) OAuthProviderCookie(provider string) *http.Cookie {
+	return s.newCookie("nats_consol_oauth_provider", provider, 600, true)
 }
 
 func (s *Service) ClearOAuthStateCookie() *http.Cookie {
-	return &http.Cookie{
-		Name:     "nats_consol_oauth_state",
-		Value:    "",
+	return s.newCookie("nats_consol_oauth_state", "", -1, true)
+}
+
+func (s *Service) ClearOAuthProviderCookie() *http.Cookie {
+	return s.newCookie("nats_consol_oauth_provider", "", -1, true)
+}
+
+func (s *Service) newCookie(name, value string, maxAge int, httpOnly bool) *http.Cookie {
+	secure := s.cfg.IsProduction() || s.cfg.TLSEnabled()
+	return &http.Cookie{ //nolint:gosec // G124: Secure/HttpOnly/SameSite set from config below
+		Name:     name,
+		Value:    value,
 		Path:     "/",
-		HttpOnly: true,
-		Secure:   s.cfg.IsProduction(),
-		MaxAge:   -1,
+		HttpOnly: httpOnly,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   maxAge,
 	}
 }
 
@@ -267,7 +273,7 @@ func (s *Service) sessionSecret() ([]byte, error) {
 		key = s.cfg.AdminPassword
 	}
 	if len(key) < 16 {
-		return nil, fmt.Errorf("session secret must be at least 16 characters")
+		return nil, errors.New("session secret must be at least 16 characters")
 	}
 	return []byte(key), nil
 }
@@ -299,31 +305,6 @@ func UserFromContext(ctx context.Context) (store.User, bool) {
 	return store.User{}, false
 }
 
-func RolesFromContext(ctx context.Context) []string {
-	if v, ok := ctx.Value(ContextRoles).([]string); ok {
-		return v
-	}
-	return nil
-}
-
 func ContextWithUser(ctx context.Context, user store.User) context.Context {
-	ctx = context.WithValue(ctx, ContextUser, user)
-	ctx = context.WithValue(ctx, ContextRoles, user.Roles)
-	return ctx
-}
-
-func CanWrite(role string) bool {
-	return role == store.RoleAdmin || role == store.RoleOperator
-}
-
-func CanDeleteCluster(role string) bool {
-	return role == store.RoleAdmin
-}
-
-func CanManageUsers(role string) bool {
-	return role == store.RoleAdmin
-}
-
-func CanViewAudit(role string) bool {
-	return role == store.RoleAdmin
+	return context.WithValue(ctx, ContextUser, user)
 }

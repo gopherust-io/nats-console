@@ -1,12 +1,13 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import { api, Cluster } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
+import { DEFAULT_MONITORING_URL, DEFAULT_NATS_URL } from "../lib/constants";
 
 type TestResponse = {
   ok: boolean;
   message: string;
-  server_name?: string;
+  serverName?: string;
   jetstream?: boolean;
 };
 
@@ -16,8 +17,8 @@ export default function ClustersPage() {
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
-  const [natsURL, setNatsURL] = useState("nats://localhost:4222");
-  const [monitoringURL, setMonitoringURL] = useState("http://localhost:8222");
+  const [natsURL, setNatsURL] = useState(DEFAULT_NATS_URL);
+  const [monitoringURL, setMonitoringURL] = useState(DEFAULT_MONITORING_URL);
   const [testResults, setTestResults] = useState<Record<string, TestResponse>>({});
 
   async function createCluster(event: FormEvent) {
@@ -27,8 +28,8 @@ export default function ClustersPage() {
         method: "POST",
         body: JSON.stringify({
           name,
-          nats_url: natsURL,
-          monitoring_url: monitoringURL,
+          natsUrl: natsURL,
+          monitoringUrl: monitoringURL,
         }),
       });
       setShowForm(false);
@@ -110,9 +111,9 @@ export default function ClustersPage() {
             {clusters.map((cluster) => (
               <tr key={cluster.id}>
                 <td>{cluster.name}</td>
-                <td className="mono">{cluster.nats_url}</td>
-                <td className="mono">{cluster.monitoring_url || "-"}</td>
-                <td>{cluster.is_default ? "yes" : "no"}</td>
+                <td className="mono">{cluster.natsUrl}</td>
+                <td className="mono">{cluster.monitoringUrl || "-"}</td>
+                <td>{cluster.isDefault ? "yes" : "no"}</td>
                 <td>
                   <button className="btn secondary" onClick={() => testCluster(cluster)}>
                     Test
@@ -124,7 +125,7 @@ export default function ClustersPage() {
                   )}
                 </td>
                 <td>
-                  {!cluster.is_default && isAdmin && (
+                  {!cluster.isDefault && isAdmin && (
                     <button className="btn danger" onClick={() => deleteCluster(cluster)}>
                       Delete
                     </button>

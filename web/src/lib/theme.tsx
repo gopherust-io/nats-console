@@ -1,4 +1,6 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { STORAGE_KEYS } from "./constants";
+import { loadThemeStyles } from "./themeStyles";
 
 export type ThemePreview = {
   bg: string;
@@ -7,6 +9,7 @@ export type ThemePreview = {
 };
 
 export const THEMES = {
+  aurora: { label: "Aurora", preview: { bg: "#060912", accent: "#38bdf8", mode: "dark" } },
   dark: { label: "Dark", preview: { bg: "#0b1220", accent: "#3b82f6", mode: "dark" } },
   light: { label: "Light", preview: { bg: "#f8fafc", accent: "#2563eb", mode: "light" } },
   nord: { label: "Nord", preview: { bg: "#2e3440", accent: "#88c0d0", mode: "dark" } },
@@ -33,7 +36,9 @@ export type ThemeId = keyof typeof THEMES;
 
 export const THEME_IDS = Object.keys(THEMES) as ThemeId[];
 
-const STORAGE_KEY = "nats-consol-theme";
+export const DEFAULT_THEME: ThemeId = "aurora";
+
+const THEME_STORAGE_KEY = STORAGE_KEYS.theme;
 
 type ThemeContextValue = {
   theme: ThemeId;
@@ -43,14 +48,11 @@ type ThemeContextValue = {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function readStoredTheme(): ThemeId {
-  const stored = localStorage.getItem(STORAGE_KEY);
+  const stored = localStorage.getItem(THEME_STORAGE_KEY);
   if (stored && stored in THEMES) {
     return stored as ThemeId;
   }
-  if (window.matchMedia("(prefers-color-scheme: light)").matches) {
-    return "light";
-  }
-  return "dark";
+  return DEFAULT_THEME;
 }
 
 export function applyTheme(theme: ThemeId) {
@@ -59,22 +61,35 @@ export function applyTheme(theme: ThemeId) {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeId>(() => readStoredTheme());
+  const [theme, setThemeState] = useState<ThemeId>(() => {
+    const stored = readStoredTheme();
+    applyTheme(stored);
+    return stored;
+  });
 
   useEffect(() => {
-    applyTheme(theme);
-    localStorage.setItem(STORAGE_KEY, theme);
+    let active = true;
+    void loadThemeStyles(theme).then(() => {
+      if (!active) return;
+      applyTheme(theme);
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
+    });
+    return () => {
+      active = false;
+    };
   }, [theme]);
 
-  const setTheme = (next: ThemeId) => setThemeState(next);
+  const setTheme = useCallback((next: ThemeId) => setThemeState(next), []);
 
-  return <ThemeContext.Provider value={{ theme, setTheme }}>{children}</ThemeContext.Provider>;
+  const value = useMemo(() => ({ theme, setTheme }), [theme, setTheme]);
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme() {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) {
+  const context = useContext(ThemeContext);
+  if (!context) {
     throw new Error("useTheme must be used within ThemeProvider");
   }
-  return ctx;
+  return context;
 }

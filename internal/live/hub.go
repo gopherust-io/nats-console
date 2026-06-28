@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
-	"log"
 	"strconv"
 	"sync"
 	"time"
@@ -14,15 +13,17 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/valyala/fasthttp"
 
-	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
+	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/log"
 	"github.com/gopherust-io/nats-consol/internal/metrics"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/port"
 )
 
 const (
-	maxMessages = 1000
-	idleTimeout = 5 * time.Minute
-	rateLimit   = 100 * time.Millisecond
+	defaultLiveWSMaxMessages = 1000
+	defaultLiveWSIdleTimeout = 5 * time.Minute
+	defaultLiveWSRateLimit   = 100 * time.Millisecond
 )
 
 var upgrader = websocket.FastHTTPUpgrader{
@@ -30,11 +31,33 @@ var upgrader = websocket.FastHTTPUpgrader{
 }
 
 type Hub struct {
-	nats *natsclient.Manager
+	gateway port.ClusterGateway
+	cfg     config.Config
 }
 
-func NewHub(nats *natsclient.Manager) *Hub {
-	return &Hub{nats: nats}
+func NewHub(gateway port.ClusterGateway, cfg config.Config) *Hub {
+	return &Hub{gateway: gateway, cfg: cfg}
+}
+
+func (h *Hub) liveWSMaxMessages() int {
+	if h.cfg.LiveWSMaxMessages > 0 {
+		return h.cfg.LiveWSMaxMessages
+	}
+	return defaultLiveWSMaxMessages
+}
+
+func (h *Hub) liveWSIdleTimeout() time.Duration {
+	if h.cfg.LiveWSIdleTimeout > 0 {
+		return h.cfg.LiveWSIdleTimeout
+	}
+	return defaultLiveWSIdleTimeout
+}
+
+func (h *Hub) liveWSRateLimit() time.Duration {
+	if h.cfg.LiveWSRateLimit > 0 {
+		return h.cfg.LiveWSRateLimit
+	}
+	return defaultLiveWSRateLimit
 }
 
 type controlFrame struct {
@@ -43,11 +66,11 @@ type controlFrame struct {
 
 type liveFrame struct {
 	Type    string `json:"type"`
-	Seq     uint64 `json:"seq,omitempty"`
 	Subject string `json:"subject,omitempty"`
 	Time    string `json:"time,omitempty"`
 	Data    string `json:"data,omitempty"`
 	Error   string `json:"error,omitempty"`
+	Seq     uint64 `json:"seq,omitempty"`
 }
 
 func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
@@ -64,18 +87,18 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 	}
 	subjectFilter := string(ctx.QueryArgs().Peek("subject"))
 	fromSeq := uint64(0)
-	if v := string(ctx.QueryArgs().Peek("from_seq")); v != "" {
+	if v := string(ctx.QueryArgs().Peek("fromSeq")); v != "" {
 		parsed, err := strconv.ParseUint(v, 10, 64)
 		if err != nil {
-			ctx.Error("invalid from_seq", fasthttp.StatusBadRequest)
+			ctx.Error("invalid fromSeq", fasthttp.StatusBadRequest)
 			return
 		}
 		fromSeq = parsed
 	}
 
-	client, err := h.nats.Get(context.Background(), clusterID)
+	client, err := h.gateway.GetExecutor(context.Background(), clusterID)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, domain.ErrNotFound) {
 			ctx.Error("cluster not found", fasthttp.StatusNotFound)
 			return
 		}
@@ -84,7 +107,7 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 	}
 
 	err = upgrader.Upgrade(ctx, func(conn *websocket.Conn) {
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		metrics.IncWS()
 		defer metrics.DecWS()
 
@@ -121,11 +144,11 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 			if p {
 				return
 			}
-			if msgCount >= maxMessages {
+			if msgCount >= h.liveWSMaxMessages() {
 				send(liveFrame{Type: "error", Error: "max messages reached"})
 				return
 			}
-			if !lastSent.IsZero() && time.Since(lastSent) < rateLimit {
+			if !lastSent.IsZero() && time.Since(lastSent) < h.liveWSRateLimit() {
 				return
 			}
 			lastSent = time.Now()
@@ -148,9 +171,9 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 			send(liveFrame{Type: "error", Error: err.Error()})
 			return
 		}
-		defer sub.Unsubscribe()
+		defer func() { _ = sub.Unsubscribe() }()
 
-		idleTimer := time.NewTimer(idleTimeout)
+		idleTimer := time.NewTimer(h.liveWSIdleTimeout())
 		defer idleTimer.Stop()
 
 		for {
@@ -165,7 +188,7 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 			if err != nil {
 				return
 			}
-			idleTimer.Reset(idleTimeout)
+			idleTimer.Reset(h.liveWSIdleTimeout())
 
 			var ctrl controlFrame
 			if err := sonic.Unmarshal(data, &ctrl); err != nil {
@@ -189,6 +212,6 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 		}
 	})
 	if err != nil {
-		log.Printf("websocket upgrade: %v", err)
+		log.Error().Err(err).Str("component", "live").Msg("websocket upgrade failed")
 	}
 }

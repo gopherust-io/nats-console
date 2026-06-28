@@ -1,5 +1,8 @@
 import { FormEvent, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
+import Pager, { DEFAULT_PAGE_SIZE, pageQuery } from "../components/Pager";
+import VirtualTable from "../components/VirtualTable";
 import {
   api,
   clusterPath,
@@ -11,18 +14,22 @@ import {
 } from "../lib/api";
 import { useCluster } from "../lib/cluster";
 import { useAuth } from "../lib/auth";
+import { clusterQueryKey } from "../lib/query";
 
 type ConsumerListResponse = {
   consumers: ConsumerInfo[];
   total: number;
+  offset: number;
+  limit: number;
 };
 
 export default function StreamDetailPage() {
   const { name = "" } = useParams();
   const { clusterId } = useCluster();
   const { canWrite } = useAuth();
+  const queryClient = useQueryClient();
   const [stream, setStream] = useState<StreamInfo | null>(null);
-  const [consumers, setConsumers] = useState<ConsumerInfo[]>([]);
+  const [consumerOffset, setConsumerOffset] = useState(0);
   const [seq, setSeq] = useState("");
   const [message, setMessage] = useState<RawMessage | null>(null);
   const [rawMode, setRawMode] = useState(false);
@@ -31,22 +38,33 @@ export default function StreamDetailPage() {
   const [consumerName, setConsumerName] = useState("");
   const [deliverPolicy, setDeliverPolicy] = useState("all");
   const [ackPolicy, setAckPolicy] = useState("explicit");
+  const limit = DEFAULT_PAGE_SIZE;
 
   useEffect(() => {
     if (!clusterId || !name) return;
-    Promise.all([
-      api<StreamInfo>(clusterPath(clusterId, `/streams/${encodeURIComponent(name)}`)),
-      api<ConsumerListResponse>(clusterPath(clusterId, `/streams/${encodeURIComponent(name)}/consumers`)),
-    ])
-      .then(([streamInfo, consumerInfo]) => {
+    api<StreamInfo>(clusterPath(clusterId, `/streams/${encodeURIComponent(name)}`))
+      .then((streamInfo) => {
         setStream(streamInfo);
-        setConsumers(consumerInfo.consumers);
-        if (!seq && streamInfo.state.last_seq > 0) {
-          setSeq(String(streamInfo.state.last_seq));
-        }
+        setSeq((current) =>
+          current || (streamInfo.state.lastSeq > 0 ? String(streamInfo.state.lastSeq) : ""),
+        );
       })
       .catch((err: Error) => setError(err.message));
   }, [clusterId, name]);
+
+  const consumersQuery = useQuery({
+    queryKey: [...clusterQueryKey(clusterId, `consumers:${name}`), consumerOffset],
+    queryFn: () =>
+      api<ConsumerListResponse>(
+        clusterPath(clusterId!, `/streams/${encodeURIComponent(name)}/consumers${pageQuery(consumerOffset, limit)}`),
+      ),
+    enabled: Boolean(clusterId && name),
+  });
+
+  const consumers = consumersQuery.data?.consumers ?? [];
+  const consumerTotal = consumersQuery.data?.total ?? 0;
+  const consumersError =
+    consumersQuery.error instanceof Error ? consumersQuery.error.message : "";
 
   async function loadMessage(targetSeq?: string, direction?: "next" | "prev") {
     if (!clusterId) return;
@@ -82,20 +100,21 @@ export default function StreamDetailPage() {
       await api(clusterPath(clusterId, `/streams/${encodeURIComponent(name)}/consumers`), {
         method: "POST",
         body: JSON.stringify({
-          durable_name: consumerName,
-          deliver_policy: deliverPolicy,
-          ack_policy: ackPolicy,
+          durableName: consumerName,
+          deliverPolicy,
+          ackPolicy,
         }),
       });
       setShowConsumerForm(false);
       setConsumerName("");
-      const consumerInfo = await api<ConsumerListResponse>(
-        clusterPath(clusterId, `/streams/${encodeURIComponent(name)}/consumers`),
-      );
-      setConsumers(consumerInfo.consumers);
+      await queryClient.invalidateQueries({ queryKey: clusterQueryKey(clusterId, `consumers:${name}`) });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create consumer");
     }
+  }
+
+  if (!clusterId) {
+    return <p className="text-muted">Select a cluster to view this stream.</p>;
   }
 
   if (!stream) {
@@ -126,7 +145,7 @@ export default function StreamDetailPage() {
         </div>
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {(error || consumersError) && <div className="error">{error || consumersError}</div>}
 
       <div className="card-grid">
         <div className="card">
@@ -136,7 +155,7 @@ export default function StreamDetailPage() {
         <div className="card">
           <div className="card-label">First / Last Seq</div>
           <div className="card-value card-value--sm">
-            {stream.state.first_seq} / {stream.state.last_seq}
+            {stream.state.firstSeq} / {stream.state.lastSeq}
           </div>
         </div>
         <div className="card">
@@ -186,38 +205,37 @@ export default function StreamDetailPage() {
       )}
 
       <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Deliver Policy</th>
-              <th>Ack Policy</th>
-              <th>Pending</th>
-              <th>Ack Pending</th>
-            </tr>
-          </thead>
-          <tbody>
-            {consumers.map((consumer) => (
-              <tr key={consumer.name}>
-                <td>
-                  <Link to={`/streams/${name}/consumers/${consumer.name}`}>{consumer.name}</Link>
-                </td>
-                <td>{consumer.config.deliver_policy}</td>
-                <td>{consumer.config.ack_policy}</td>
-                <td>{consumer.num_pending}</td>
-                <td>{consumer.num_ack_pending}</td>
-              </tr>
-            ))}
-            {consumers.length === 0 && (
-              <tr>
-                <td colSpan={5} className="text-muted">
-                  No consumers
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <VirtualTable
+          columns={[
+            { id: "name", header: "Name", width: "minmax(140px, 1.3fr)" },
+            { id: "deliver", header: "Deliver Policy", width: "minmax(120px, 1fr)" },
+            { id: "ack", header: "Ack Policy", width: "minmax(120px, 1fr)" },
+            { id: "pending", header: "Pending", width: "96px", align: "right" },
+            { id: "ackPending", header: "Ack Pending", width: "112px", align: "right" },
+          ]}
+          items={consumers}
+          empty="No consumers"
+          getKey={(consumer) => consumer.name}
+          renderCell={(consumer, columnId) => {
+            switch (columnId) {
+              case "name":
+                return <Link to={`/streams/${name}/consumers/${consumer.name}`}>{consumer.name}</Link>;
+              case "deliver":
+                return consumer.config.deliverPolicy;
+              case "ack":
+                return consumer.config.ackPolicy;
+              case "pending":
+                return consumer.numPending;
+              case "ackPending":
+                return consumer.numAckPending;
+              default:
+                return null;
+            }
+          }}
+        />
       </div>
+
+      <Pager total={consumerTotal} offset={consumerOffset} limit={limit} onPageChange={setConsumerOffset} />
 
       <h2 className="mt-32">Message Browser</h2>
       <div className="form-grid form-grid--inline">
@@ -228,10 +246,10 @@ export default function StreamDetailPage() {
         <button className="btn" onClick={() => loadMessage()}>
           Load
         </button>
-        <button className="btn secondary" disabled={!message?.navigation?.prev_seq} onClick={() => loadMessage(String(message?.navigation?.prev_seq), "prev")}>
+        <button className="btn secondary" disabled={!message?.navigation?.prevSeq} onClick={() => loadMessage(String(message?.navigation?.prevSeq), "prev")}>
           ← Prev
         </button>
-        <button className="btn secondary" disabled={!message?.navigation?.next_seq} onClick={() => loadMessage(String(message?.navigation?.next_seq), "next")}>
+        <button className="btn secondary" disabled={!message?.navigation?.nextSeq} onClick={() => loadMessage(String(message?.navigation?.nextSeq), "next")}>
           Next →
         </button>
       </div>
@@ -246,7 +264,7 @@ export default function StreamDetailPage() {
               {rawMode ? "Show JSON" : "Show Raw"}
             </button>
           </div>
-          {message.message.hdrs && message.message.hdrs.length > 0 && (
+          {message.message.hdrs && Array.isArray(message.message.hdrs) && message.message.hdrs.length > 0 && (
             <div className="mono text-muted mb-8">
               Headers: {message.message.hdrs.length} bytes
             </div>

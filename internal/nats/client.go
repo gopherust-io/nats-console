@@ -8,22 +8,40 @@ import (
 	"time"
 
 	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/nats-io/nats.go"
 )
 
 type Client struct {
-	nc           *nats.Conn
-	js           nats.JetStreamContext
-	monitoring   string
-	httpClient   *http.Client
+	js             nats.JetStreamContext
+	nc             *nats.Conn
+	httpClient     *http.Client
+	monitoring     string
 	requestTimeout time.Duration
 }
 
-func Connect(cfg config.Config) (*Client, error) {
+type ConnectionHooks struct {
+	OnDisconnect func(*nats.Conn, error)
+	OnReconnect  func(*nats.Conn)
+	OnClosed     func(*nats.Conn)
+}
+
+func Connect(cfg config.Config, hooks ConnectionHooks) (*Client, error) {
 	opts := []nats.Option{
 		nats.Name("nats-consol"),
 		nats.Timeout(cfg.RequestTimeout),
 		nats.MaxReconnects(-1),
+		nats.ReconnectWait(2 * time.Second),
+	}
+
+	if hooks.OnDisconnect != nil {
+		opts = append(opts, nats.DisconnectErrHandler(hooks.OnDisconnect))
+	}
+	if hooks.OnReconnect != nil {
+		opts = append(opts, nats.ReconnectHandler(hooks.OnReconnect))
+	}
+	if hooks.OnClosed != nil {
+		opts = append(opts, nats.ClosedHandler(hooks.OnClosed))
 	}
 
 	if cfg.NATSCredsFile != "" {
@@ -59,6 +77,17 @@ func (c *Client) Close() {
 	}
 }
 
+func (c *Client) IsAlive() bool {
+	return c.nc != nil && c.nc.IsConnected() && !c.nc.IsClosed()
+}
+
+func (c *Client) ServerName() string {
+	if c.nc == nil || !c.nc.IsConnected() {
+		return ""
+	}
+	return c.nc.ConnectedServerName()
+}
+
 func (c *Client) JetStream() nats.JetStreamContext {
 	return c.js
 }
@@ -82,6 +111,33 @@ func (c *Client) StreamNames(ctx context.Context) ([]string, error) {
 		names = append(names, name)
 	}
 	return names, nil
+}
+
+func sliceStrings(items []string, offset, limit int) ([]string, int) {
+	total := len(items)
+	if offset >= total {
+		return []string{}, total
+	}
+	end := min(offset+limit, total)
+	return items[offset:end], total
+}
+
+func (c *Client) ListStreams(ctx context.Context, offset, limit int) ([]*nats.StreamInfo, int, error) {
+	streams := make([]*nats.StreamInfo, 0)
+	for info := range c.js.Streams() {
+		streams = append(streams, info)
+	}
+	page, total := slicePageStreams(streams, offset, limit)
+	return page, total, nil
+}
+
+func slicePageStreams(items []*nats.StreamInfo, offset, limit int) ([]*nats.StreamInfo, int) {
+	total := len(items)
+	if offset >= total {
+		return []*nats.StreamInfo{}, total
+	}
+	end := min(offset+limit, total)
+	return items[offset:end], total
 }
 
 func (c *Client) StreamInfo(ctx context.Context, name string) (*nats.StreamInfo, error) {
@@ -113,6 +169,24 @@ func (c *Client) ConsumerNames(ctx context.Context, stream string) ([]string, er
 	return names, nil
 }
 
+func (c *Client) ListConsumers(ctx context.Context, stream string, offset, limit int) ([]*nats.ConsumerInfo, int, error) {
+	consumers := make([]*nats.ConsumerInfo, 0)
+	for info := range c.js.Consumers(stream) {
+		consumers = append(consumers, info)
+	}
+	page, total := slicePageConsumers(consumers, offset, limit)
+	return page, total, nil
+}
+
+func slicePageConsumers(items []*nats.ConsumerInfo, offset, limit int) ([]*nats.ConsumerInfo, int) {
+	total := len(items)
+	if offset >= total {
+		return []*nats.ConsumerInfo{}, total
+	}
+	end := min(offset+limit, total)
+	return items[offset:end], total
+}
+
 func (c *Client) ConsumerInfo(ctx context.Context, stream, consumer string) (*nats.ConsumerInfo, error) {
 	return c.js.ConsumerInfo(stream, consumer)
 }
@@ -129,17 +203,7 @@ func (c *Client) GetMessage(ctx context.Context, stream string, seq uint64) (*na
 	return c.js.GetMsg(stream, seq)
 }
 
-type MessageResult struct {
-	Message    *nats.RawStreamMsg `json:"message"`
-	Navigation MessageNavigation  `json:"navigation"`
-}
-
-type MessageNavigation struct {
-	PrevSeq *uint64 `json:"prev_seq,omitempty"`
-	NextSeq *uint64 `json:"next_seq,omitempty"`
-}
-
-func (c *Client) GetMessageNav(ctx context.Context, stream string, seq uint64, direction string) (*MessageResult, error) {
+func (c *Client) GetMessageNav(ctx context.Context, stream string, seq uint64, direction string) (*domain.MessageResult, error) {
 	info, err := c.js.StreamInfo(stream)
 	if err != nil {
 		return nil, err
@@ -164,7 +228,9 @@ func (c *Client) GetMessageNav(ctx context.Context, stream string, seq uint64, d
 		return nil, err
 	}
 
-	result := &MessageResult{Message: msg}
+	result := &domain.MessageResult{
+		Message: domain.StreamMessageFromRaw(msg),
+	}
 	if target > info.State.FirstSeq {
 		prev := target - 1
 		result.Navigation.PrevSeq = &prev
@@ -186,7 +252,7 @@ func (c *Client) Monitoring(ctx context.Context, path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("monitoring request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)

@@ -8,6 +8,8 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBasicAuthEnabledWithoutOIDC(t *testing.T) {
@@ -16,25 +18,15 @@ func TestBasicAuthEnabledWithoutOIDC(t *testing.T) {
 		OIDCEnabled:   false,
 		AdminPassword: "test-admin-password",
 	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if svc.OIDCEnabled() {
-		t.Fatal("expected OIDC disabled")
-	}
-	if !svc.BasicAuthEnabled() {
-		t.Fatal("expected basic auth enabled when OIDC is off")
-	}
+	require.NoError(t, err)
+	assert.False(t, svc.OIDCEnabled(), "expected OIDC disabled")
+	assert.True(t, svc.BasicAuthEnabled(), "expected basic auth enabled when OIDC is off")
 }
 
 func TestBasicAuthDisabledWhenAuthOff(t *testing.T) {
 	svc, err := auth.NewService(config.Config{AuthEnabled: false}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if svc.BasicAuthEnabled() {
-		t.Fatal("expected basic auth disabled when auth is off")
-	}
+	require.NoError(t, err)
+	assert.False(t, svc.BasicAuthEnabled(), "expected basic auth disabled when auth is off")
 }
 
 func TestSessionRoundTrip(t *testing.T) {
@@ -43,9 +35,7 @@ func TestSessionRoundTrip(t *testing.T) {
 		SessionSecret: "test-session-secret-key",
 		SessionTTL:    time.Hour,
 	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	user := store.User{
 		ID:       "user-1",
@@ -53,17 +43,12 @@ func TestSessionRoundTrip(t *testing.T) {
 		Roles:    []string{store.RoleAdmin},
 	}
 	token, err := svc.CreateSession(user)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	parsed, err := svc.ParseSession(token)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if parsed.Username != user.Username || parsed.ID != user.ID {
-		t.Fatalf("parsed user = %+v, want %+v", parsed, user)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, user.Username, parsed.Username)
+	assert.Equal(t, user.ID, parsed.ID)
 }
 
 func TestSessionCookieSecureInProduction(t *testing.T) {
@@ -72,15 +57,9 @@ func TestSessionCookieSecureInProduction(t *testing.T) {
 		SessionSecret: "test-session-secret-key",
 		SessionTTL:    time.Hour,
 	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	cookie := svc.SessionCookie("token")
-	if !cookie.Secure {
-		t.Fatal("expected Secure cookie in production")
-	}
-	if cookie.SameSite != http.SameSiteLaxMode {
-		t.Fatalf("SameSite = %v", cookie.SameSite)
-	}
+	assert.True(t, cookie.Secure, "expected Secure cookie in production")
+	assert.Equal(t, http.SameSiteLaxMode, cookie.SameSite)
 }

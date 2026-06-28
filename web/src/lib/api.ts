@@ -1,25 +1,27 @@
-const STORAGE_KEY = "nats-consol-auth";
-const CLUSTER_KEY = "nats-consol-cluster";
+import { STORAGE_KEYS } from "./constants";
+
+const AUTH_STORAGE_KEY = STORAGE_KEYS.auth;
+const CLUSTER_STORAGE_KEY = STORAGE_KEYS.cluster;
 
 export function getAuthHeader(): string | undefined {
-  const value = localStorage.getItem(STORAGE_KEY);
+  const value = localStorage.getItem(AUTH_STORAGE_KEY);
   return value ?? undefined;
 }
 
 export function setAuth(username: string, password: string) {
-  localStorage.setItem(STORAGE_KEY, `Basic ${btoa(`${username}:${password}`)}`);
+  localStorage.setItem(AUTH_STORAGE_KEY, `Basic ${btoa(`${username}:${password}`)}`);
 }
 
 export function clearAuth() {
-  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(AUTH_STORAGE_KEY);
 }
 
 export function getSelectedClusterId(): string | null {
-  return localStorage.getItem(CLUSTER_KEY);
+  return localStorage.getItem(CLUSTER_STORAGE_KEY);
 }
 
 export function setSelectedClusterId(id: string) {
-  localStorage.setItem(CLUSTER_KEY, id);
+  localStorage.setItem(CLUSTER_STORAGE_KEY, id);
 }
 
 export class UnauthorizedError extends Error {
@@ -27,6 +29,11 @@ export class UnauthorizedError extends Error {
     super("Unauthorized");
     this.name = "UnauthorizedError";
   }
+}
+
+export function getCSRFToken(): string | undefined {
+  const match = document.cookie.match(/(?:^|;\s*)nats_consol_csrf=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : undefined;
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -38,6 +45,14 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const auth = getAuthHeader();
   if (auth) {
     headers.set("Authorization", auth);
+  }
+
+  const method = (init.method ?? "GET").toUpperCase();
+  if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+    const csrf = getCSRFToken();
+    if (csrf) {
+      headers.set("X-CSRF-Token", csrf);
+    }
   }
 
   const response = await fetch(path, { ...init, headers, credentials: "include" });
@@ -65,13 +80,13 @@ export function clusterPath(clusterId: string, suffix: string): string {
 export type Cluster = {
   id: string;
   name: string;
-  nats_url: string;
-  monitoring_url: string;
-  has_creds: boolean;
-  has_token: boolean;
-  is_default: boolean;
-  created_at: string;
-  updated_at: string;
+  natsUrl: string;
+  monitoringUrl: string;
+  hasCreds: boolean;
+  hasToken: boolean;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type ClusterListResponse = {
@@ -84,12 +99,20 @@ export type AuditEntry = {
   timestamp: string;
   actor: string;
   action: string;
-  cluster_id: string;
-  resource_type: string;
-  resource_name: string;
-  request_id: string;
+  clusterId: string;
+  resourceType: string;
+  resourceName: string;
+  requestId: string;
   details: Record<string, unknown>;
   ip: string;
+};
+
+export type AccessRules = {
+  clusterIds?: string[];
+  manageUsers: boolean;
+  viewAudit: boolean;
+  deleteClusters: boolean;
+  assignableRoles?: string[];
 };
 
 export type UserRecord = {
@@ -97,7 +120,9 @@ export type UserRecord = {
   username: string;
   email: string;
   roles: string[];
-  created_at: string;
+  isRoot?: boolean;
+  accessRules?: AccessRules;
+  createdAt: string;
 };
 
 export type AccountInfo = {
@@ -106,10 +131,10 @@ export type AccountInfo = {
   streams: number;
   consumers: number;
   limits: {
-    max_memory: number;
-    max_storage: number;
-    max_streams: number;
-    max_consumers: number;
+    maxMemory: number;
+    maxStorage: number;
+    maxStreams: number;
+    maxConsumers: number;
   };
 };
 
@@ -119,33 +144,33 @@ export type StreamInfo = {
     subjects?: string[];
     retention: string;
     storage: string;
-    max_msgs?: number;
-    max_bytes?: number;
-    max_age?: number;
+    maxMsgs?: number;
+    maxBytes?: number;
+    maxAge?: number;
   };
   state: {
     messages: number;
     bytes: number;
-    first_seq: number;
-    last_seq: number;
-    consumer_count: number;
+    firstSeq: number;
+    lastSeq: number;
+    consumerCount: number;
   };
 };
 
 export type ConsumerInfo = {
   name: string;
-  stream_name: string;
+  streamName: string;
   config: {
-    durable_name?: string;
-    deliver_policy: string;
-    ack_policy: string;
-    filter_subject?: string;
+    durableName?: string;
+    deliverPolicy: string;
+    ackPolicy: string;
+    filterSubject?: string;
   };
-  num_pending: number;
-  num_ack_pending: number;
+  numPending: number;
+  numAckPending: number;
   delivered?: {
-    consumer_seq: number;
-    stream_seq: number;
+    consumerSeq: number;
+    streamSeq: number;
   };
 };
 
@@ -158,8 +183,8 @@ export type RawMessage = {
     hdrs?: number[];
   };
   navigation?: {
-    prev_seq?: number;
-    next_seq?: number;
+    prevSeq?: number;
+    nextSeq?: number;
   };
 };
 
@@ -211,7 +236,7 @@ export function getWebSocketURL(clusterId: string, stream: string, subject?: str
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   const params = new URLSearchParams({ stream });
   if (subject) params.set("subject", subject);
-  if (fromSeq) params.set("from_seq", String(fromSeq));
+  if (fromSeq) params.set("fromSeq", String(fromSeq));
   const auth = getAuthHeader();
   if (auth) params.set("authorization", auth);
   return `${proto}//${window.location.host}/api/v1/clusters/${encodeURIComponent(clusterId)}/live/ws?${params}`;

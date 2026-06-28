@@ -8,19 +8,37 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+const auditQueueSize = 512
+
 type Writer struct {
 	store *store.Store
+	ch    chan store.AuditCreate
 }
 
 func NewWriter(st *store.Store) *Writer {
-	return &Writer{store: st}
+	w := &Writer{
+		store: st,
+		ch:    make(chan store.AuditCreate, auditQueueSize),
+	}
+	go w.worker()
+	return w
+}
+
+func (w *Writer) worker() {
+	for in := range w.ch {
+		_ = w.store.InsertAudit(context.Background(), in)
+	}
 }
 
 func (w *Writer) Log(ctx context.Context, in store.AuditCreate) {
 	if w == nil || w.store == nil {
 		return
 	}
-	_ = w.store.InsertAudit(ctx, in)
+	select {
+	case w.ch <- in:
+	default:
+		// Drop under backpressure rather than blocking request completion.
+	}
 }
 
 func ParseResource(path string) (resourceType, resourceName string) {

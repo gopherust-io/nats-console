@@ -1,0 +1,34 @@
+[data-theme="catppuccin"] {
+  color-scheme: dark;
+  --bg-body: #1e1e2e;
+  --bg-gradient: radial-gradient(ellipse 80% 60% at 50% -10%, #313244 0%, transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 100%, #181825 0%, transparent 50%), #1e1e2e;
+  --bg-sidebar: rgba(24, 24, 37, 0.95);
+  --bg-card: rgba(49, 50, 68, 0.85);
+  --bg-input: rgba(24, 24, 37, 0.8);
+  --bg-table-hover: rgba(203, 166, 247, 0.08);
+  --bg-nav-active: rgba(203, 166, 247, 0.15);
+  --bg-badge: rgba(203, 166, 247, 0.12);
+  --bg-btn-secondary: rgba(205, 214, 244, 0.08);
+  --text-primary: #cdd6f4;
+  --text-secondary: #bac2de;
+  --text-muted: #6c7086;
+  --border: rgba(205, 214, 244, 0.12);
+  --border-subtle: rgba(205, 214, 244, 0.06);
+  --accent: #cba6f7;
+  --accent-hover: #b4befe;
+  --accent-text: #1e1e2e;
+  --danger: #f38ba8;
+  --danger-hover: #e06c88;
+  --success: #a6e3a1;
+  --success-bg: rgba(166, 227, 161, 0.12);
+  --success-text: #a6e3a1;
+  --warning-bg: rgba(249, 226, 175, 0.12);
+  --warning-text: #f9e2af;
+  --error: #f38ba8;
+  --error-bg: rgba(243, 139, 168, 0.12);
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* ── Catppuccin Latte ── */

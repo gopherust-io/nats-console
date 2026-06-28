@@ -2,6 +2,40 @@
 
 All notable changes to NATS Consol are documented in this file.
 
+## [0.4.0] - 2026-06-28
+
+### Added
+
+- **Topology page** — stream overview table, focused stream detail, flow diagram, and grouped subjects/consumers for large clusters
+- **Supercluster view** — gateway, route, leafnode, and stream replication API + UI
+- **Continuous profiling** — runtime profiles, download endpoints, and admin Profiling page
+- **AI assistant** — cluster-scoped chat panel with sanitized context
+- **Root user access rules** — migration `005_user_root_access_rules.sql` and scoped cluster/connection visibility
+- **Contract tests** — JSON shape guarantees (camelCase keys, non-null arrays) for web API compatibility
+- **GitHub Actions CI** — lint and test workflow (replaces GitLab CI)
+- **Documentation** — getting started, user guide, developer setup, and DevOps guides under `docs/`
+
+### Changed
+
+- **Settings page removed** — appearance simplified to theme switcher only; Inter + JetBrains Mono as default fonts; animations always enabled
+- **Theme switcher** — moved to top-right content bar
+- **Sidebar** — fixed width overflow and collapse button; hide “Show menu” when sidebar is open
+- **RBAC hardening** — route guards for audit/users pages; scoped cluster and audit lists; stale JWT permissions rejected on user load failure
+- **API lists** — pagination and list handlers never return JSON `null` arrays
+- **Topology / supercluster helpers** — null-safe parsing and improved large-topology layout
+
+### Fixed
+
+- Live stream WebSocket JSON parse errors; stream consumer error surfacing; audit empty state on query failure
+- KV/consumer write actions gated on `canWrite`; profiling error vs disabled state
+- SPA static file handler path traversal (`safeStaticFilePath`)
+- NATS testcontainer monitoring port in integration/contract tests
+
+### Security
+
+- Safe resolution of static asset paths under `STATIC_DIR` (blocks directory traversal)
+- Safer pprof profile parameter extraction
+
 ## [0.3.0] - 2026-06-28
 
 ### Added

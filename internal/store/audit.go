@@ -4,23 +4,29 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 type AuditEntry struct {
-	ID           string          `json:"id"`
 	Timestamp    time.Time       `json:"timestamp"`
+	ID           string          `json:"id"`
 	Actor        string          `json:"actor"`
 	Action       string          `json:"action"`
 	ClusterID    string          `json:"cluster_id"`
 	ResourceType string          `json:"resource_type"`
 	ResourceName string          `json:"resource_name"`
 	RequestID    string          `json:"request_id"`
-	Details      json.RawMessage `json:"details"`
 	IP           string          `json:"ip"`
+	Details      json.RawMessage `json:"details"`
+}
+
+type AuditRequestDetails struct {
+	Method string `json:"method"`
+	Path   string `json:"path"`
+	Status int    `json:"status"`
 }
 
 type AuditCreate struct {
@@ -30,14 +36,15 @@ type AuditCreate struct {
 	ResourceType string
 	ResourceName string
 	RequestID    string
-	Details      map[string]any
 	IP           string
+	Details      AuditRequestDetails
 }
 
 type AuditFilter struct {
-	ClusterID string
-	Limit     int
-	Offset    int
+	ClusterID  string
+	ClusterIDs []string
+	Limit      int
+	Offset     int
 }
 
 func (s *Store) InsertAudit(ctx context.Context, in AuditCreate) error {
@@ -65,6 +72,13 @@ func (s *Store) ListAudit(ctx context.Context, f AuditFilter) ([]AuditEntry, int
 	if f.ClusterID != "" {
 		args = append(args, f.ClusterID)
 		where += fmt.Sprintf(" AND cluster_id = $%d", len(args))
+	} else if len(f.ClusterIDs) > 0 {
+		placeholders := make([]string, len(f.ClusterIDs))
+		for i, clusterID := range f.ClusterIDs {
+			args = append(args, clusterID)
+			placeholders[i] = fmt.Sprintf("$%d", len(args))
+		}
+		where += " AND cluster_id IN (" + strings.Join(placeholders, ",") + ")"
 	}
 
 	var total int
@@ -101,10 +115,4 @@ func (s *Store) ListAudit(ctx context.Context, f AuditFilter) ([]AuditEntry, int
 		entries = []AuditEntry{}
 	}
 	return entries, total, rows.Err()
-}
-
-func scanAuditRow(row pgx.Row) (AuditEntry, error) {
-	var e AuditEntry
-	err := row.Scan(&e.ID, &e.Timestamp, &e.Actor, &e.Action, &e.ClusterID, &e.ResourceType, &e.ResourceName, &e.RequestID, &e.Details, &e.IP)
-	return e, err
 }

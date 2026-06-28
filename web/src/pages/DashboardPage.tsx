@@ -1,6 +1,10 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import Alert from "../components/ui/Alert";
+import PageHeader from "../components/ui/PageHeader";
+import StatCard from "../components/ui/StatCard";
 import { AccountInfo, api, clusterPath } from "../lib/api";
 import { useCluster } from "../lib/cluster";
+import { clusterQueryKey } from "../lib/query";
 
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
@@ -10,12 +14,6 @@ function formatBytes(value: number) {
 }
 
 type JSZResponse = {
-  account_details?: Array<{
-    stream_count?: number;
-    consumer_count?: number;
-    storage?: number;
-    memory?: number;
-  }>;
   total?: {
     streams?: number;
     consumers?: number;
@@ -25,82 +23,108 @@ type JSZResponse = {
 
 export default function DashboardPage() {
   const { clusterId, cluster } = useCluster();
-  const [account, setAccount] = useState<AccountInfo | null>(null);
-  const [varz, setVarz] = useState<Record<string, unknown> | null>(null);
-  const [jsz, setJsz] = useState<JSZResponse | null>(null);
-  const [error, setError] = useState("");
+  const loading = !clusterId;
 
-  useEffect(() => {
-    if (!clusterId) return;
-    Promise.all([
-      api<AccountInfo>(clusterPath(clusterId, "/account")),
-      api<Record<string, unknown>>(clusterPath(clusterId, "/monitoring/varz")),
-      api<JSZResponse>(clusterPath(clusterId, "/monitoring/jsz?streams=1&consumers=1")),
-    ])
-      .then(([accountInfo, varzInfo, jszInfo]) => {
-        setAccount(accountInfo);
-        setVarz(varzInfo);
-        setJsz(jszInfo);
-        setError("");
-      })
-      .catch((err: Error) => setError(err.message));
-  }, [clusterId]);
+  const accountQuery = useQuery({
+    queryKey: clusterQueryKey(clusterId, "account"),
+    queryFn: () => api<AccountInfo>(clusterPath(clusterId!, "/account")),
+    enabled: Boolean(clusterId),
+    refetchInterval: 30_000,
+  });
+
+  const varzQuery = useQuery({
+    queryKey: clusterQueryKey(clusterId, "varz"),
+    queryFn: () => api<Record<string, unknown>>(clusterPath(clusterId!, "/monitoring/varz")),
+    enabled: Boolean(clusterId),
+    refetchInterval: 30_000,
+  });
+
+  const jszQuery = useQuery({
+    queryKey: clusterQueryKey(clusterId, "jsz"),
+    queryFn: () => api<JSZResponse>(clusterPath(clusterId!, "/monitoring/jsz?streams=1&consumers=1")),
+    enabled: Boolean(clusterId),
+    refetchInterval: 30_000,
+  });
+
+  const error =
+    (accountQuery.error instanceof Error && accountQuery.error.message) ||
+    (varzQuery.error instanceof Error && varzQuery.error.message) ||
+    (jszQuery.error instanceof Error && jszQuery.error.message) ||
+    "";
+
+  const account = accountQuery.data ?? null;
+  const varz = varzQuery.data ?? null;
+  const jsz = jszQuery.data ?? null;
+  const isFetching = accountQuery.isFetching || varzQuery.isFetching;
 
   return (
-    <div>
-      <div className="page-header">
-        <h1>Dashboard</h1>
-        {cluster && <span className="badge">{cluster.name}</span>}
-      </div>
+    <div className="page">
+      <PageHeader
+        eyebrow="Overview"
+        title="Dashboard"
+        subtitle="Live JetStream health and capacity for your active cluster."
+        badge={
+          cluster ? (
+            <span className="badge badge--live">
+              {cluster.name}
+              {isFetching && <span className="badge__pulse" aria-label="Refreshing" />}
+            </span>
+          ) : undefined
+        }
+      />
 
-      {error && <div className="error">{error}</div>}
+      <Alert variant="error">{error}</Alert>
+
+      {loading && <div className="skeleton skeleton--table" />}
 
       {account && (
-        <div className="card-grid">
-          <div className="card">
-            <div className="card-label">Streams</div>
-            <div className="card-value">{account.streams}</div>
+        <section className="section">
+          <h2 className="section__title">Account usage</h2>
+          <div className="stat-grid">
+            <StatCard label="Streams" value={account.streams} accent="sky" icon="◎" />
+            <StatCard label="Consumers" value={account.consumers} accent="violet" icon="◉" />
+            <StatCard
+              label="Storage"
+              value={formatBytes(account.storage)}
+              hint={`Limit ${formatBytes(account.limits.maxStorage)}`}
+              accent="emerald"
+              icon="▣"
+            />
+            <StatCard
+              label="Memory"
+              value={formatBytes(account.memory)}
+              hint={`Limit ${formatBytes(account.limits.maxMemory)}`}
+              accent="amber"
+              icon="△"
+            />
           </div>
-          <div className="card">
-            <div className="card-label">Consumers</div>
-            <div className="card-value">{account.consumers}</div>
-          </div>
-          <div className="card">
-            <div className="card-label">Storage Used</div>
-            <div className="card-value">{formatBytes(account.storage)}</div>
-          </div>
-          <div className="card">
-            <div className="card-label">Memory Used</div>
-            <div className="card-value">{formatBytes(account.memory)}</div>
-          </div>
-        </div>
+        </section>
       )}
 
       {jsz?.total && (
-        <div className="card-grid mt-16">
-          <div className="card">
-            <div className="card-label">JSZ Streams</div>
-            <div className="card-value">{jsz.total.streams ?? 0}</div>
+        <section className="section">
+          <h2 className="section__title">JetStream totals</h2>
+          <div className="stat-grid stat-grid--3">
+            <StatCard label="JSZ Streams" value={jsz.total.streams ?? 0} accent="sky" />
+            <StatCard label="JSZ Consumers" value={jsz.total.consumers ?? 0} accent="violet" />
+            <StatCard label="Messages" value={jsz.total.messages ?? 0} accent="emerald" />
           </div>
-          <div className="card">
-            <div className="card-label">JSZ Consumers</div>
-            <div className="card-value">{jsz.total.consumers ?? 0}</div>
-          </div>
-          <div className="card">
-            <div className="card-label">JSZ Messages</div>
-            <div className="card-value">{jsz.total.messages ?? 0}</div>
-          </div>
-        </div>
+        </section>
       )}
 
       {varz && (
-        <div className="card mt-24">
-          <div className="card-label">Server</div>
-          <div>{String(varz.server_name ?? "unknown")}</div>
-          <div className="text-muted" style={{ marginTop: 8 }}>
-            version {String(varz.version ?? "-")} · uptime {String(varz.uptime ?? "-")}
+        <section className="section">
+          <div className="panel">
+            <div className="panel__header">
+              <h2 className="panel__title">Server</h2>
+              <span className="chip chip--success">Online</span>
+            </div>
+            <p className="panel__lead">{String(varz.server_name ?? "unknown")}</p>
+            <p className="text-muted">
+              Version {String(varz.version ?? "—")} · Uptime {String(varz.uptime ?? "—")}
+            </p>
           </div>
-        </div>
+        </section>
       )}
     </div>
   );

@@ -1,26 +1,36 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
+import PageLoader from "./components/ui/PageLoader";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { ClusterProvider } from "./lib/cluster";
-import AuditPage from "./pages/AuditPage";
-import ClustersPage from "./pages/ClustersPage";
-import ConsumerDetailPage from "./pages/ConsumerDetailPage";
-import DashboardPage from "./pages/DashboardPage";
-import KVBucketsPage from "./pages/KVBucketsPage";
-import KVBucketPage from "./pages/KVBucketPage";
-import KVKeyPage from "./pages/KVKeyPage";
-import LiveStreamPage from "./pages/LiveStreamPage";
 import LoginPage from "./pages/LoginPage";
-import ObjectBucketPage from "./pages/ObjectBucketPage";
-import ObjectBucketsPage from "./pages/ObjectBucketsPage";
-import StreamDetailPage from "./pages/StreamDetailPage";
-import StreamsPage from "./pages/StreamsPage";
-import UsersPage from "./pages/UsersPage";
+
+const DashboardPage = lazy(() => import("./pages/DashboardPage"));
+const ClustersPage = lazy(() => import("./pages/ClustersPage"));
+const TopologyPage = lazy(() => import("./pages/TopologyPage"));
+const SuperclusterPage = lazy(() => import("./pages/SuperclusterPage"));
+const StreamsPage = lazy(() => import("./pages/StreamsPage"));
+const StreamDetailPage = lazy(() => import("./pages/StreamDetailPage"));
+const LiveStreamPage = lazy(() => import("./pages/LiveStreamPage"));
+const ConsumerDetailPage = lazy(() => import("./pages/ConsumerDetailPage"));
+const KVBucketsPage = lazy(() => import("./pages/KVBucketsPage"));
+const KVBucketPage = lazy(() => import("./pages/KVBucketPage"));
+const KVKeyPage = lazy(() => import("./pages/KVKeyPage"));
+const ObjectBucketsPage = lazy(() => import("./pages/ObjectBucketsPage"));
+const ObjectBucketPage = lazy(() => import("./pages/ObjectBucketPage"));
+const AuditPage = lazy(() => import("./pages/AuditPage"));
+const UsersPage = lazy(() => import("./pages/UsersPage"));
+const ProfilingPage = lazy(() => import("./pages/ProfilingPage"));
+
+function PageLoaderFallback() {
+  return <PageLoader />;
+}
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) {
-    return <div className="login-page">Loading…</div>;
+    return <PageLoaderFallback />;
   }
   if (!user) {
     return <Navigate to="/login" replace />;
@@ -32,6 +42,20 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
   const { isAdmin, loading } = useAuth();
   if (loading) return null;
   if (!isAdmin) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+function RequireCanViewAudit({ children }: { children: React.ReactNode }) {
+  const { canViewAudit, loading } = useAuth();
+  if (loading) return null;
+  if (!canViewAudit) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+function RequireCanManageUsers({ children }: { children: React.ReactNode }) {
+  const { canManageUsers, loading } = useAuth();
+  if (loading) return null;
+  if (!canManageUsers) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
@@ -50,31 +74,138 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route index element={<DashboardPage />} />
-          <Route path="clusters" element={<ClustersPage />} />
-          <Route path="streams" element={<StreamsPage />} />
-          <Route path="streams/:name" element={<StreamDetailPage />} />
-          <Route path="streams/:name/live" element={<LiveStreamPage />} />
-          <Route path="streams/:name/consumers/:consumer" element={<ConsumerDetailPage />} />
-          <Route path="kv" element={<KVBucketsPage />} />
-          <Route path="kv/:bucket" element={<KVBucketPage />} />
-          <Route path="kv/:bucket/:key" element={<KVKeyPage />} />
-          <Route path="objects" element={<ObjectBucketsPage />} />
-          <Route path="objects/:bucket" element={<ObjectBucketPage />} />
+          <Route
+            index
+            element={
+              <Suspense fallback={<PageLoaderFallback />}>
+                <DashboardPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="clusters"
+            element={
+              <Suspense fallback={<PageLoaderFallback />}>
+                <ClustersPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="profiling"
+            element={
+              <RequireAdmin>
+                <Suspense fallback={<PageLoaderFallback />}>
+                  <ProfilingPage />
+                </Suspense>
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="topology"
+            element={
+              <Suspense fallback={<PageLoaderFallback />}>
+                <TopologyPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="supercluster"
+            element={
+              <Suspense fallback={<PageLoaderFallback />}>
+                <SuperclusterPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="streams"
+            element={
+              <Suspense fallback={<PageLoaderFallback />}>
+                <StreamsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="streams/:name"
+            element={
+              <Suspense fallback={<PageLoaderFallback />}>
+                <StreamDetailPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="streams/:name/live"
+            element={
+              <Suspense fallback={<PageLoaderFallback />}>
+                <LiveStreamPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="streams/:name/consumers/:consumer"
+            element={
+              <Suspense fallback={<PageLoaderFallback />}>
+                <ConsumerDetailPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="kv"
+            element={
+              <Suspense fallback={<PageLoaderFallback />}>
+                <KVBucketsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="kv/:bucket"
+            element={
+              <Suspense fallback={<PageLoaderFallback />}>
+                <KVBucketPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="kv/:bucket/:key"
+            element={
+              <Suspense fallback={<PageLoaderFallback />}>
+                <KVKeyPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="objects"
+            element={
+              <Suspense fallback={<PageLoaderFallback />}>
+                <ObjectBucketsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="objects/:bucket"
+            element={
+              <Suspense fallback={<PageLoaderFallback />}>
+                <ObjectBucketPage />
+              </Suspense>
+            }
+          />
           <Route
             path="audit"
             element={
-              <RequireAdmin>
-                <AuditPage />
-              </RequireAdmin>
+              <RequireCanViewAudit>
+                <Suspense fallback={<PageLoaderFallback />}>
+                  <AuditPage />
+                </Suspense>
+              </RequireCanViewAudit>
             }
           />
           <Route
             path="users"
             element={
-              <RequireAdmin>
-                <UsersPage />
-              </RequireAdmin>
+              <RequireCanManageUsers>
+                <Suspense fallback={<PageLoaderFallback />}>
+                  <UsersPage />
+                </Suspense>
+              </RequireCanManageUsers>
             }
           />
         </Route>

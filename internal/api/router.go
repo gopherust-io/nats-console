@@ -2,62 +2,77 @@ package api
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"github.com/fasthttp/router"
 	"github.com/valyala/fasthttp"
 
+	"github.com/gopherust-io/nats-consol/internal/app"
 	"github.com/gopherust-io/nats-consol/internal/audit"
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/live"
-	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
-	"github.com/gopherust-io/nats-consol/internal/store"
 )
 
 type RouterDeps struct {
-	Config      config.Config
-	Store       *store.Store
-	NATS        *natsclient.Manager
-	Auth        *auth.Service
+	Services    *app.Services
 	AuditWriter *audit.Writer
+	Config      config.Config
 }
 
 func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
-	h := NewHandler(deps.Store, deps.NATS)
-	authH := NewAuthHandler(deps.Auth)
-	usersH := NewUsersHandler(deps.Store)
-	auditH := NewAuditHandler(deps.Store)
-	liveHub := live.NewHub(deps.NATS)
+	h := NewHandler(deps.Services, deps.Config)
+	authH := NewAuthHandler(deps.Services.Auth, deps.Config)
+	assistantH := NewAssistantHandler(deps.Services.Assistant)
+	usersH := NewUsersHandler(deps.Services, deps.Config)
+	auditH := NewAuditHandler(deps.Services, deps.Config)
+	liveHub := live.NewHub(deps.Services.JetStream, deps.Config)
 	r := router.New()
 
 	r.GET("/api/health", h.Health)
-	r.GET("/metrics", metricsHandler)
+	r.GET("/metrics", promMetricsHandler)
 	r.GET("/api/openapi.yaml", openapiHandler(deps.Config.OpenAPIPath))
 
 	r.GET("/api/v1/auth/me", authH.Me)
 	r.GET("/api/v1/auth/config", authH.Config)
+	r.GET("/api/v1/assistant/config", assistantH.Config)
 	r.POST("/api/v1/auth/login", authH.Login)
 	r.POST("/api/v1/auth/logout", authH.Logout)
 	r.GET("/api/v1/auth/oidc/login", authH.OIDCLogin)
 	r.GET("/api/v1/auth/oidc/callback", authH.OIDCCallback)
+	r.GET("/api/v1/auth/oidc/{provider}/login", authH.SSOProviderLogin)
+	r.GET("/api/v1/auth/oidc/{provider}/callback", authH.SSOProviderCallback)
 
 	r.GET("/api/v1/users", usersH.List)
+	r.POST("/api/v1/users", usersH.Create)
+	r.PUT("/api/v1/users/{userId}", usersH.Update)
+	r.DELETE("/api/v1/users/{userId}", usersH.Delete)
 	r.PUT("/api/v1/users/{userId}/roles", usersH.SetRoles)
 	r.GET("/api/v1/audit", auditH.List)
 
+	r.GET("/api/v1/pprof/config", h.PprofConfig)
+	r.GET("/api/v1/pprof/continuous", h.PprofContinuous)
+	r.GET("/api/v1/pprof/runtime", h.PprofRuntime)
+	r.GET("/api/v1/pprof/profile/{profile}/download", h.PprofProfileDownload)
+	r.GET("/api/v1/pprof/profile/{profile}", h.PprofProfileSummary)
+
 	r.GET("/api/v1/clusters", h.ListClusters)
 	r.POST("/api/v1/clusters", h.CreateCluster)
+	r.GET("/api/v1/clusters/connections", h.ListClusterConnections)
 	r.GET("/api/v1/clusters/{clusterId}", h.GetCluster)
 	r.PUT("/api/v1/clusters/{clusterId}", h.UpdateCluster)
 	r.DELETE("/api/v1/clusters/{clusterId}", h.DeleteCluster)
 	r.POST("/api/v1/clusters/{clusterId}/test", h.TestCluster)
+	r.GET("/api/v1/clusters/{clusterId}/connection", h.GetClusterConnection)
 
 	prefix := "/api/v1/clusters/{clusterId}"
 	r.GET(prefix+"/account", h.AccountInfo)
 	r.GET(prefix+"/monitoring/varz", h.Varz)
 	r.GET(prefix+"/monitoring/jsz", h.Jsz)
+	r.GET(prefix+"/monitoring/{endpoint}", h.Monitoring)
+	r.GET(prefix+"/supercluster", h.Supercluster)
 
 	r.GET(prefix+"/streams", h.ListStreams)
 	r.POST(prefix+"/streams", h.CreateStream)
@@ -72,6 +87,7 @@ func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
 	r.GET(prefix+"/streams/{name}/messages", h.GetMessage)
 
 	r.GET(prefix+"/live/ws", liveHub.Handle)
+	r.POST(prefix+"/assistant/chat", assistantH.Chat)
 
 	r.GET(prefix+"/kv/buckets", h.ListKVBuckets)
 	r.POST(prefix+"/kv/buckets", h.CreateKVBucket)
@@ -99,32 +115,52 @@ func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
 
 	mws := []middleware{
 		requestIDMiddleware,
+		securityHeadersMiddleware(deps.Config),
+		bodySizeLimitMiddleware(deps.Config.MaxBodyBytes()),
+		authRateLimitMiddleware(deps.Config),
 		metricsMiddleware,
-		slogMiddleware,
+		requestLogMiddleware,
 		timeoutMiddleware(deps.Config.RequestTimeout),
 		corsMiddleware(deps.Config),
 		auditMiddleware(deps.AuditWriter),
 	}
 
 	if deps.Config.AuthEnabled {
-		mws = append(mws, authMiddleware(deps.Config, deps.Auth), rbacMiddleware)
+		mws = append(mws, csrfMiddleware(deps.Config), authMiddleware(deps.Config, deps.Services.Auth), rbacMiddleware)
 	}
 
 	finalHandler := chain(mws...)(r.Handler)
 
-	if deps.Config.MetricsAuthEnabled {
-		return func(ctx *fasthttp.RequestCtx) {
-			if string(ctx.Path()) == "/metrics" {
-				if _, ok := authenticate(ctx, deps.Auth); !ok {
+	return func(ctx *fasthttp.RequestCtx) {
+		path := string(ctx.Path())
+		if strings.HasPrefix(path, pprofPathPrefix) {
+			if !deps.Config.PprofEnabled {
+				ctx.SetStatusCode(fasthttp.StatusNotFound)
+				return
+			}
+			if deps.Config.PprofAuthEnabled {
+				user, ok := authenticate(ctx, deps.Services.Auth)
+				if !ok {
 					ctx.SetStatusCode(fasthttp.StatusUnauthorized)
 					return
 				}
+				if !auth.CanViewProfiling(user) {
+					ctx.SetStatusCode(fasthttp.StatusForbidden)
+					ctx.SetBodyString("forbidden")
+					return
+				}
 			}
-			finalHandler(ctx)
+			serveStdPprof(ctx)
+			return
 		}
+		if deps.Config.MetricsAuthEnabled && path == "/metrics" {
+			if _, ok := authenticate(ctx, deps.Services.Auth); !ok {
+				ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+				return
+			}
+		}
+		finalHandler(ctx)
 	}
-
-	return finalHandler
 }
 
 type spaHandler struct {
@@ -133,10 +169,41 @@ type spaHandler struct {
 }
 
 func newSPAHandler(staticDir string) *spaHandler {
-	return &spaHandler{
-		staticDir: staticDir,
-		index:     filepath.Join(staticDir, "index.html"),
+	absDir, err := filepath.Abs(staticDir)
+	if err != nil {
+		absDir = staticDir
 	}
+	return &spaHandler{
+		staticDir: absDir,
+		index:     filepath.Join(absDir, "index.html"),
+	}
+}
+
+// safeStaticFilePath resolves a URL path under rootDir, rejecting traversal outside the root.
+func safeStaticFilePath(rootDir, urlPath string) (string, bool) {
+	cleaned := path.Clean("/" + urlPath)
+	cleaned = strings.TrimPrefix(cleaned, "/")
+	if cleaned == "" || cleaned == "." || strings.Contains(cleaned, "..") {
+		return "", false
+	}
+
+	absRoot, err := filepath.Abs(rootDir)
+	if err != nil {
+		return "", false
+	}
+
+	candidate := filepath.Join(absRoot, filepath.FromSlash(cleaned))
+	absCandidate, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", false
+	}
+
+	rel, err := filepath.Rel(absRoot, absCandidate)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+
+	return absCandidate, true
 }
 
 func (s *spaHandler) ServeHTTP(ctx *fasthttp.RequestCtx) {
@@ -146,15 +213,17 @@ func (s *spaHandler) ServeHTTP(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	if strings.HasPrefix(path, "/api/") {
+	if isAPIPath(path) {
 		ctx.SetStatusCode(fasthttp.StatusNotFound)
 		return
 	}
 
-	filePath := filepath.Join(s.staticDir, path)
-	if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
-		fasthttp.ServeFile(ctx, filePath)
-		return
+	filePath, ok := safeStaticFilePath(s.staticDir, path)
+	if ok {
+		if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
+			fasthttp.ServeFile(ctx, filePath)
+			return
+		}
 	}
 
 	fasthttp.ServeFile(ctx, s.index)

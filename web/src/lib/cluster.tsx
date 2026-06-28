@@ -1,5 +1,7 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api, Cluster, ClusterListResponse, getSelectedClusterId, setSelectedClusterId } from "../lib/api";
+import { clusterQueryKey } from "./query";
 
 type ClusterContextValue = {
   clusters: Cluster[];
@@ -14,51 +16,56 @@ type ClusterContextValue = {
 const ClusterContext = createContext<ClusterContextValue | null>(null);
 
 export function ClusterProvider({ children }: { children: ReactNode }) {
-  const [clusters, setClusters] = useState<Cluster[]>([]);
   const [clusterId, setClusterIdState] = useState<string | null>(getSelectedClusterId());
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
 
-  async function reload() {
-    try {
-      const data = await api<ClusterListResponse>("/api/v1/clusters");
-      setClusters(data.clusters);
-      setError("");
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: clusterQueryKey(null, "list"),
+    queryFn: () => api<ClusterListResponse>("/api/v1/clusters"),
+    staleTime: 60_000,
+  });
 
-      const stored = getSelectedClusterId();
-      const exists = data.clusters.find((c) => c.id === stored);
-      if (exists) {
-        setClusterIdState(stored);
-      } else {
-        const fallback = data.clusters.find((c) => c.is_default) ?? data.clusters[0];
-        if (fallback) {
-          setSelectedClusterId(fallback.id);
-          setClusterIdState(fallback.id);
-        }
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load clusters");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const clusters = useMemo(() => data?.clusters ?? [], [data?.clusters]);
 
   useEffect(() => {
-    reload();
-  }, []);
+    if (clusters.length === 0) return;
+    const stored = getSelectedClusterId();
+    const exists = clusters.find((c) => c.id === stored);
+    if (exists) {
+      setClusterIdState(stored);
+      return;
+    }
+    const fallback = clusters.find((c) => c.isDefault) ?? clusters[0];
+    if (fallback) {
+      setSelectedClusterId(fallback.id);
+      setClusterIdState(fallback.id);
+    }
+  }, [clusters]);
 
-  function setClusterId(id: string) {
+  const setClusterId = useCallback((id: string) => {
     setSelectedClusterId(id);
     setClusterIdState(id);
-  }
+  }, []);
+
+  const reload = useCallback(async () => {
+    await refetch();
+  }, [refetch]);
 
   const cluster = clusters.find((c) => c.id === clusterId) ?? null;
 
-  return (
-    <ClusterContext.Provider value={{ clusters, clusterId, cluster, setClusterId, reload, loading, error }}>
-      {children}
-    </ClusterContext.Provider>
+  const value = useMemo(
+    () => ({
+      clusters,
+      clusterId,
+      cluster,
+      setClusterId,
+      reload,
+      loading: isLoading,
+      error: error instanceof Error ? error.message : "",
+    }),
+    [clusters, clusterId, cluster, setClusterId, reload, isLoading, error],
   );
+
+  return <ClusterContext.Provider value={value}>{children}</ClusterContext.Provider>;
 }
 
 export function useCluster() {

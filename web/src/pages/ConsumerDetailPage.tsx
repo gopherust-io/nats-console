@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, clusterPath, ConsumerInfo } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
 
 export default function ConsumerDetailPage() {
   const { name = "", consumer = "" } = useParams();
   const { clusterId } = useCluster();
+  const { canWrite } = useAuth();
   const [info, setInfo] = useState<ConsumerInfo | null>(null);
   const [error, setError] = useState("");
 
@@ -31,6 +33,10 @@ export default function ConsumerDetailPage() {
     }
   }
 
+  if (!clusterId) {
+    return <p className="text-muted">Select a cluster to view this consumer.</p>;
+  }
+
   if (!info) {
     return <div>{error || "Loading..."}</div>;
   }
@@ -44,9 +50,11 @@ export default function ConsumerDetailPage() {
           </Link>
           <h1>{info.name}</h1>
         </div>
-        <button className="btn danger" onClick={deleteConsumer}>
-          Delete Consumer
-        </button>
+        {canWrite && (
+          <button className="btn danger" onClick={deleteConsumer}>
+            Delete Consumer
+          </button>
+        )}
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -54,22 +62,22 @@ export default function ConsumerDetailPage() {
       <div className="card-grid">
         <div className="card">
           <div className="card-label">Pending</div>
-          <div className="card-value">{info.num_pending}</div>
+          <div className="card-value">{info.numPending}</div>
         </div>
         <div className="card">
           <div className="card-label">Ack Pending</div>
-          <div className="card-value">{info.num_ack_pending}</div>
+          <div className="card-value">{info.numAckPending}</div>
         </div>
         <div className="card">
           <div className="card-label">Deliver Policy</div>
           <div className="card-value card-value--sm">
-            {info.config.deliver_policy}
+            {info.config.deliverPolicy}
           </div>
         </div>
         <div className="card">
           <div className="card-label">Ack Policy</div>
           <div className="card-value card-value--sm">
-            {info.config.ack_policy}
+            {info.config.ackPolicy}
           </div>
         </div>
       </div>

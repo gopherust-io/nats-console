@@ -17,24 +17,37 @@ type Store struct {
 	encryptor *crypto.Encryptor
 }
 
-func Open(ctx context.Context, databaseURL, migrationsDir string, encryptor *crypto.Encryptor) (*Store, error) {
-	pool, err := pgxpool.New(ctx, databaseURL)
+func Open(ctx context.Context, databaseURL, migrationsDir string, encryptor *crypto.Encryptor, poolCfg PoolConfig) (*Store, error) {
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse postgres config: %w", err)
+	}
+	if poolCfg.MaxConns <= 0 {
+		poolCfg = DefaultPoolConfig()
+	}
+	cfg.MaxConns = poolCfg.MaxConns
+	cfg.MinConns = poolCfg.MinConns
+	cfg.MaxConnLifetime = poolCfg.MaxConnLifetime
+	cfg.MaxConnIdleTime = poolCfg.MaxConnIdleTime
+	cfg.HealthCheckPeriod = poolCfg.HealthCheckPeriod
+
+	dbPool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect postgres: %w", err)
 	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
+	if err := dbPool.Ping(ctx); err != nil {
+		dbPool.Close()
 		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
 
-	s := &Store{pool: pool, encryptor: encryptor}
+	s := &Store{pool: dbPool, encryptor: encryptor}
 	if err := s.migrate(ctx, migrationsDir); err != nil {
-		pool.Close()
+		dbPool.Close()
 		return nil, err
 	}
 	if encryptor != nil {
 		if err := s.ReencryptCredentials(ctx); err != nil {
-			pool.Close()
+			dbPool.Close()
 			return nil, err
 		}
 	}
@@ -79,7 +92,8 @@ func (s *Store) migrate(ctx context.Context, dir string) error {
 			continue
 		}
 
-		sql, err := os.ReadFile(filepath.Join(dir, name))
+		// Migration files are read from the configured migrations directory only.
+		sql, err := os.ReadFile(filepath.Join(dir, name)) //nolint:gosec // G304: controlled migration dir
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}

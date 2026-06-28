@@ -1,19 +1,28 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import Pager, { DEFAULT_PAGE_SIZE, pageQuery } from "../components/Pager";
+import VirtualTable from "../components/VirtualTable";
+import Alert from "../components/ui/Alert";
+import PageHeader from "../components/ui/PageHeader";
 import { api, clusterPath, StreamInfo } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
+import { clusterQueryKey } from "../lib/query";
 
 type StreamListResponse = {
   streams: StreamInfo[];
   total: number;
+  offset: number;
+  limit: number;
 };
 
 export default function StreamsPage() {
   const { clusterId } = useCluster();
   const { canWrite } = useAuth();
-  const [streams, setStreams] = useState<StreamInfo[]>([]);
-  const [error, setError] = useState("");
+  const queryClient = useQueryClient();
+  const [offset, setOffset] = useState(0);
+  const [actionError, setActionError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [subjects, setSubjects] = useState("events.>");
@@ -21,21 +30,24 @@ export default function StreamsPage() {
   const [storage, setStorage] = useState("file");
   const [maxMsgs, setMaxMsgs] = useState("");
   const [maxBytes, setMaxBytes] = useState("");
+  const limit = DEFAULT_PAGE_SIZE;
 
-  async function loadStreams() {
-    if (!clusterId) return;
-    try {
-      const data = await api<StreamListResponse>(clusterPath(clusterId, "/streams"));
-      setStreams(data.streams);
-      setError("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load streams");
-    }
+  const streamsQuery = useQuery({
+    queryKey: [...clusterQueryKey(clusterId, "streams"), offset],
+    queryFn: () =>
+      api<StreamListResponse>(clusterPath(clusterId!, `/streams${pageQuery(offset, limit)}`)),
+    enabled: Boolean(clusterId),
+  });
+
+  const streams = streamsQuery.data?.streams ?? [];
+  const total = streamsQuery.data?.total ?? 0;
+  const error =
+    actionError ||
+    (streamsQuery.error instanceof Error ? streamsQuery.error.message : "");
+
+  async function invalidateStreams() {
+    await queryClient.invalidateQueries({ queryKey: clusterQueryKey(clusterId, "streams") });
   }
-
-  useEffect(() => {
-    loadStreams();
-  }, [clusterId]);
 
   async function createStream(event: FormEvent) {
     event.preventDefault();
@@ -47,8 +59,8 @@ export default function StreamsPage() {
         retention,
         storage,
       };
-      if (maxMsgs) body.max_msgs = Number(maxMsgs);
-      if (maxBytes) body.max_bytes = Number(maxBytes);
+      if (maxMsgs) body.maxMsgs = Number(maxMsgs);
+      if (maxBytes) body.maxBytes = Number(maxBytes);
 
       await api(clusterPath(clusterId, "/streams"), {
         method: "POST",
@@ -56,9 +68,10 @@ export default function StreamsPage() {
       });
       setShowForm(false);
       setName("");
-      await loadStreams();
+      setActionError("");
+      await invalidateStreams();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create stream");
+      setActionError(err instanceof Error ? err.message : "Failed to create stream");
     }
   }
 
@@ -66,24 +79,29 @@ export default function StreamsPage() {
     if (!clusterId || !confirm(`Delete stream "${streamName}"?`)) return;
     try {
       await api(clusterPath(clusterId, `/streams/${encodeURIComponent(streamName)}`), { method: "DELETE" });
-      await loadStreams();
+      setActionError("");
+      await invalidateStreams();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete stream");
+      setActionError(err instanceof Error ? err.message : "Failed to delete stream");
     }
   }
 
   return (
-    <div>
-      <div className="page-header">
-        <h1>Streams</h1>
-        {canWrite && (
-          <button className="btn" onClick={() => setShowForm((v) => !v)}>
-            {showForm ? "Cancel" : "Create Stream"}
-          </button>
-        )}
-      </div>
+    <div className="page">
+      <PageHeader
+        eyebrow="JetStream"
+        title="Streams"
+        subtitle="Create, inspect, and manage message streams across subjects."
+        actions={
+          canWrite ? (
+            <button className="btn" type="button" onClick={() => setShowForm((v) => !v)}>
+              {showForm ? "Cancel" : "Create stream"}
+            </button>
+          ) : undefined
+        }
+      />
 
-      {error && <div className="error">{error}</div>}
+      <Alert variant="error">{error}</Alert>
 
       {showForm && (
         <form className="form-grid card mb-24" onSubmit={createStream}>
@@ -124,47 +142,53 @@ export default function StreamsPage() {
         </form>
       )}
 
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Subjects</th>
-              <th>Messages</th>
-              <th>Consumers</th>
-              <th>Storage</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {streams.map((stream) => (
-              <tr key={stream.config.name}>
-                <td>
-                  <Link to={`/streams/${stream.config.name}`}>{stream.config.name}</Link>
-                </td>
-                <td className="mono">{(stream.config.subjects ?? []).join(", ")}</td>
-                <td>{stream.state.messages}</td>
-                <td>{stream.state.consumer_count}</td>
-                <td>{stream.config.storage}</td>
-                <td>
-                  {canWrite && (
-                    <button className="btn danger" onClick={() => deleteStream(stream.config.name)}>
+      {streamsQuery.isLoading && <div className="skeleton skeleton--table" />}
+
+      {!streamsQuery.isLoading && (
+        <div className="table-wrap">
+          <VirtualTable
+            columns={[
+              { id: "name", header: "Name", width: "minmax(120px, 1.1fr)" },
+              { id: "subjects", header: "Subjects", width: "minmax(180px, 2fr)" },
+              { id: "messages", header: "Messages", width: "96px", align: "right" },
+              { id: "consumers", header: "Consumers", width: "108px", align: "right" },
+              { id: "storage", header: "Storage", width: "96px" },
+              { id: "actions", header: "", width: "112px", align: "right" },
+            ]}
+            items={streams}
+            empty="No streams yet"
+            getKey={(stream) => stream.config.name}
+            renderCell={(stream, columnId) => {
+              switch (columnId) {
+                case "name":
+                  return <Link to={`/streams/${stream.config.name}`}>{stream.config.name}</Link>;
+                case "subjects":
+                  return (
+                    <span className="mono virtual-table__truncate">
+                      {(stream.config.subjects ?? []).join(", ")}
+                    </span>
+                  );
+                case "messages":
+                  return stream.state.messages ?? 0;
+                case "consumers":
+                  return stream.state.consumerCount ?? 0;
+                case "storage":
+                  return stream.config.storage;
+                case "actions":
+                  return canWrite ? (
+                    <button className="btn danger btn--small" type="button" onClick={() => deleteStream(stream.config.name)}>
                       Delete
                     </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {streams.length === 0 && (
-              <tr>
-                <td colSpan={6} className="text-muted">
-                  No streams yet
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+                  ) : null;
+                default:
+                  return null;
+              }
+            }}
+          />
+        </div>
+      )}
+
+      <Pager total={total} offset={offset} limit={limit} onPageChange={setOffset} />
     </div>
   );
 }

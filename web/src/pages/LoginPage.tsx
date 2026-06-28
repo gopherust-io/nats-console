@@ -1,12 +1,13 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import ThemeSwitcher from "../components/ThemeSwitcher";
+import SSOProviders from "../components/SSOProviders";
+import Alert from "../components/ui/Alert";
 import { useAuth } from "../lib/auth";
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { login, oidcEnabled, basicEnabled, user } = useAuth();
+  const { login, oidcEnabled, oidcProviders, basicEnabled, user } = useAuth();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("admin");
   const [error, setError] = useState("");
@@ -37,49 +38,70 @@ export default function LoginPage() {
 
   return (
     <div className="login-page">
-      <div className="login-card">
-        <div className="brand" style={{ marginBottom: 24 }}>
-          <span className="brand__icon">NC</span>
-          NATS Consol
-        </div>
-        <h1>Sign in</h1>
-        <p className="login-card__hint">
-          {oidcEnabled && basicEnabled
-            ? "Use your console credentials or SSO"
-            : oidcEnabled
-              ? "Sign in with your organization account"
-              : "Use your console credentials"}
-        </p>
-        {oidcEnabled && (
-          <a className="btn btn--secondary mb-16" href="/api/v1/auth/oidc/login" style={{ display: "block", textAlign: "center" }}>
-            Sign in with SSO
-          </a>
-        )}
-        {basicEnabled && (
-          <form className="form-grid" onSubmit={onSubmit}>
-            <label>
-              Username
-              <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
-            </label>
-            <label>
-              Password
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-              />
-            </label>
-            <button className="btn" type="submit">
-              Continue
-            </button>
-            {error && <div className="error">{error}</div>}
-          </form>
-        )}
-        {!basicEnabled && error && <div className="error">{error}</div>}
-        <div className="login-card__themes">
-          <div className="login-card__themes-label">Appearance</div>
-          <ThemeSwitcher compact />
+      <div className="login-page__backdrop" aria-hidden>
+        <div className="login-orb login-orb--1" />
+        <div className="login-orb login-orb--2" />
+        <div className="login-orb login-orb--3" />
+      </div>
+
+      <div className="login-layout">
+        <section className="login-hero">
+          <div className="brand login-hero__brand">
+            <span className="brand__icon">
+              <span className="brand__mark">NC</span>
+            </span>
+            <div className="brand__text">
+              <span className="brand__name">NATS Consol</span>
+              <span className="brand__tagline">JetStream operations console</span>
+            </div>
+          </div>
+          <h1 className="login-hero__title">Operate JetStream with clarity.</h1>
+          <p className="login-hero__desc">
+            Streams, consumers, KV, object stores, and live tail — unified in one fast console built for operators.
+          </p>
+          <ul className="login-hero__features">
+            <li>Multi-cluster management</li>
+            <li>Live message inspection</li>
+            <li>Role-based access control</li>
+          </ul>
+        </section>
+
+        <div className="login-card">
+          <h2 className="login-card__title">Welcome back</h2>
+          <p className="login-card__hint">
+            {oidcEnabled && basicEnabled
+              ? "Sign in with SSO or your console credentials"
+              : oidcEnabled
+                ? "Sign in with your organization account"
+                : "Enter your console credentials"}
+          </p>
+
+          {oidcEnabled && <SSOProviders providers={oidcProviders} />}
+          {oidcEnabled && basicEnabled && <div className="login-divider">or continue with email</div>}
+
+          {basicEnabled && (
+            <form className="form-grid form-grid--login" onSubmit={onSubmit}>
+              <label>
+                Username
+                <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" placeholder="admin" />
+              </label>
+              <label>
+                Password
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                />
+              </label>
+              <button className="btn btn--block" type="submit">
+                Sign in
+              </button>
+            </form>
+          )}
+
+          <Alert variant="error">{error}</Alert>
         </div>
       </div>
     </div>

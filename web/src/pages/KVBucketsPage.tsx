@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, clusterPath, KVBucketInfo } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
 
 type BucketListResponse = {
@@ -10,25 +11,26 @@ type BucketListResponse = {
 
 export default function KVBucketsPage() {
   const { clusterId } = useCluster();
+  const { canWrite } = useAuth();
   const [buckets, setBuckets] = useState<KVBucketInfo[]>([]);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [bucket, setBucket] = useState("");
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!clusterId) return;
     try {
       const data = await api<BucketListResponse>(clusterPath(clusterId, "/kv/buckets"));
-      setBuckets(data.buckets);
+      setBuckets(data.buckets ?? []);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load KV buckets");
     }
-  }
+  }, [clusterId]);
 
   useEffect(() => {
-    load();
-  }, [clusterId]);
+    void load();
+  }, [load]);
 
   async function createBucket(event: FormEvent) {
     event.preventDefault();
@@ -60,14 +62,16 @@ export default function KVBucketsPage() {
     <div>
       <div className="page-header">
         <h1>KV Stores</h1>
-        <button className="btn" onClick={() => setShowForm((v) => !v)}>
-          {showForm ? "Cancel" : "Create Bucket"}
-        </button>
+        {canWrite && (
+          <button className="btn" onClick={() => setShowForm((v) => !v)}>
+            {showForm ? "Cancel" : "Create Bucket"}
+          </button>
+        )}
       </div>
 
       {error && <div className="error">{error}</div>}
 
-      {showForm && (
+      {canWrite && showForm && (
         <form className="form-grid card mb-24" onSubmit={createBucket}>
           <label>
             Bucket Name
@@ -98,9 +102,11 @@ export default function KVBucketsPage() {
                 <td>{b.values}</td>
                 <td>{b.history}</td>
                 <td>
-                  <button className="btn danger" onClick={() => deleteBucket(b.bucket)}>
-                    Delete
-                  </button>
+                  {canWrite && (
+                    <button className="btn danger" onClick={() => deleteBucket(b.bucket)}>
+                      Delete
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

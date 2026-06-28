@@ -6,81 +6,56 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/bytedance/sonic"
-	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/app"
+	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/port"
+	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
+
 	"github.com/nats-io/nats.go"
 	"github.com/valyala/fasthttp"
 )
 
 type Handler struct {
-	store *store.Store
-	nats  *natsclient.Manager
+	svc *app.Services
+	cfg config.Config
 }
 
-func NewHandler(st *store.Store, nats *natsclient.Manager) *Handler {
-	return &Handler{store: st, nats: nats}
+func NewHandler(svc *app.Services, cfg config.Config) *Handler {
+	return &Handler{svc: svc, cfg: cfg}
 }
 
 func (h *Handler) Health(ctx *fasthttp.RequestCtx) {
-	c := requestContext(ctx)
-	postgresStatus := "ok"
-	if err := h.store.Ping(c); err != nil {
-		postgresStatus = "error"
-	}
-
-	natsStatus := "unknown"
-	if cluster, err := h.store.GetDefaultCluster(c); err == nil {
-		serverName, _, err := h.nats.Test(c, cluster.ID)
-		if err == nil && serverName != "" {
-			natsStatus = "ok"
-		} else {
-			natsStatus = "error"
-		}
-	}
-
-	status := "ok"
-	code := fasthttp.StatusOK
-	if postgresStatus != "ok" {
-		status = "degraded"
-		code = fasthttp.StatusServiceUnavailable
-	}
-
-	writeJSON(ctx, code, map[string]any{
-		"status":              status,
-		"postgres":            postgresStatus,
-		"nats_default_cluster": natsStatus,
-	})
+	status, code := h.svc.Health.Check(requestContext(ctx))
+	serializer.WriteJSON(ctx, code, status)
 }
 
 func (h *Handler) AccountInfo(ctx *fasthttp.RequestCtx) {
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.AccountInfo(c)
 		return info, fasthttp.StatusOK, err
 	})
 }
 
 func (h *Handler) ListStreams(ctx *fasthttp.RequestCtx) {
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
-		names, err := client.StreamNames(c)
+	offset, limit := parsePaginationParams(ctx, h.cfg)
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
+		streams, total, err := client.ListStreams(c, offset, limit)
 		if err != nil {
 			return nil, 0, err
 		}
-		streams := make([]*nats.StreamInfo, 0, len(names))
-		for _, name := range names {
-			info, err := client.StreamInfo(c, name)
-			if err != nil {
-				return nil, 0, err
-			}
-			streams = append(streams, info)
-		}
-		return map[string]any{"streams": streams, "total": len(streams)}, fasthttp.StatusOK, nil
+		return newStreamsListResponse(streams, total, offset, limit), fasthttp.StatusOK, nil
 	})
 }
 
 func (h *Handler) GetStream(ctx *fasthttp.RequestCtx) {
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
-		info, err := client.StreamInfo(c, param(ctx, "name"))
+	name := routeParam(ctx, "name")
+	if err := validateResourceName(name); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
+		info, err := client.StreamInfo(c, name)
 		if err != nil {
 			return nil, fasthttp.StatusNotFound, err
 		}
@@ -90,15 +65,19 @@ func (h *Handler) GetStream(ctx *fasthttp.RequestCtx) {
 
 func (h *Handler) CreateStream(ctx *fasthttp.RequestCtx) {
 	var cfg nats.StreamConfig
-	if err := sonic.Unmarshal(ctx.PostBody(), &cfg); err != nil {
-		writeError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.UnmarshalNATSRequest(ctx.PostBody(), &cfg); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	if cfg.Name == "" {
-		writeError(ctx, fasthttp.StatusBadRequest, errMissing("name"))
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("name"))
 		return
 	}
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	if err := validateResourceName(cfg.Name); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.AddStream(c, &cfg)
 		if err != nil {
 			return nil, fasthttp.StatusBadRequest, err
@@ -109,14 +88,14 @@ func (h *Handler) CreateStream(ctx *fasthttp.RequestCtx) {
 
 func (h *Handler) UpdateStream(ctx *fasthttp.RequestCtx) {
 	var cfg nats.StreamConfig
-	if err := sonic.Unmarshal(ctx.PostBody(), &cfg); err != nil {
-		writeError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.UnmarshalNATSRequest(ctx.PostBody(), &cfg); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	if cfg.Name == "" {
-		cfg.Name = param(ctx, "name")
+		cfg.Name = routeParam(ctx, "name")
 	}
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.UpdateStream(c, &cfg)
 		if err != nil {
 			return nil, fasthttp.StatusBadRequest, err
@@ -126,40 +105,33 @@ func (h *Handler) UpdateStream(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) DeleteStream(ctx *fasthttp.RequestCtx) {
-	h.natsVoid(ctx, func(c context.Context, client *natsclient.Client) error {
-		return client.DeleteStream(c, param(ctx, "name"))
+	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
+		return client.DeleteStream(c, routeParam(ctx, "name"))
 	}, fasthttp.StatusBadRequest)
 }
 
 func (h *Handler) PurgeStream(ctx *fasthttp.RequestCtx) {
-	h.natsVoid(ctx, func(c context.Context, client *natsclient.Client) error {
-		return client.PurgeStream(c, param(ctx, "name"))
+	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
+		return client.PurgeStream(c, routeParam(ctx, "name"))
 	}, fasthttp.StatusBadRequest)
 }
 
 func (h *Handler) ListConsumers(ctx *fasthttp.RequestCtx) {
-	stream := param(ctx, "name")
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
-		names, err := client.ConsumerNames(c, stream)
+	stream := routeParam(ctx, "name")
+	offset, limit := parsePaginationParams(ctx, h.cfg)
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
+		consumers, total, err := client.ListConsumers(c, stream, offset, limit)
 		if err != nil {
 			return nil, 0, err
 		}
-		consumers := make([]*nats.ConsumerInfo, 0, len(names))
-		for _, name := range names {
-			info, err := client.ConsumerInfo(c, stream, name)
-			if err != nil {
-				return nil, 0, err
-			}
-			consumers = append(consumers, info)
-		}
-		return map[string]any{"consumers": consumers, "total": len(consumers)}, fasthttp.StatusOK, nil
+		return newConsumersListResponse(consumers, total, offset, limit), fasthttp.StatusOK, nil
 	})
 }
 
 func (h *Handler) GetConsumer(ctx *fasthttp.RequestCtx) {
-	stream := param(ctx, "name")
-	consumer := param(ctx, "consumer")
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	stream := routeParam(ctx, "name")
+	consumer := routeParam(ctx, "consumer")
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.ConsumerInfo(c, stream, consumer)
 		if err != nil {
 			return nil, fasthttp.StatusNotFound, err
@@ -169,13 +141,13 @@ func (h *Handler) GetConsumer(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) CreateConsumer(ctx *fasthttp.RequestCtx) {
-	stream := param(ctx, "name")
+	stream := routeParam(ctx, "name")
 	var cfg nats.ConsumerConfig
-	if err := sonic.Unmarshal(ctx.PostBody(), &cfg); err != nil {
-		writeError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.UnmarshalNATSRequest(ctx.PostBody(), &cfg); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.AddConsumer(c, stream, &cfg)
 		if err != nil {
 			return nil, fasthttp.StatusBadRequest, err
@@ -185,28 +157,28 @@ func (h *Handler) CreateConsumer(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) DeleteConsumer(ctx *fasthttp.RequestCtx) {
-	stream := param(ctx, "name")
-	consumer := param(ctx, "consumer")
-	h.natsVoid(ctx, func(c context.Context, client *natsclient.Client) error {
+	stream := routeParam(ctx, "name")
+	consumer := routeParam(ctx, "consumer")
+	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
 		return client.DeleteConsumer(c, stream, consumer)
 	}, fasthttp.StatusBadRequest)
 }
 
 func (h *Handler) GetMessage(ctx *fasthttp.RequestCtx) {
-	stream := param(ctx, "name")
+	stream := routeParam(ctx, "name")
 	seqStr := string(ctx.QueryArgs().Peek("seq"))
 	if seqStr == "" {
-		writeError(ctx, fasthttp.StatusBadRequest, errMissing("seq"))
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("seq"))
 		return
 	}
 	seq, err := strconv.ParseUint(seqStr, 10, 64)
 	if err != nil {
-		writeError(ctx, fasthttp.StatusBadRequest, err)
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	direction := string(ctx.QueryArgs().Peek("direction"))
 
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		if direction != "" {
 			result, err := client.GetMessageNav(c, stream, seq, direction)
 			if err != nil {
@@ -218,11 +190,7 @@ func (h *Handler) GetMessage(ctx *fasthttp.RequestCtx) {
 		if err != nil {
 			return nil, fasthttp.StatusNotFound, err
 		}
-		result, err := client.GetMessageNav(c, stream, seq, "")
-		if err != nil {
-			return map[string]any{"message": msg}, fasthttp.StatusOK, nil
-		}
-		return result, fasthttp.StatusOK, nil
+		return domain.MessageResult{Message: domain.StreamMessageFromRaw(msg)}, fasthttp.StatusOK, nil
 	})
 }
 
@@ -239,26 +207,26 @@ func (h *Handler) Jsz(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) ListKVBuckets(ctx *fasthttp.RequestCtx) {
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		buckets, err := client.ListKVBuckets(c)
 		if err != nil {
 			return nil, 0, err
 		}
-		return map[string]any{"buckets": buckets, "total": len(buckets)}, fasthttp.StatusOK, nil
+		return KVBucketsListResponse{Buckets: nonNilSlice(buckets), Total: len(buckets)}, fasthttp.StatusOK, nil
 	})
 }
 
 func (h *Handler) CreateKVBucket(ctx *fasthttp.RequestCtx) {
 	var cfg nats.KeyValueConfig
-	if err := sonic.Unmarshal(ctx.PostBody(), &cfg); err != nil {
-		writeError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.UnmarshalNATSRequest(ctx.PostBody(), &cfg); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	if cfg.Bucket == "" {
-		writeError(ctx, fasthttp.StatusBadRequest, errMissing("bucket"))
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("bucket"))
 		return
 	}
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.CreateKVBucket(c, &cfg)
 		if err != nil {
 			return nil, fasthttp.StatusBadRequest, err
@@ -268,8 +236,8 @@ func (h *Handler) CreateKVBucket(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) GetKVBucket(ctx *fasthttp.RequestCtx) {
-	bucket := param(ctx, "bucket")
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	bucket := routeParam(ctx, "bucket")
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.GetKVBucket(c, bucket)
 		if err != nil {
 			return nil, fasthttp.StatusNotFound, err
@@ -279,27 +247,28 @@ func (h *Handler) GetKVBucket(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) DeleteKVBucket(ctx *fasthttp.RequestCtx) {
-	bucket := param(ctx, "bucket")
-	h.natsVoid(ctx, func(c context.Context, client *natsclient.Client) error {
+	bucket := routeParam(ctx, "bucket")
+	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
 		return client.DeleteKVBucket(c, bucket)
 	}, fasthttp.StatusBadRequest)
 }
 
 func (h *Handler) ListKVKeys(ctx *fasthttp.RequestCtx) {
-	bucket := param(ctx, "bucket")
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
-		keys, err := client.ListKVKeys(c, bucket)
+	bucket := routeParam(ctx, "bucket")
+	offset, limit := parsePaginationParams(ctx, h.cfg)
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
+		keys, total, err := client.ListKVKeys(c, bucket, offset, limit)
 		if err != nil {
 			return nil, fasthttp.StatusNotFound, err
 		}
-		return map[string]any{"keys": keys, "total": len(keys)}, fasthttp.StatusOK, nil
+		return newKeysListResponse(keys, total, offset, limit), fasthttp.StatusOK, nil
 	})
 }
 
 func (h *Handler) GetKVEntry(ctx *fasthttp.RequestCtx) {
-	bucket := param(ctx, "bucket")
-	key := param(ctx, "key")
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	bucket := routeParam(ctx, "bucket")
+	key := routeParam(ctx, "key")
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		entry, err := client.GetKVEntry(c, bucket, key)
 		if err != nil {
 			return nil, fasthttp.StatusNotFound, err
@@ -313,19 +282,19 @@ type kvPutRequest struct {
 }
 
 func (h *Handler) PutKVEntry(ctx *fasthttp.RequestCtx) {
-	bucket := param(ctx, "bucket")
-	key := param(ctx, "key")
+	bucket := routeParam(ctx, "bucket")
+	key := routeParam(ctx, "key")
 	var req kvPutRequest
-	if err := sonic.Unmarshal(ctx.PostBody(), &req); err != nil {
-		writeError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.UnmarshalRequest(ctx.PostBody(), &req); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	value, err := base64.StdEncoding.DecodeString(req.Value)
 	if err != nil {
-		writeError(ctx, fasthttp.StatusBadRequest, err)
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		entry, err := client.PutKVEntry(c, bucket, key, value)
 		if err != nil {
 			return nil, fasthttp.StatusBadRequest, err
@@ -335,46 +304,46 @@ func (h *Handler) PutKVEntry(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) DeleteKVEntry(ctx *fasthttp.RequestCtx) {
-	bucket := param(ctx, "bucket")
-	key := param(ctx, "key")
-	h.natsVoid(ctx, func(c context.Context, client *natsclient.Client) error {
+	bucket := routeParam(ctx, "bucket")
+	key := routeParam(ctx, "key")
+	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
 		return client.DeleteKVEntry(c, bucket, key)
 	}, fasthttp.StatusBadRequest)
 }
 
 func (h *Handler) KVHistory(ctx *fasthttp.RequestCtx) {
-	bucket := param(ctx, "bucket")
-	key := param(ctx, "key")
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	bucket := routeParam(ctx, "bucket")
+	key := routeParam(ctx, "key")
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		entries, err := client.KVHistory(c, bucket, key)
 		if err != nil {
 			return nil, fasthttp.StatusNotFound, err
 		}
-		return map[string]any{"entries": entries, "total": len(entries)}, fasthttp.StatusOK, nil
+		return KVHistoryResponse{Entries: nonNilSlice(entries), Total: len(entries)}, fasthttp.StatusOK, nil
 	})
 }
 
 func (h *Handler) ListObjectBuckets(ctx *fasthttp.RequestCtx) {
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		buckets, err := client.ListObjectBuckets(c)
 		if err != nil {
 			return nil, 0, err
 		}
-		return map[string]any{"buckets": buckets, "total": len(buckets)}, fasthttp.StatusOK, nil
+		return ObjectBucketsListResponse{Buckets: nonNilSlice(buckets), Total: len(buckets)}, fasthttp.StatusOK, nil
 	})
 }
 
 func (h *Handler) CreateObjectBucket(ctx *fasthttp.RequestCtx) {
 	var cfg nats.ObjectStoreConfig
-	if err := sonic.Unmarshal(ctx.PostBody(), &cfg); err != nil {
-		writeError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.UnmarshalNATSRequest(ctx.PostBody(), &cfg); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	if cfg.Bucket == "" {
-		writeError(ctx, fasthttp.StatusBadRequest, errMissing("bucket"))
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("bucket"))
 		return
 	}
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.CreateObjectBucket(c, &cfg)
 		if err != nil {
 			return nil, fasthttp.StatusBadRequest, err
@@ -384,8 +353,8 @@ func (h *Handler) CreateObjectBucket(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) GetObjectBucket(ctx *fasthttp.RequestCtx) {
-	bucket := param(ctx, "bucket")
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	bucket := routeParam(ctx, "bucket")
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.GetObjectBucket(c, bucket)
 		if err != nil {
 			return nil, fasthttp.StatusNotFound, err
@@ -395,27 +364,28 @@ func (h *Handler) GetObjectBucket(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) DeleteObjectBucket(ctx *fasthttp.RequestCtx) {
-	bucket := param(ctx, "bucket")
-	h.natsVoid(ctx, func(c context.Context, client *natsclient.Client) error {
+	bucket := routeParam(ctx, "bucket")
+	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
 		return client.DeleteObjectBucket(c, bucket)
 	}, fasthttp.StatusBadRequest)
 }
 
 func (h *Handler) ListObjects(ctx *fasthttp.RequestCtx) {
-	bucket := param(ctx, "bucket")
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
-		objects, err := client.ListObjects(c, bucket)
+	bucket := routeParam(ctx, "bucket")
+	offset, limit := parsePaginationParams(ctx, h.cfg)
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
+		objects, total, err := client.ListObjects(c, bucket, offset, limit)
 		if err != nil {
 			return nil, fasthttp.StatusNotFound, err
 		}
-		return map[string]any{"objects": objects, "total": len(objects)}, fasthttp.StatusOK, nil
+		return newObjectsListResponse(objects, total, offset, limit), fasthttp.StatusOK, nil
 	})
 }
 
 func (h *Handler) GetObject(ctx *fasthttp.RequestCtx) {
-	bucket := param(ctx, "bucket")
-	name := param(ctx, "objectName")
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	bucket := routeParam(ctx, "bucket")
+	name := routeParam(ctx, "objectName")
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.GetObject(c, bucket, name)
 		if err != nil {
 			return nil, fasthttp.StatusNotFound, err
@@ -429,19 +399,19 @@ type objectPutRequest struct {
 }
 
 func (h *Handler) PutObject(ctx *fasthttp.RequestCtx) {
-	bucket := param(ctx, "bucket")
-	name := param(ctx, "objectName")
+	bucket := routeParam(ctx, "bucket")
+	name := routeParam(ctx, "objectName")
 	var req objectPutRequest
-	if err := sonic.Unmarshal(ctx.PostBody(), &req); err != nil {
-		writeError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.UnmarshalRequest(ctx.PostBody(), &req); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	data, err := base64.StdEncoding.DecodeString(req.Data)
 	if err != nil {
-		writeError(ctx, fasthttp.StatusBadRequest, err)
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	h.natsAction(ctx, func(c context.Context, client *natsclient.Client) (any, int, error) {
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.PutObject(c, bucket, name, data)
 		if err != nil {
 			return nil, fasthttp.StatusBadRequest, err
@@ -451,74 +421,77 @@ func (h *Handler) PutObject(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) DeleteObject(ctx *fasthttp.RequestCtx) {
-	bucket := param(ctx, "bucket")
-	name := param(ctx, "objectName")
-	h.natsVoid(ctx, func(c context.Context, client *natsclient.Client) error {
+	bucket := routeParam(ctx, "bucket")
+	name := routeParam(ctx, "objectName")
+	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
 		return client.DeleteObject(c, bucket, name)
 	}, fasthttp.StatusBadRequest)
 }
 
-func (h *Handler) natsAction(ctx *fasthttp.RequestCtx, fn func(context.Context, *natsclient.Client) (any, int, error)) {
-	client, err := h.nats.Get(requestContext(ctx), clusterID(ctx))
+func (h *Handler) natsAction(ctx *fasthttp.RequestCtx, fn func(context.Context, port.JetStreamExecutor) (any, int, error)) {
+	c := requestContext(ctx)
+	var (
+		result any
+		status int
+	)
+	err := h.svc.JetStream.WithExecutor(c, clusterID(ctx), func(client port.JetStreamExecutor) error {
+		var actionErr error
+		result, status, actionErr = fn(c, client)
+		return actionErr
+	})
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeStoreError(ctx, err)
+		if errors.Is(err, domain.ErrNotFound) {
+			writeDomainError(ctx, err)
 			return
 		}
-		writeError(ctx, fasthttp.StatusBadGateway, err)
-		return
-	}
-
-	result, status, err := fn(requestContext(ctx), client)
-	if err != nil {
 		if status == 0 {
 			status = fasthttp.StatusBadGateway
 		}
-		writeError(ctx, status, err)
+		serializer.WriteError(ctx, status, err)
 		return
 	}
 	if status == 0 {
 		status = fasthttp.StatusOK
 	}
-	writeJSON(ctx, status, result)
+	serializer.WriteJSON(ctx, status, result)
 }
 
-func (h *Handler) natsVoid(ctx *fasthttp.RequestCtx, fn func(context.Context, *natsclient.Client) error, badStatus int) {
-	client, err := h.nats.Get(requestContext(ctx), clusterID(ctx))
+func (h *Handler) natsVoid(ctx *fasthttp.RequestCtx, fn func(context.Context, port.JetStreamExecutor) error, badStatus int) {
+	c := requestContext(ctx)
+	err := h.svc.JetStream.WithExecutor(c, clusterID(ctx), func(client port.JetStreamExecutor) error {
+		return fn(c, client)
+	})
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeStoreError(ctx, err)
+		if errors.Is(err, domain.ErrNotFound) {
+			writeDomainError(ctx, err)
 			return
 		}
-		writeError(ctx, fasthttp.StatusBadGateway, err)
-		return
-	}
-	if err := fn(requestContext(ctx), client); err != nil {
-		writeError(ctx, badStatus, err)
+		serializer.WriteError(ctx, badStatus, err)
 		return
 	}
 	ctx.SetStatusCode(fasthttp.StatusNoContent)
 }
 
 func (h *Handler) natsRaw(ctx *fasthttp.RequestCtx, path string) {
-	client, err := h.nats.Get(requestContext(ctx), clusterID(ctx))
+	c := requestContext(ctx)
+	client, err := h.svc.JetStream.GetExecutor(c, clusterID(ctx))
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeStoreError(ctx, err)
+		if errors.Is(err, domain.ErrNotFound) {
+			writeDomainError(ctx, err)
 			return
 		}
-		writeError(ctx, fasthttp.StatusBadGateway, err)
+		serializer.WriteError(ctx, fasthttp.StatusBadGateway, err)
 		return
 	}
-	data, err := client.Monitoring(requestContext(ctx), path)
+	data, err := client.Monitoring(c, path)
 	if err != nil {
-		writeError(ctx, fasthttp.StatusBadGateway, err)
+		serializer.WriteError(ctx, fasthttp.StatusBadGateway, err)
 		return
 	}
-	writeRawJSON(ctx, data)
+	serializer.WriteRawJSON(ctx, data)
 }
 
-func param(ctx *fasthttp.RequestCtx, key string) string {
+func routeParam(ctx *fasthttp.RequestCtx, key string) string {
 	value, ok := ctx.UserValue(key).(string)
 	if !ok {
 		return ""
@@ -531,27 +504,6 @@ func requestContext(ctx *fasthttp.RequestCtx) context.Context {
 		return c
 	}
 	return context.Background()
-}
-
-func writeJSON(ctx *fasthttp.RequestCtx, status int, v any) {
-	data, err := sonic.Marshal(v)
-	if err != nil {
-		writeError(ctx, fasthttp.StatusInternalServerError, err)
-		return
-	}
-	ctx.SetStatusCode(status)
-	ctx.SetContentType("application/json")
-	ctx.SetBody(data)
-}
-
-func writeRawJSON(ctx *fasthttp.RequestCtx, data []byte) {
-	ctx.SetStatusCode(fasthttp.StatusOK)
-	ctx.SetContentType("application/json")
-	ctx.SetBody(data)
-}
-
-func writeError(ctx *fasthttp.RequestCtx, status int, err error) {
-	writeJSON(ctx, status, map[string]string{"error": err.Error()})
 }
 
 type missingFieldError string

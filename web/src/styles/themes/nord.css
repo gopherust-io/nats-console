@@ -1,0 +1,34 @@
+[data-theme="nord"] {
+  color-scheme: dark;
+  --bg-body: #2e3440;
+  --bg-gradient: radial-gradient(ellipse 80% 60% at 50% -10%, #434c5e 0%, transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 100%, #3b4252 0%, transparent 50%), #2e3440;
+  --bg-sidebar: rgba(46, 52, 64, 0.95);
+  --bg-card: rgba(59, 66, 82, 0.9);
+  --bg-input: rgba(46, 52, 64, 0.8);
+  --bg-table-hover: rgba(136, 192, 208, 0.08);
+  --bg-nav-active: rgba(136, 192, 208, 0.15);
+  --bg-badge: rgba(136, 192, 208, 0.12);
+  --bg-btn-secondary: rgba(216, 222, 233, 0.1);
+  --text-primary: #eceff4;
+  --text-secondary: #d8dee9;
+  --text-muted: #81a1c1;
+  --border: rgba(216, 222, 233, 0.12);
+  --border-subtle: rgba(216, 222, 233, 0.06);
+  --accent: #88c0d0;
+  --accent-hover: #5e81ac;
+  --accent-text: #2e3440;
+  --danger: #bf616a;
+  --danger-hover: #a54e56;
+  --success: #a3be8c;
+  --success-bg: rgba(163, 190, 140, 0.15);
+  --success-text: #a3be8c;
+  --warning-bg: rgba(235, 203, 139, 0.15);
+  --warning-text: #ebcb8b;
+  --error: #bf616a;
+  --error-bg: rgba(191, 97, 106, 0.15);
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* ── Dracula ── */

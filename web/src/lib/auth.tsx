@@ -1,24 +1,34 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { api, clearAuth, getAuthHeader, setAuth } from "./api";
+import { api, AccessRules, clearAuth, setAuth } from "./api";
 
 export type AuthUser = {
   id?: string;
   username: string;
   email?: string;
   roles: string[];
+  isRoot?: boolean;
+  accessRules?: AccessRules;
+};
+
+export type SSOProvider = {
+  id: string;
+  name: string;
 };
 
 type AuthContextValue = {
   user: AuthUser | null;
   loading: boolean;
   oidcEnabled: boolean;
+  oidcProviders: SSOProvider[];
   basicEnabled: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   reload: () => Promise<void>;
   canWrite: boolean;
   isAdmin: boolean;
-  isViewer: boolean;
+  isRoot: boolean;
+  canManageUsers: boolean;
+  canViewAudit: boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -31,23 +41,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [oidcEnabled, setOidcEnabled] = useState(false);
+  const [oidcProviders, setOidcProviders] = useState<SSOProvider[]>([]);
   const [basicEnabled, setBasicEnabled] = useState(true);
 
   const reload = useCallback(async () => {
     let authEnabled = true;
     try {
-      const config = await api<{ oidc_enabled: boolean; basic_enabled: boolean; auth_enabled: boolean }>(
-        "/api/v1/auth/config",
-      );
-      setOidcEnabled(config.oidc_enabled);
-      setBasicEnabled(config.basic_enabled);
-      authEnabled = config.auth_enabled;
+      const config = await api<{
+        oidcEnabled: boolean;
+        oidcProviders: SSOProvider[];
+        basicEnabled: boolean;
+        authEnabled: boolean;
+      }>("/api/v1/auth/config");
+      setOidcEnabled(config.oidcEnabled);
+      setOidcProviders(config.oidcProviders ?? []);
+      setBasicEnabled(config.basicEnabled);
+      authEnabled = config.authEnabled;
       if (!authEnabled) {
-        setUser({ username: "dev", roles: ["admin"] });
+        setUser({ username: "dev", roles: ["admin"], isRoot: true });
         return;
       }
     } catch {
       setOidcEnabled(false);
+      setOidcProviders([]);
       setBasicEnabled(true);
     }
 
@@ -87,22 +103,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
-  const roles = user?.roles ?? [];
-  const value = useMemo<AuthContextValue>(
-    () => ({
+  const value = useMemo<AuthContextValue>(() => {
+    const roles = user?.roles ?? [];
+    const isRoot = Boolean(user?.isRoot);
+    const rules = user?.accessRules;
+    const legacyAdmin = hasRole(roles, "admin") && !rules;
+    const canManageUsers = isRoot || rules?.manageUsers === true || legacyAdmin;
+    const canViewAudit = isRoot || rules?.viewAudit === true || legacyAdmin;
+    return {
       user,
       loading,
       oidcEnabled,
+      oidcProviders,
       basicEnabled,
       login,
       logout,
       reload,
-      canWrite: hasRole(roles, "admin") || hasRole(roles, "operator"),
+      canWrite: isRoot || hasRole(roles, "admin") || hasRole(roles, "operator"),
       isAdmin: hasRole(roles, "admin"),
-      isViewer: roles.length > 0 && !hasRole(roles, "admin") && !hasRole(roles, "operator"),
-    }),
-    [user, loading, oidcEnabled, basicEnabled, login, logout, reload, roles],
-  );
+      isRoot,
+      canManageUsers,
+      canViewAudit,
+    };
+  }, [user, loading, oidcEnabled, oidcProviders, basicEnabled, login, logout, reload]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -1,100 +1,196 @@
 import { FormEvent, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import Alert from "../components/ui/Alert";
+import EmptyState from "../components/ui/EmptyState";
+import PageHeader from "../components/ui/PageHeader";
 import { api, AuditEntry } from "../lib/api";
 import { useCluster } from "../lib/cluster";
+import { AUDIT_PAGE_LIMIT } from "../lib/constants";
+
+type AuditListResponse = {
+  entries: AuditEntry[];
+  total: number;
+};
+
+function formatClusterId(clusterId: string) {
+  if (!clusterId) return "—";
+  if (clusterId.length <= 13) return clusterId;
+  return `${clusterId.slice(0, 8)}…${clusterId.slice(-4)}`;
+}
+
+function formatResource(entry: AuditEntry) {
+  if (!entry.resourceType) return "—";
+  if (!entry.resourceName) return entry.resourceType;
+  return `${entry.resourceType} / ${entry.resourceName}`;
+}
 
 export default function AuditPage() {
   const { clusterId } = useCluster();
-  const [entries, setEntries] = useState<AuditEntry[]>([]);
-  const [total, setTotal] = useState(0);
-  const [error, setError] = useState("");
-  const [filterCluster, setFilterCluster] = useState("");
-  const [expanded, setExpanded] = useState<string | null>(null);
-
-  async function load() {
-    setError("");
-    try {
-      const params = new URLSearchParams({ limit: "100" });
-      const cluster = filterCluster || clusterId || "";
-      if (cluster) params.set("cluster_id", cluster);
-      const data = await api<{ entries: AuditEntry[]; total: number }>(`/api/v1/audit?${params}`);
-      setEntries(data.entries);
-      setTotal(data.total);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load audit log");
-    }
-  }
+  const [filterInput, setFilterInput] = useState("");
+  const [appliedClusterFilter, setAppliedClusterFilter] = useState("");
+  const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
 
   useEffect(() => {
-    setFilterCluster(clusterId ?? "");
+    const initial = clusterId ?? "";
+    setFilterInput(initial);
+    setAppliedClusterFilter(initial);
   }, [clusterId]);
 
-  useEffect(() => {
-    load();
-  }, [filterCluster]);
+  const auditQuery = useQuery({
+    queryKey: ["audit", appliedClusterFilter, AUDIT_PAGE_LIMIT],
+    queryFn: async () => {
+      const params = new URLSearchParams({ limit: String(AUDIT_PAGE_LIMIT) });
+      if (appliedClusterFilter) params.set("clusterId", appliedClusterFilter);
+      return api<AuditListResponse>(`/api/v1/audit?${params}`);
+    },
+  });
+
+  const entries = auditQuery.data?.entries ?? [];
+  const total = auditQuery.data?.total ?? 0;
+  const error = auditQuery.error instanceof Error ? auditQuery.error.message : "";
 
   function onFilter(event: FormEvent) {
     event.preventDefault();
-    load();
+    setAppliedClusterFilter(filterInput.trim());
+    setExpandedEntryId(null);
+  }
+
+  function toggleDetails(entryId: string) {
+    setExpandedEntryId((current) => (current === entryId ? null : entryId));
   }
 
   return (
-    <div>
-      <div className="page-header">
-        <h1>Audit Log</h1>
-      </div>
+    <div className="page">
+      <PageHeader
+        eyebrow="Administration"
+        title="Audit Log"
+        subtitle="Review operator actions across clusters — who did what, when, and from where."
+        badge={<span className="badge">{total} entries</span>}
+        actions={
+          <button
+            className="btn btn--secondary"
+            type="button"
+            onClick={() => auditQuery.refetch()}
+            disabled={auditQuery.isFetching}
+          >
+            Refresh
+          </button>
+        }
+      />
 
-      {error && <div className="error">{error}</div>}
+      <Alert variant="error">{error}</Alert>
 
-      <form className="form-grid card mb-24" onSubmit={onFilter} style={{ gridTemplateColumns: "1fr auto" }}>
-        <label>
-          Cluster ID filter
-          <input value={filterCluster} onChange={(e) => setFilterCluster(e.target.value)} placeholder="Optional cluster UUID" />
+      <form className="audit-toolbar panel" onSubmit={onFilter}>
+        <label className="audit-toolbar__field">
+          <span className="audit-toolbar__label">Cluster ID filter</span>
+          <input
+            value={filterInput}
+            onChange={(event) => setFilterInput(event.target.value)}
+            placeholder="Optional cluster UUID"
+            aria-label="Cluster ID filter"
+          />
         </label>
-        <button className="btn" type="submit" style={{ alignSelf: "end" }}>
-          Refresh
+        <button className="btn" type="submit">
+          Apply filter
         </button>
       </form>
 
-      <div className="card">
-        <div className="muted mb-16">{total} entries</div>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Actor</th>
-              <th>Action</th>
-              <th>Cluster</th>
-              <th>Resource</th>
-              <th>IP</th>
-              <th>Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <tr key={entry.id}>
-                <td>{new Date(entry.timestamp).toLocaleString()}</td>
-                <td>{entry.actor || "—"}</td>
-                <td>{entry.action}</td>
-                <td className="mono">{entry.cluster_id ? entry.cluster_id.slice(0, 8) : "—"}</td>
-                <td>
-                  {entry.resource_type}
-                  {entry.resource_name ? ` / ${entry.resource_name}` : ""}
-                </td>
-                <td>{entry.ip || "—"}</td>
-                <td>
-                  <button className="btn btn--secondary btn--small" type="button" onClick={() => setExpanded(expanded === entry.id ? null : entry.id)}>
-                    {expanded === entry.id ? "Hide" : "Show"}
-                  </button>
-                  {expanded === entry.id && (
-                    <pre className="code-block mt-8">{JSON.stringify(entry.details, null, 2)}</pre>
+      {auditQuery.isLoading && <div className="skeleton skeleton--table" />}
+
+      {!auditQuery.isLoading && !auditQuery.isError && entries.length === 0 && (
+        <EmptyState
+          title="No audit entries yet"
+          description="Actions such as stream creation, login events, and assistant requests will appear here."
+        />
+      )}
+
+      {!auditQuery.isLoading && entries.length > 0 && (
+        <div className="table-wrap audit-table">
+          <div className="audit-table__header" role="row">
+            <div className="audit-table__cell audit-table__cell--time" role="columnheader">
+              Time
+            </div>
+            <div className="audit-table__cell" role="columnheader">
+              Actor
+            </div>
+            <div className="audit-table__cell audit-table__cell--action" role="columnheader">
+              Action
+            </div>
+            <div className="audit-table__cell audit-table__cell--cluster" role="columnheader">
+              Cluster
+            </div>
+            <div className="audit-table__cell audit-table__cell--resource" role="columnheader">
+              Resource
+            </div>
+            <div className="audit-table__cell audit-table__cell--ip" role="columnheader">
+              IP
+            </div>
+            <div className="audit-table__cell audit-table__cell--details" role="columnheader">
+              Details
+            </div>
+          </div>
+
+          <div className="audit-table__body">
+            {entries.map((entry) => {
+              const isExpanded = expandedEntryId === entry.id;
+              return (
+                <article key={entry.id} className={`audit-entry${isExpanded ? " audit-entry--expanded" : ""}`}>
+                  <div className="audit-entry__row" role="row">
+                    <div className="audit-table__cell audit-table__cell--time" role="cell">
+                      <time dateTime={entry.timestamp}>{new Date(entry.timestamp).toLocaleString()}</time>
+                    </div>
+                    <div className="audit-table__cell" role="cell">
+                      {entry.actor || "—"}
+                    </div>
+                    <div className="audit-table__cell audit-table__cell--action" role="cell">
+                      <span className="audit-action">{entry.action}</span>
+                    </div>
+                    <div className="audit-table__cell audit-table__cell--cluster" role="cell">
+                      {entry.clusterId ? (
+                        <span className="mono virtual-table__truncate" title={entry.clusterId}>
+                          {formatClusterId(entry.clusterId)}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </div>
+                    <div className="audit-table__cell audit-table__cell--resource" role="cell">
+                      <span className="virtual-table__truncate" title={formatResource(entry)}>
+                        {formatResource(entry)}
+                      </span>
+                    </div>
+                    <div className="audit-table__cell audit-table__cell--ip" role="cell">
+                      <span className="mono">{entry.ip || "—"}</span>
+                    </div>
+                    <div className="audit-table__cell audit-table__cell--details" role="cell">
+                      <button
+                        className="btn btn--ghost btn--small"
+                        type="button"
+                        aria-expanded={isExpanded}
+                        onClick={() => toggleDetails(entry.id)}
+                      >
+                        {isExpanded ? "Hide" : "Show"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="audit-entry__details">
+                      <div className="audit-entry__details-head">
+                        <span className="audit-entry__details-label">Request details</span>
+                        {entry.requestId && (
+                          <span className="audit-entry__request-id mono">req {entry.requestId}</span>
+                        )}
+                      </div>
+                      <pre className="audit-entry__json mono">{JSON.stringify(entry.details, null, 2)}</pre>
+                    </div>
                   )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {entries.length === 0 && <div className="muted">No audit entries yet.</div>}
-      </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

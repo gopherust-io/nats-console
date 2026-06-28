@@ -1,0 +1,34 @@
+[data-theme="rosepine"] {
+  color-scheme: dark;
+  --bg-body: #191724;
+  --bg-gradient: radial-gradient(ellipse 80% 60% at 50% -10%, #1f1d2e 0%, transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 100%, #12101a 0%, transparent 50%), #191724;
+  --bg-sidebar: rgba(18, 16, 26, 0.95);
+  --bg-card: rgba(31, 29, 46, 0.9);
+  --bg-input: rgba(18, 16, 26, 0.8);
+  --bg-table-hover: rgba(235, 111, 146, 0.08);
+  --bg-nav-active: rgba(235, 111, 146, 0.15);
+  --bg-badge: rgba(235, 111, 146, 0.12);
+  --bg-btn-secondary: rgba(224, 222, 244, 0.08);
+  --text-primary: #e0def4;
+  --text-secondary: #908caa;
+  --text-muted: #6e6a86;
+  --border: rgba(224, 222, 244, 0.1);
+  --border-subtle: rgba(224, 222, 244, 0.05);
+  --accent: #eb6f92;
+  --accent-hover: #c4a7e7;
+  --accent-text: #191724;
+  --danger: #eb6f92;
+  --danger-hover: #d45a7a;
+  --success: #9ccfd8;
+  --success-bg: rgba(156, 207, 216, 0.12);
+  --success-text: #9ccfd8;
+  --warning-bg: rgba(246, 193, 119, 0.12);
+  --warning-text: #f6c177;
+  --error: #eb6f92;
+  --error-bg: rgba(235, 111, 146, 0.12);
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+/* ── Rosé Pine Dawn ── */

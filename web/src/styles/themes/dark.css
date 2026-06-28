@@ -1,0 +1,34 @@
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-body: #0b1220;
+  --bg-gradient: radial-gradient(ellipse 80% 60% at 50% -10%, #1e3a8a 0%, transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 100%, #172554 0%, transparent 50%), #0b1220;
+  --bg-sidebar: rgba(15, 23, 42, 0.92);
+  --bg-card: rgba(15, 23, 42, 0.85);
+  --bg-input: rgba(2, 6, 23, 0.7);
+  --bg-table-hover: rgba(59, 130, 246, 0.06);
+  --bg-nav-active: rgba(59, 130, 246, 0.18);
+  --bg-badge: rgba(59, 130, 246, 0.15);
+  --bg-btn-secondary: rgba(148, 163, 184, 0.12);
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --border: rgba(148, 163, 184, 0.14);
+  --border-subtle: rgba(148, 163, 184, 0.08);
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-text: #ffffff;
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --success: #22c55e;
+  --success-bg: rgba(34, 197, 94, 0.15);
+  --success-text: #86efac;
+  --warning-bg: rgba(234, 179, 8, 0.15);
+  --warning-text: #fde047;
+  --error: #fca5a5;
+  --error-bg: rgba(239, 68, 68, 0.15);
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* ── Light ── */

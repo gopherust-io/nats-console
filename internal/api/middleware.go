@@ -4,13 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"log/slog"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/bytedance/sonic"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
@@ -18,18 +17,28 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/audit"
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/log"
 	"github.com/gopherust-io/nats-consol/internal/metrics"
 	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 )
 
 const requestIDKey = "request_id"
+
+func isAPIPath(path string) bool {
+	return strings.HasPrefix(path, "/api/")
+}
+
+func requiresAuth(path string) bool {
+	return isAPIPath(path) && !isPublicPath(path)
+}
 
 type middleware func(fasthttp.RequestHandler) fasthttp.RequestHandler
 
 func chain(mws ...middleware) middleware {
 	return func(final fasthttp.RequestHandler) fasthttp.RequestHandler {
-		for i := len(mws) - 1; i >= 0; i-- {
-			final = mws[i](final)
+		for _, v := range slices.Backward(mws) {
+			final = v(final)
 		}
 		return final
 	}
@@ -52,6 +61,10 @@ func requestIDMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 func timeoutMiddleware(timeout time.Duration) middleware {
 	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(ctx *fasthttp.RequestCtx) {
+			if isLongRunningProfilePath(string(ctx.Path())) {
+				next(ctx)
+				return
+			}
 			c, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 			ctx.SetUserValue("context", c)
@@ -60,22 +73,32 @@ func timeoutMiddleware(timeout time.Duration) middleware {
 	}
 }
 
-func slogMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
+func requestLogMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
+		path := string(ctx.Path())
+		if !isAPIPath(path) {
+			next(ctx)
+			return
+		}
 		start := time.Now()
 		next(ctx)
-		slog.Info("request",
-			"method", string(ctx.Method()),
-			"path", string(ctx.Path()),
-			"status", ctx.Response.StatusCode(),
-			"duration_ms", time.Since(start).Milliseconds(),
-			"request_id", requestID(ctx),
-		)
+		log.Info().
+			Str("component", "http").
+			Str("method", string(ctx.Method())).
+			Str("path", path).
+			Int("status", ctx.Response.StatusCode()).
+			Int64("duration_ms", time.Since(start).Milliseconds()).
+			Str("request_id", requestID(ctx)).
+			Msg("request")
 	}
 }
 
 func metricsMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
+		if !isAPIPath(string(ctx.Path())) {
+			next(ctx)
+			return
+		}
 		start := time.Now()
 		next(ctx)
 		metrics.ObserveHTTP(string(ctx.Method()), routeLabel(ctx), ctx.Response.StatusCode(), time.Since(start))
@@ -91,30 +114,31 @@ func routeLabel(ctx *fasthttp.RequestCtx) string {
 }
 
 func corsMiddleware(cfg config.Config) middleware {
-	origins := cfg.CORSOrigins()
+	allowed := make(map[string]struct{}, len(cfg.CORSOrigins()))
+	for _, origin := range cfg.CORSOrigins() {
+		allowed[origin] = struct{}{}
+	}
 	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(ctx *fasthttp.RequestCtx) {
 			origin := string(ctx.Request.Header.Peek("Origin"))
-			if len(origins) == 0 {
-				if origin != "" {
+			if origin != "" {
+				if _, ok := allowed[origin]; ok {
 					ctx.Response.Header.Set("Access-Control-Allow-Origin", origin)
+					ctx.Response.Header.Set("Access-Control-Allow-Credentials", "true")
 					ctx.Response.Header.Set("Vary", "Origin")
-				}
-			} else {
-				for _, allowed := range origins {
-					if origin == allowed {
-						ctx.Response.Header.Set("Access-Control-Allow-Origin", origin)
-						ctx.Response.Header.Set("Access-Control-Allow-Credentials", "true")
-						ctx.Response.Header.Set("Vary", "Origin")
-						break
-					}
 				}
 			}
 			ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			ctx.Response.Header.Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-Request-ID")
+			ctx.Response.Header.Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-Request-ID, X-CSRF-Token")
 
 			if ctx.IsOptions() {
-				ctx.SetStatusCode(fasthttp.StatusNoContent)
+				if origin != "" {
+					if _, ok := allowed[origin]; ok {
+						ctx.SetStatusCode(fasthttp.StatusNoContent)
+						return
+					}
+				}
+				ctx.SetStatusCode(fasthttp.StatusForbidden)
 				return
 			}
 			next(ctx)
@@ -126,17 +150,28 @@ func authMiddleware(cfg config.Config, authSvc *auth.Service) middleware {
 	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(ctx *fasthttp.RequestCtx) {
 			path := string(ctx.Path())
-			if isPublicPath(path) {
+			if !requiresAuth(path) {
 				next(ctx)
 				return
 			}
 
 			user, ok := authenticate(ctx, authSvc)
 			if !ok {
-				ctx.Response.Header.Set("WWW-Authenticate", `Basic realm="nats-consol"`)
 				ctx.SetStatusCode(fasthttp.StatusUnauthorized)
-				ctx.SetBodyString("unauthorized")
+				ctx.SetContentType("application/json")
+				ctx.SetBodyString(`{"error":"unauthorized"}`)
 				return
+			}
+
+			if user.ID != "" {
+				loaded, err := authSvc.LoadUser(requestContext(ctx), user.ID)
+				if err != nil {
+					ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+					ctx.SetContentType("application/json")
+					ctx.SetBodyString(`{"error":"unauthorized"}`)
+					return
+				}
+				user = loaded
 			}
 
 			c := requestContext(ctx)
@@ -150,7 +185,7 @@ func authMiddleware(cfg config.Config, authSvc *auth.Service) middleware {
 func rbacMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
 		path := string(ctx.Path())
-		if isPublicPath(path) {
+		if !requiresAuth(path) {
 			next(ctx)
 			return
 		}
@@ -161,39 +196,66 @@ func rbacMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 			ctx.SetStatusCode(fasthttp.StatusUnauthorized)
 			return
 		}
-		role := store.HighestRole(user.Roles)
 		method := string(ctx.Method())
 
 		if method == fasthttp.MethodGet || method == fasthttp.MethodHead || method == fasthttp.MethodOptions {
+			if strings.HasPrefix(path, "/api/v1/audit") && !auth.CanViewAudit(user) {
+				ctx.SetStatusCode(fasthttp.StatusForbidden)
+				ctx.SetBodyString("forbidden")
+				return
+			}
+			if strings.HasPrefix(path, "/api/v1/users") && !auth.CanManageUsers(user) {
+				ctx.SetStatusCode(fasthttp.StatusForbidden)
+				ctx.SetBodyString("forbidden")
+				return
+			}
+			if strings.HasPrefix(path, "/api/v1/pprof") && !auth.CanViewProfiling(user) {
+				ctx.SetStatusCode(fasthttp.StatusForbidden)
+				ctx.SetBodyString("forbidden")
+				return
+			}
+			if clusterID := clusterIDFromPath(path); clusterID != "" && !auth.CanAccessCluster(user, clusterID) {
+				ctx.SetStatusCode(fasthttp.StatusForbidden)
+				ctx.SetBodyString("forbidden")
+				return
+			}
 			next(ctx)
 			return
 		}
 
-		if role == store.RoleViewer {
+		if !auth.CanWrite(user) {
 			ctx.SetStatusCode(fasthttp.StatusForbidden)
 			ctx.SetBodyString("forbidden")
 			return
 		}
 
 		if method == fasthttp.MethodDelete && strings.HasPrefix(path, "/api/v1/clusters/") && !strings.Contains(strings.TrimPrefix(path, "/api/v1/clusters/"), "/") {
-			if !auth.CanDeleteCluster(role) {
+			if !auth.CanDeleteCluster(user) {
 				ctx.SetStatusCode(fasthttp.StatusForbidden)
 				ctx.SetBodyString("forbidden")
 				return
 			}
 		}
 
-		if strings.HasPrefix(path, "/api/v1/users") || strings.HasPrefix(path, "/api/v1/audit") {
-			if !auth.CanManageUsers(role) && strings.HasPrefix(path, "/api/v1/users") {
+		if strings.HasPrefix(path, "/api/v1/users") {
+			if !auth.CanManageUsers(user) {
 				ctx.SetStatusCode(fasthttp.StatusForbidden)
 				ctx.SetBodyString("forbidden")
 				return
 			}
-			if !auth.CanViewAudit(role) && strings.HasPrefix(path, "/api/v1/audit") {
+		}
+		if strings.HasPrefix(path, "/api/v1/audit") {
+			if !auth.CanViewAudit(user) {
 				ctx.SetStatusCode(fasthttp.StatusForbidden)
 				ctx.SetBodyString("forbidden")
 				return
 			}
+		}
+
+		if clusterID := clusterIDFromPath(path); clusterID != "" && !auth.CanAccessCluster(user, clusterID) {
+			ctx.SetStatusCode(fasthttp.StatusForbidden)
+			ctx.SetBodyString("forbidden")
+			return
 		}
 
 		next(ctx)
@@ -219,10 +281,10 @@ func auditMiddleware(auditWriter *audit.Writer) middleware {
 			c := requestContext(ctx)
 			user, _ := auth.UserFromContext(c)
 			resourceType, resourceName := audit.ParseResource(path)
-			details := map[string]any{
-				"method": method,
-				"path":   path,
-				"status": ctx.Response.StatusCode(),
+			details := store.AuditRequestDetails{
+				Method: method,
+				Path:   path,
+				Status: ctx.Response.StatusCode(),
 			}
 
 			auditWriter.Log(c, store.AuditCreate{
@@ -275,13 +337,12 @@ func authenticate(ctx *fasthttp.RequestCtx, authSvc *auth.Service) (store.User, 
 
 func isPublicPath(path string) bool {
 	switch path {
-	case "/api/health", "/metrics", "/api/openapi.yaml":
+	case "/api/health", "/metrics", "/api/openapi.yaml",
+		"/api/v1/auth/config", "/api/v1/auth/login", "/api/v1/auth/logout":
 		return true
+	default:
+		return strings.HasPrefix(path, "/api/v1/auth/oidc/")
 	}
-	if strings.HasPrefix(path, "/api/v1/auth/") {
-		return true
-	}
-	return false
 }
 
 func requestID(ctx *fasthttp.RequestCtx) string {
@@ -301,15 +362,14 @@ func clientIP(ctx *fasthttp.RequestCtx) string {
 	return ctx.RemoteIP().String()
 }
 
-func metricsHandler(ctx *fasthttp.RequestCtx) {
-	fasthttpadaptor.NewFastHTTPHandler(promhttp.Handler())(ctx)
-}
+var promMetricsHandler = fasthttpadaptor.NewFastHTTPHandler(promhttp.Handler())
 
 func openapiHandler(path string) fasthttp.RequestHandler {
-	data, err := os.ReadFile(path)
+	// Path comes from server config (OPENAPI_PATH), not user input.
+	data, err := os.ReadFile(path) //nolint:gosec // G304: trusted config path
 	if err != nil {
 		return func(ctx *fasthttp.RequestCtx) {
-			writeError(ctx, fasthttp.StatusNotFound, err)
+			serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
 		}
 	}
 	return func(ctx *fasthttp.RequestCtx) {
@@ -320,14 +380,9 @@ func openapiHandler(path string) fasthttp.RequestHandler {
 }
 
 func writeUserJSON(ctx *fasthttp.RequestCtx, status int, user store.User) {
-	writeJSON(ctx, status, map[string]any{
-		"id":       user.ID,
-		"username": user.Username,
-		"email":    user.Email,
-		"roles":    user.Roles,
-	})
+	serializer.WriteJSON(ctx, status, toUserResponse(user))
 }
 
 func parseJSONBody(ctx *fasthttp.RequestCtx, v any) error {
-	return sonic.Unmarshal(ctx.PostBody(), v)
+	return serializer.UnmarshalRequest(ctx.PostBody(), v)
 }

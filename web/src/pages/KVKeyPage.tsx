@@ -26,10 +26,14 @@ export default function KVKeyPage() {
     ])
       .then(([entryData, historyData]) => {
         setEntry(entryData);
-        setHistory(historyData.entries);
+        setHistory(historyData.entries ?? []);
       })
       .catch((err: Error) => setError(err.message));
   }, [clusterId, bucket, decodedKey]);
+
+  if (!clusterId) {
+    return <p className="text-muted">Select a cluster to view this key.</p>;
+  }
 
   if (!entry) {
     return <div>{error || "Loading..."}</div>;

@@ -10,20 +10,24 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound      = errors.New("not found")
+	ErrConflict      = errors.New("conflict")
+	ErrRootProtected = errors.New("root user protected")
+)
 
 type Cluster struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	NATSURL        string    `json:"nats_url"`
-	MonitoringURL  string    `json:"monitoring_url"`
-	CredsFilePath  string    `json:"-"`
-	Token          string    `json:"-"`
-	HasCreds       bool      `json:"has_creds"`
-	HasToken       bool      `json:"has_token"`
-	IsDefault      bool      `json:"is_default"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	NATSURL       string    `json:"nats_url"`
+	MonitoringURL string    `json:"monitoring_url"`
+	CredsFilePath string    `json:"-"`
+	Token         string    `json:"-"`
+	HasCreds      bool      `json:"has_creds"`
+	HasToken      bool      `json:"has_token"`
+	IsDefault     bool      `json:"is_default"`
 }
 
 type ClusterCreate struct {
@@ -68,6 +72,9 @@ func (s *Store) ListClusters(ctx context.Context) ([]Cluster, error) {
 		}
 		clusters = append(clusters, c)
 	}
+	if clusters == nil {
+		return []Cluster{}, rows.Err()
+	}
 	return clusters, rows.Err()
 }
 
@@ -93,7 +100,7 @@ func (s *Store) CreateCluster(ctx context.Context, in ClusterCreate) (Cluster, e
 	if err != nil {
 		return Cluster{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	if in.IsDefault {
 		if _, err := tx.Exec(ctx, `UPDATE clusters SET is_default = FALSE, updated_at = $1`, now); err != nil {
@@ -156,7 +163,7 @@ func (s *Store) UpdateCluster(ctx context.Context, id string, in ClusterUpdate) 
 	if err != nil {
 		return Cluster{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	if current.IsDefault {
 		if _, err := tx.Exec(ctx, `UPDATE clusters SET is_default = FALSE, updated_at = $1 WHERE id <> $2`, current.UpdatedAt, id); err != nil {
@@ -204,10 +211,6 @@ func (s *Store) DeleteCluster(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
-}
-
-type clusterScanner interface {
-	Scan(dest ...any) error
 }
 
 func scanCluster(rows pgx.Rows) (Cluster, error) {

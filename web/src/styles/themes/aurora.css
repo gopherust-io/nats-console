@@ -1,0 +1,75 @@
+[data-theme="aurora"] {
+  color-scheme: dark;
+  --bg-body: #060912;
+  --bg-gradient:
+    radial-gradient(ellipse 100% 80% at 8% -15%, rgba(56, 189, 248, 0.38) 0%, transparent 52%),
+    radial-gradient(ellipse 85% 65% at 92% 8%, rgba(139, 92, 246, 0.32) 0%, transparent 48%),
+    radial-gradient(ellipse 75% 55% at 50% 105%, rgba(45, 212, 191, 0.2) 0%, transparent 52%),
+    radial-gradient(ellipse 55% 45% at 65% 45%, rgba(99, 102, 241, 0.14) 0%, transparent 42%),
+    #060912;
+  --bg-sidebar: rgba(8, 12, 24, 0.86);
+  --bg-card: rgba(14, 20, 38, 0.74);
+  --bg-input: rgba(6, 10, 20, 0.82);
+  --bg-table-hover: rgba(56, 189, 248, 0.08);
+  --bg-nav-active: rgba(56, 189, 248, 0.16);
+  --bg-badge: rgba(139, 92, 246, 0.14);
+  --bg-btn-secondary: rgba(148, 163, 184, 0.1);
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --border: rgba(56, 189, 248, 0.16);
+  --border-subtle: rgba(148, 163, 184, 0.08);
+  --accent: #38bdf8;
+  --accent-hover: #0ea5e9;
+  --accent-text: #041018;
+  --danger: #fb7185;
+  --danger-hover: #f43f5e;
+  --success: #2dd4bf;
+  --success-bg: rgba(45, 212, 191, 0.14);
+  --success-text: #5eead4;
+  --warning-bg: rgba(251, 191, 36, 0.14);
+  --warning-text: #fcd34d;
+  --error: #fda4af;
+  --error-bg: rgba(251, 113, 133, 0.14);
+  --shadow: 0 8px 32px rgba(0, 0, 0, 0.45), 0 0 48px rgba(56, 189, 248, 0.06);
+  --shadow-sm: 0 2px 12px rgba(0, 0, 0, 0.28);
+  --brand-bg: linear-gradient(135deg, #22d3ee 0%, #3b82f6 42%, #818cf8 72%, #2dd4bf 100%);
+  --brand-shadow: 0 4px 22px rgba(56, 189, 248, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.14);
+  --btn-bg: linear-gradient(135deg, #22d3ee 0%, #3b82f6 50%, #6366f1 100%);
+  --btn-bg-hover: linear-gradient(135deg, #06b6d4 0%, #2563eb 50%, #4f46e5 100%);
+  --btn-text: #f8fafc;
+  --btn-shadow: 0 4px 16px rgba(56, 189, 248, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  --btn-shadow-hover: 0 8px 28px rgba(56, 189, 248, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  --btn-secondary-bg: rgba(255, 255, 255, 0.05);
+  --btn-secondary-bg-hover: rgba(56, 189, 248, 0.12);
+  --btn-secondary-text: #e2e8f0;
+  --btn-secondary-text-hover: #f8fafc;
+  --btn-secondary-border: rgba(56, 189, 248, 0.28);
+  --btn-secondary-border-hover: rgba(56, 189, 248, 0.45);
+  --btn-secondary-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="aurora"] .login-card,
+
+[data-theme="aurora"] .card,
+
+[data-theme="aurora"] .sidebar {
+  backdrop-filter: blur(18px);
+}
+
+[data-theme="aurora"] .login-card {
+  border-color: rgba(56, 189, 248, 0.22);
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(56, 189, 248, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="aurora"] .brand {
+  background: linear-gradient(90deg, #f8fafc 0%, #bae6fd 55%, #c4b5fd 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ── Dark ── */

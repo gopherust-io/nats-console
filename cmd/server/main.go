@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log/slog"
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,83 +11,91 @@ import (
 	"github.com/valyala/fasthttp"
 
 	"github.com/gopherust-io/nats-consol/internal/api"
-	"github.com/gopherust-io/nats-consol/internal/audit"
-	"github.com/gopherust-io/nats-consol/internal/auth"
+	"github.com/gopherust-io/nats-consol/internal/bootstrap"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/crypto"
-	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/log"
+	"github.com/gopherust-io/nats-consol/internal/profiler"
 )
 
 func main() {
 	_ = env.LoadDotEnv(".env")
 
-	cfg, err := config.Load()
+	cfg, err := config.LoadConfig()
 	if err != nil {
-		slog.Error("config", "error", err)
-		os.Exit(1)
+		log.Fatal().Err(err).Str("component", "config").Msg("failed to load config")
 	}
+	if err := cfg.Validate(); err != nil {
+		log.Fatal().Err(err).Str("component", "config").Msg("invalid production config")
+	}
+	log.Init(log.Options{JSON: cfg.LogJSON, Level: cfg.LogLevel})
 
-	setupLogging(cfg)
-
-	var encryptor *crypto.Encryptor
-	if cfg.EncryptionKey != "" {
-		encryptor, err = crypto.New(cfg.EncryptionKey)
-		if err != nil {
-			slog.Error("encryption", "error", err)
-			os.Exit(1)
-		}
-	} else if cfg.IsProduction() {
-		slog.Error("ENCRYPTION_KEY is required when ENV=production")
-		os.Exit(1)
+	encryptor, err := buildEncryptor(cfg)
+	if err != nil {
+		log.Fatal().Err(err).Str("component", "encryption").Msg("encryption setup failed")
 	}
 
 	ctx := context.Background()
-	st, err := store.Open(ctx, cfg.DatabaseURL, "migrations", encryptor)
+	app, err := bootstrap.New(ctx, cfg, encryptor)
 	if err != nil {
-		slog.Error("store", "error", err)
-		os.Exit(1)
+		log.Fatal().Err(err).Str("component", "bootstrap").Msg("failed to bootstrap application")
 	}
-	defer st.Close()
+	defer app.Close()
 
-	authSvc, err := auth.NewService(cfg, st)
-	if err != nil {
-		slog.Error("auth", "error", err)
-		os.Exit(1)
-	}
-	if err := authSvc.SeedAdmin(ctx); err != nil {
-		slog.Error("seed admin", "error", err)
-		os.Exit(1)
-	}
+	logAssistantEnabled(app, cfg)
 
-	manager := natsclient.NewManager(st, cfg)
-	defer manager.Close()
-
-	if err := manager.BootstrapDefaultCluster(ctx); err != nil {
-		slog.Error("bootstrap cluster", "error", err)
-		os.Exit(1)
+	if cfg.PprofContinuous() {
+		profiler.StartDefault(profiler.Options{
+			Interval: cfg.ContinuousPprofInterval(),
+			CPUSlice: cfg.ContinuousPprofCPUSlice(),
+		})
+		defer profiler.StopDefault()
 	}
 
-	auditWriter := audit.NewWriter(st)
+	server := newHTTPServer(cfg, app)
+	runUntilSignal(server, cfg.HTTPAddr)
+}
 
-	server := &fasthttp.Server{
+func buildEncryptor(cfg config.Config) (*crypto.Encryptor, error) {
+	if cfg.EncryptionKey != "" {
+		return crypto.New(cfg.EncryptionKey)
+	}
+	if cfg.IsProduction() {
+		return nil, errors.New("ENCRYPTION_KEY is required when ENV=production")
+	}
+	return nil, nil
+}
+
+func logAssistantEnabled(app *bootstrap.Application, cfg config.Config) {
+	if app.Assistant == nil {
+		return
+	}
+	log.Info().
+		Str("component", "assistant").
+		Str("provider", app.Assistant.Provider()).
+		Str("model", cfg.AIModel).
+		Msg("ai assistant enabled")
+}
+
+func newHTTPServer(cfg config.Config, app *bootstrap.Application) *fasthttp.Server {
+	return &fasthttp.Server{
 		Handler: api.NewRouter(api.RouterDeps{
 			Config:      cfg,
-			Store:       st,
-			NATS:        manager,
-			Auth:        authSvc,
-			AuditWriter: auditWriter,
+			Services:    app.Services,
+			AuditWriter: app.AuditWriter,
 		}),
-		ReadTimeout:  cfg.RequestTimeout,
-		WriteTimeout: cfg.RequestTimeout * 3,
-		IdleTimeout:  cfg.RequestTimeout * 6,
+		ReadTimeout:       cfg.HTTPReadTimeout,
+		WriteTimeout:      cfg.HTTPWriteTimeout,
+		IdleTimeout:       cfg.HTTPIdleTimeout,
+		MaxRequestBodySize: cfg.MaxBodyBytes(),
 	}
+}
 
+func runUntilSignal(server *fasthttp.Server, addr string) {
 	go func() {
-		slog.Info("nats-consol v0.3 listening", "addr", cfg.HTTPAddr)
-		if err := server.ListenAndServe(cfg.HTTPAddr); err != nil {
-			slog.Error("server", "error", err)
-			os.Exit(1)
+		log.Info().Str("component", "server").Str("addr", addr).Msg("nats-consol v0.3 listening")
+		if err := server.ListenAndServe(addr); err != nil {
+			log.Fatal().Err(err).Str("component", "server").Msg("server failed")
 		}
 	}()
 
@@ -96,17 +104,6 @@ func main() {
 	<-stop
 
 	if err := server.Shutdown(); err != nil {
-		slog.Error("shutdown", "error", err)
+		log.Error().Err(err).Str("component", "server").Msg("shutdown failed")
 	}
-}
-
-func setupLogging(cfg config.Config) {
-	opts := &slog.HandlerOptions{Level: slog.LevelInfo}
-	var handler slog.Handler
-	if cfg.LogJSON {
-		handler = slog.NewJSONHandler(os.Stdout, opts)
-	} else {
-		handler = slog.NewTextHandler(os.Stdout, opts)
-	}
-	slog.SetDefault(slog.New(handler))
 }
