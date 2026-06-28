@@ -23,7 +23,34 @@ func NewHandler(st *store.Store, nats *natsclient.Manager) *Handler {
 }
 
 func (h *Handler) Health(ctx *fasthttp.RequestCtx) {
-	writeJSON(ctx, fasthttp.StatusOK, map[string]string{"status": "ok"})
+	c := requestContext(ctx)
+	postgresStatus := "ok"
+	if err := h.store.Ping(c); err != nil {
+		postgresStatus = "error"
+	}
+
+	natsStatus := "unknown"
+	if cluster, err := h.store.GetDefaultCluster(c); err == nil {
+		serverName, _, err := h.nats.Test(c, cluster.ID)
+		if err == nil && serverName != "" {
+			natsStatus = "ok"
+		} else {
+			natsStatus = "error"
+		}
+	}
+
+	status := "ok"
+	code := fasthttp.StatusOK
+	if postgresStatus != "ok" {
+		status = "degraded"
+		code = fasthttp.StatusServiceUnavailable
+	}
+
+	writeJSON(ctx, code, map[string]any{
+		"status":              status,
+		"postgres":            postgresStatus,
+		"nats_default_cluster": natsStatus,
+	})
 }
 
 func (h *Handler) AccountInfo(ctx *fasthttp.RequestCtx) {

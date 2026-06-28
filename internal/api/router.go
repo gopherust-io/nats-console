@@ -1,28 +1,51 @@
 package api
 
 import (
-	"encoding/base64"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/fasthttp/router"
 	"github.com/valyala/fasthttp"
 
+	"github.com/gopherust-io/nats-consol/internal/audit"
+	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/live"
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
 	"github.com/gopherust-io/nats-consol/internal/store"
 )
 
-func NewRouter(cfg config.Config, st *store.Store, nats *natsclient.Manager) fasthttp.RequestHandler {
-	h := NewHandler(st, nats)
-	liveHub := live.NewHub(nats)
+type RouterDeps struct {
+	Config      config.Config
+	Store       *store.Store
+	NATS        *natsclient.Manager
+	Auth        *auth.Service
+	AuditWriter *audit.Writer
+}
+
+func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
+	h := NewHandler(deps.Store, deps.NATS)
+	authH := NewAuthHandler(deps.Auth)
+	usersH := NewUsersHandler(deps.Store)
+	auditH := NewAuditHandler(deps.Store)
+	liveHub := live.NewHub(deps.NATS)
 	r := router.New()
 
 	r.GET("/api/health", h.Health)
+	r.GET("/metrics", metricsHandler)
+	r.GET("/api/openapi.yaml", openapiHandler(deps.Config.OpenAPIPath))
+
+	r.GET("/api/v1/auth/me", authH.Me)
+	r.GET("/api/v1/auth/config", authH.Config)
+	r.POST("/api/v1/auth/login", authH.Login)
+	r.POST("/api/v1/auth/logout", authH.Logout)
+	r.GET("/api/v1/auth/oidc/login", authH.OIDCLogin)
+	r.GET("/api/v1/auth/oidc/callback", authH.OIDCCallback)
+
+	r.GET("/api/v1/users", usersH.List)
+	r.PUT("/api/v1/users/{userId}/roles", usersH.SetRoles)
+	r.GET("/api/v1/audit", auditH.List)
 
 	r.GET("/api/v1/clusters", h.ListClusters)
 	r.POST("/api/v1/clusters", h.CreateCluster)
@@ -69,107 +92,39 @@ func NewRouter(cfg config.Config, st *store.Store, nats *natsclient.Manager) fas
 	r.PUT(prefix+"/objects/buckets/{bucket}/objects/{objectName}", h.PutObject)
 	r.DELETE(prefix+"/objects/buckets/{bucket}/objects/{objectName}", h.DeleteObject)
 
-	if cfg.StaticDir != "" {
-		spa := newSPAHandler(cfg.StaticDir)
+	if deps.Config.StaticDir != "" {
+		spa := newSPAHandler(deps.Config.StaticDir)
 		r.NotFound = spa.ServeHTTP
 	}
 
-	mws := []middleware{logMiddleware, corsMiddleware}
-	if cfg.AuthEnabled {
-		mws = append(mws, authMiddleware(cfg.AdminUsername, cfg.AdminPassword))
+	mws := []middleware{
+		requestIDMiddleware,
+		metricsMiddleware,
+		slogMiddleware,
+		timeoutMiddleware(deps.Config.RequestTimeout),
+		corsMiddleware(deps.Config),
+		auditMiddleware(deps.AuditWriter),
 	}
 
-	return chain(mws...)(r.Handler)
-}
-
-type middleware func(fasthttp.RequestHandler) fasthttp.RequestHandler
-
-func chain(mws ...middleware) middleware {
-	return func(final fasthttp.RequestHandler) fasthttp.RequestHandler {
-		for i := len(mws) - 1; i >= 0; i-- {
-			final = mws[i](final)
-		}
-		return final
+	if deps.Config.AuthEnabled {
+		mws = append(mws, authMiddleware(deps.Config, deps.Auth), rbacMiddleware)
 	}
-}
 
-func logMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
-	return func(ctx *fasthttp.RequestCtx) {
-		start := time.Now()
-		next(ctx)
-		log.Printf("%s %s %d %s",
-			string(ctx.Method()),
-			string(ctx.Path()),
-			ctx.Response.StatusCode(),
-			time.Since(start),
-		)
-	}
-}
+	finalHandler := chain(mws...)(r.Handler)
 
-func corsMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
-	return func(ctx *fasthttp.RequestCtx) {
-		ctx.Response.Header.Set("Access-Control-Allow-Origin", "*")
-		ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		ctx.Response.Header.Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type")
-		ctx.Response.Header.Set("Access-Control-Allow-Credentials", "true")
-
-		if ctx.IsOptions() {
-			ctx.SetStatusCode(fasthttp.StatusNoContent)
-			return
-		}
-
-		next(ctx)
-	}
-}
-
-func authMiddleware(username, password string) middleware {
-	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
+	if deps.Config.MetricsAuthEnabled {
 		return func(ctx *fasthttp.RequestCtx) {
-			if string(ctx.Path()) == "/api/health" {
-				next(ctx)
-				return
+			if string(ctx.Path()) == "/metrics" {
+				if _, ok := authenticate(ctx, deps.Auth); !ok {
+					ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+					return
+				}
 			}
-
-			if !validBasicAuth(ctx, username, password) && !validWSAuth(ctx, username, password) {
-				ctx.Response.Header.Set("WWW-Authenticate", `Basic realm="nats-consol"`)
-				ctx.SetStatusCode(fasthttp.StatusUnauthorized)
-				ctx.SetBodyString("unauthorized")
-				return
-			}
-
-			next(ctx)
+			finalHandler(ctx)
 		}
 	}
-}
 
-func validWSAuth(ctx *fasthttp.RequestCtx, username, password string) bool {
-	if !strings.Contains(string(ctx.Path()), "/live/ws") {
-		return false
-	}
-	auth := string(ctx.QueryArgs().Peek("authorization"))
-	if auth == "" {
-		return false
-	}
-	if !strings.HasPrefix(auth, "Basic ") {
-		auth = "Basic " + auth
-	}
-	ctx.Request.Header.Set("Authorization", auth)
-	return validBasicAuth(ctx, username, password)
-}
-
-func validBasicAuth(ctx *fasthttp.RequestCtx, username, password string) bool {
-	auth := string(ctx.Request.Header.Peek("Authorization"))
-	if !strings.HasPrefix(auth, "Basic ") {
-		return false
-	}
-
-	decoded, err := base64.StdEncoding.DecodeString(auth[6:])
-	if err != nil {
-		return false
-	}
-
-	user, pass, ok := strings.Cut(string(decoded), ":")
-	return ok && user == username && pass == password
+	return finalHandler
 }
 
 type spaHandler struct {
@@ -188,6 +143,11 @@ func (s *spaHandler) ServeHTTP(ctx *fasthttp.RequestCtx) {
 	path := string(ctx.Path())
 	if path == "/" {
 		fasthttp.ServeFile(ctx, s.index)
+		return
+	}
+
+	if strings.HasPrefix(path, "/api/") {
+		ctx.SetStatusCode(fasthttp.StatusNotFound)
 		return
 	}
 

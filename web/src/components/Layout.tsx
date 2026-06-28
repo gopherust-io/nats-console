@@ -1,9 +1,11 @@
 import { NavLink, Outlet } from "react-router-dom";
 import ThemeSwitcher from "./ThemeSwitcher";
+import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
 
 export default function Layout() {
   const { clusters, clusterId, setClusterId, loading, error } = useCluster();
+  const { user, logout, isAdmin } = useAuth();
 
   return (
     <div className="layout">
@@ -48,9 +50,25 @@ export default function Layout() {
           <NavLink to="/objects" className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}>
             Object Stores
           </NavLink>
+          {isAdmin && (
+            <>
+              <NavLink to="/audit" className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}>
+                Audit Log
+              </NavLink>
+              <NavLink to="/users" className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}>
+                Users &amp; Roles
+              </NavLink>
+            </>
+          )}
         </nav>
 
         <div className="sidebar__footer">
+          <div className="user-bar">
+            <span className="muted">{user?.username}</span>
+            <button className="btn btn--secondary btn--small" type="button" onClick={() => logout().then(() => (window.location.href = "/login"))}>
+              Logout
+            </button>
+          </div>
           <ThemeSwitcher />
         </div>
       </aside>

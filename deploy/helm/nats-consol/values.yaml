@@ -1,0 +1,64 @@
+replicaCount: 1
+
+image:
+  repository: registry.gitlab.time2go.tech/gopherust-io/nats-consol
+  tag: "0.3.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: nats-consol.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+env:
+  ENV: production
+  AUTH_ENABLED: "true"
+  LOG_JSON: "true"
+  OIDC_ENABLED: "false"
+  BASIC_AUTH_ENABLED: "true"
+  METRICS_AUTH_ENABLED: "false"
+
+secrets:
+  databaseUrl: ""
+  encryptionKey: ""
+  sessionSecret: ""
+  adminPassword: admin
+  oidcClientSecret: ""
+
+config:
+  natsUrl: nats://nats:4222
+  monitoringUrl: http://nats:8222
+  adminUsername: admin
+  defaultClusterName: default
+  corsAllowedOrigins: ""
+  oidcIssuer: ""
+  oidcClientId: ""
+  oidcRedirectUrl: ""
+
+probes:
+  liveness:
+    path: /api/health
+    initialDelaySeconds: 10
+    periodSeconds: 15
+  readiness:
+    path: /api/health
+    initialDelaySeconds: 5
+    periodSeconds: 10

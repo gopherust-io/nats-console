@@ -45,6 +45,8 @@ func (c Config) Masked() Config {
 	out := c
 	out.AdminPassword = env.SensitiveMask
 	out.EncryptionKey = env.SensitiveMask
+	out.SessionSecret = env.SensitiveMask
+	out.OIDCClientSecret = env.SensitiveMask
 	return out
 }
 
@@ -181,6 +183,167 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 			cfg.DefaultClusterName = "default"
 		} else {
 			cfg.DefaultClusterName = raw
+		}
+	}
+	{
+		key := "ENV"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			cfg.Env = "development"
+		} else {
+			cfg.Env = raw
+		}
+	}
+	{
+		key := "CORS_ALLOWED_ORIGINS"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.CORSAllowedOrigins = raw
+		}
+	}
+	{
+		key := "SESSION_SECRET"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.SessionSecret = raw
+		}
+	}
+	{
+		key := "SESSION_TTL"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("8h")
+			if err != nil {
+				env.AppendParse(&errs, "SessionTTL", key, "8h", err)
+			} else {
+				cfg.SessionTTL = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "SessionTTL", key, raw, err)
+			} else {
+				cfg.SessionTTL = v
+			}
+		}
+	}
+	{
+		key := "OIDC_ENABLED"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseBool("false")
+			if err != nil {
+				env.AppendParse(&errs, "OIDCEnabled", key, "false", err)
+			} else {
+				cfg.OIDCEnabled = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "OIDCEnabled", key, raw, err)
+			} else {
+				cfg.OIDCEnabled = v
+			}
+		}
+	}
+	{
+		key := "OIDC_ISSUER"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.OIDCIssuer = raw
+		}
+	}
+	{
+		key := "OIDC_CLIENT_ID"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.OIDCClientID = raw
+		}
+	}
+	{
+		key := "OIDC_CLIENT_SECRET"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.OIDCClientSecret = raw
+		}
+	}
+	{
+		key := "OIDC_REDIRECT_URL"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.OIDCRedirectURL = raw
+		}
+	}
+	{
+		key := "BASIC_AUTH_ENABLED"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseBool("true")
+			if err != nil {
+				env.AppendParse(&errs, "BasicAuthEnabled", key, "true", err)
+			} else {
+				cfg.BasicAuthEnabled = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "BasicAuthEnabled", key, raw, err)
+			} else {
+				cfg.BasicAuthEnabled = v
+			}
+		}
+	}
+	{
+		key := "METRICS_AUTH_ENABLED"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseBool("false")
+			if err != nil {
+				env.AppendParse(&errs, "MetricsAuthEnabled", key, "false", err)
+			} else {
+				cfg.MetricsAuthEnabled = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "MetricsAuthEnabled", key, raw, err)
+			} else {
+				cfg.MetricsAuthEnabled = v
+			}
+		}
+	}
+	{
+		key := "LOG_JSON"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseBool("false")
+			if err != nil {
+				env.AppendParse(&errs, "LogJSON", key, "false", err)
+			} else {
+				cfg.LogJSON = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "LogJSON", key, raw, err)
+			} else {
+				cfg.LogJSON = v
+			}
+		}
+	}
+	{
+		key := "OPENAPI_PATH"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			cfg.OpenAPIPath = "api/openapi.yaml"
+		} else {
+			cfg.OpenAPIPath = raw
 		}
 	}
 	return env.NewError(errs)

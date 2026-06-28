@@ -54,7 +54,7 @@ func (m *Manager) BootstrapDefaultCluster(ctx context.Context) error {
 }
 
 func (m *Manager) Get(ctx context.Context, clusterID string) (*Client, error) {
-	cluster, err := m.store.GetCluster(ctx, clusterID)
+	cluster, err := m.store.GetClusterCredentials(ctx, clusterID)
 	if err != nil {
 		return nil, err
 	}

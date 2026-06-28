@@ -15,6 +15,7 @@ import (
 	"github.com/valyala/fasthttp"
 
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
+	"github.com/gopherust-io/nats-consol/internal/metrics"
 	"github.com/gopherust-io/nats-consol/internal/store"
 )
 
@@ -84,6 +85,8 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 
 	err = upgrader.Upgrade(ctx, func(conn *websocket.Conn) {
 		defer conn.Close()
+		metrics.IncWS()
+		defer metrics.DecWS()
 
 		paused := false
 		var pauseMu sync.Mutex

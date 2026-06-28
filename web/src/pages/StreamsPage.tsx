@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, clusterPath, StreamInfo } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
 
 type StreamListResponse = {
@@ -10,6 +11,7 @@ type StreamListResponse = {
 
 export default function StreamsPage() {
   const { clusterId } = useCluster();
+  const { canWrite } = useAuth();
   const [streams, setStreams] = useState<StreamInfo[]>([]);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -74,9 +76,11 @@ export default function StreamsPage() {
     <div>
       <div className="page-header">
         <h1>Streams</h1>
-        <button className="btn" onClick={() => setShowForm((v) => !v)}>
-          {showForm ? "Cancel" : "Create Stream"}
-        </button>
+        {canWrite && (
+          <button className="btn" onClick={() => setShowForm((v) => !v)}>
+            {showForm ? "Cancel" : "Create Stream"}
+          </button>
+        )}
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -143,9 +147,11 @@ export default function StreamsPage() {
                 <td>{stream.state.consumer_count}</td>
                 <td>{stream.config.storage}</td>
                 <td>
-                  <button className="btn danger" onClick={() => deleteStream(stream.config.name)}>
-                    Delete
-                  </button>
+                  {canWrite && (
+                    <button className="btn danger" onClick={() => deleteStream(stream.config.name)}>
+                      Delete
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

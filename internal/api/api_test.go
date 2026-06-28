@@ -21,6 +21,7 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 
 	"github.com/gopherust-io/nats-consol/internal/api"
+	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
 	"github.com/gopherust-io/nats-consol/internal/store"
@@ -34,6 +35,15 @@ func requireDocker(t *testing.T) {
 	if _, err := testcontainers.NewDockerProvider(); err != nil {
 		t.Skipf("docker unavailable: %v", err)
 	}
+}
+
+func mustTestAuth(t *testing.T, cfg config.Config, st *store.Store) *auth.Service {
+	t.Helper()
+	svc, err := auth.NewService(cfg, st)
+	if err != nil {
+		t.Fatalf("auth service: %v", err)
+	}
+	return svc
 }
 func TestClusterStreamConsumerLifecycle(t *testing.T) {
 	requireDocker(t)
@@ -77,7 +87,7 @@ func TestClusterStreamConsumerLifecycle(t *testing.T) {
 		migrationsDir = "migrations"
 	}
 
-	st, err := store.Open(ctx, pgURL, migrationsDir)
+	st, err := store.Open(ctx, pgURL, migrationsDir, nil)
 	if err != nil {
 		t.Fatalf("store open: %v", err)
 	}
@@ -104,7 +114,12 @@ func TestClusterStreamConsumerLifecycle(t *testing.T) {
 	}
 	clusterID := clusters[0].ID
 
-	handler := api.NewRouter(cfg, st, manager)
+	handler := api.NewRouter(api.RouterDeps{
+		Config: cfg,
+		Store:  st,
+		NATS:   manager,
+		Auth:   mustTestAuth(t, cfg, st),
+	})
 	ln := fasthttputil.NewInmemoryListener()
 	server := &fasthttp.Server{Handler: handler}
 	go server.Serve(ln)
@@ -201,7 +216,7 @@ func TestHealthEndpoint(t *testing.T) {
 		migrationsDir = "migrations"
 	}
 
-	st, err := store.Open(ctx, pgURL, migrationsDir)
+	st, err := store.Open(ctx, pgURL, migrationsDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +226,12 @@ func TestHealthEndpoint(t *testing.T) {
 	manager := natsclient.NewManager(st, cfg)
 	t.Cleanup(manager.Close)
 
-	handler := api.NewRouter(cfg, st, manager)
+	handler := api.NewRouter(api.RouterDeps{
+		Config: cfg,
+		Store:  st,
+		NATS:   manager,
+		Auth:   mustTestAuth(t, cfg, st),
+	})
 	ln := fasthttputil.NewInmemoryListener()
 	server := &fasthttp.Server{Handler: handler}
 	go server.Serve(ln)

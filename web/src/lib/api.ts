@@ -22,6 +22,13 @@ export function setSelectedClusterId(id: string) {
   localStorage.setItem(CLUSTER_KEY, id);
 }
 
+export class UnauthorizedError extends Error {
+  constructor() {
+    super("Unauthorized");
+    this.name = "UnauthorizedError";
+  }
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body) {
@@ -33,10 +40,13 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set("Authorization", auth);
   }
 
-  const response = await fetch(path, { ...init, headers });
+  const response = await fetch(path, { ...init, headers, credentials: "include" });
   if (response.status === 401) {
     clearAuth();
-    throw new Error("Unauthorized");
+    if (!window.location.pathname.startsWith("/login")) {
+      window.location.href = "/login";
+    }
+    throw new UnauthorizedError();
   }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -67,6 +77,27 @@ export type Cluster = {
 export type ClusterListResponse = {
   clusters: Cluster[];
   total: number;
+};
+
+export type AuditEntry = {
+  id: string;
+  timestamp: string;
+  actor: string;
+  action: string;
+  cluster_id: string;
+  resource_type: string;
+  resource_name: string;
+  request_id: string;
+  details: Record<string, unknown>;
+  ip: string;
+};
+
+export type UserRecord = {
+  id: string;
+  username: string;
+  email: string;
+  roles: string[];
+  created_at: string;
 };
 
 export type AccountInfo = {

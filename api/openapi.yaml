@@ -1,31 +1,151 @@
 openapi: 3.1.0
 info:
   title: NATS Consol API
-  version: 0.2.0
+  version: 0.3.0
   description: Self-hosted admin console for NATS JetStream — cluster-scoped REST and WebSocket API.
 
 servers:
-  - url: /api/v1
-    description: API v1 base path
+  - url: /
+    description: API root
 
 security:
   - basicAuth: []
+  - sessionCookie: []
 
 paths:
-  /health:
+  /api/health:
     get:
       tags: [System]
-      summary: Health check
+      summary: Health and readiness check
       security: []
       responses:
         "200":
-          description: OK
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Degraded
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
 
-  /clusters:
+  /api/openapi.yaml:
+    get:
+      tags: [System]
+      summary: OpenAPI specification
+      security: []
+      responses:
+        "200":
+          description: YAML spec
+
+  /metrics:
+    get:
+      tags: [System]
+      summary: Prometheus metrics
+      security: []
+      responses:
+        "200":
+          description: Metrics payload
+
+  /api/v1/auth/config:
+    get:
+      tags: [Auth]
+      summary: Auth configuration
+      security: []
+      responses:
+        "200":
+          description: Auth config
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with username/password
+      security: []
+      responses:
+        "200":
+          description: Session created
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout
+      responses:
+        "204":
+          description: Logged out
+
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user
+      responses:
+        "200":
+          description: User profile
+
+  /api/v1/auth/oidc/login:
+    get:
+      tags: [Auth]
+      summary: Start OIDC login
+      security: []
+      responses:
+        "302":
+          description: Redirect to IdP
+
+  /api/v1/auth/oidc/callback:
+    get:
+      tags: [Auth]
+      summary: OIDC callback
+      security: []
+      responses:
+        "302":
+          description: Redirect to UI
+
+  /api/v1/audit:
+    get:
+      tags: [Audit]
+      summary: List audit log entries (admin)
+      parameters:
+        - name: cluster_id
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Audit entries
+
+  /api/v1/users:
+    get:
+      tags: [Users]
+      summary: List users (admin)
+      responses:
+        "200":
+          description: User list
+
+  /api/v1/users/{userId}/roles:
+    put:
+      tags: [Users]
+      summary: Set user roles (admin)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated user
+
+  /api/v1/clusters:
     get:
       tags: [Clusters]
       summary: List clusters
@@ -53,7 +173,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Cluster"
 
-  /clusters/{clusterId}:
+  /api/v1/clusters/{clusterId}:
     parameters:
       - $ref: "#/components/parameters/clusterId"
     get:
@@ -95,7 +215,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /clusters/{clusterId}/test:
+  /api/v1/clusters/{clusterId}/test:
     parameters:
       - $ref: "#/components/parameters/clusterId"
     post:
@@ -111,7 +231,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /clusters/{clusterId}/account:
+  /api/v1/clusters/{clusterId}/account:
     parameters:
       - $ref: "#/components/parameters/clusterId"
     get:
@@ -127,7 +247,7 @@ paths:
         "502":
           $ref: "#/components/responses/BadGateway"
 
-  /clusters/{clusterId}/monitoring/varz:
+  /api/v1/clusters/{clusterId}/monitoring/varz:
     parameters:
       - $ref: "#/components/parameters/clusterId"
     get:
@@ -141,7 +261,7 @@ paths:
               schema:
                 type: object
 
-  /clusters/{clusterId}/monitoring/jsz:
+  /api/v1/clusters/{clusterId}/monitoring/jsz:
     parameters:
       - $ref: "#/components/parameters/clusterId"
     get:
@@ -168,7 +288,7 @@ paths:
               schema:
                 type: object
 
-  /clusters/{clusterId}/streams:
+  /api/v1/clusters/{clusterId}/streams:
     parameters:
       - $ref: "#/components/parameters/clusterId"
     get:
@@ -198,7 +318,7 @@ paths:
               schema:
                 type: object
 
-  /clusters/{clusterId}/streams/{name}:
+  /api/v1/clusters/{clusterId}/streams/{name}:
     parameters:
       - $ref: "#/components/parameters/clusterId"
       - $ref: "#/components/parameters/streamName"
@@ -237,7 +357,7 @@ paths:
         "204":
           description: Deleted
 
-  /clusters/{clusterId}/streams/{name}/purge:
+  /api/v1/clusters/{clusterId}/streams/{name}/purge:
     parameters:
       - $ref: "#/components/parameters/clusterId"
       - $ref: "#/components/parameters/streamName"
@@ -248,7 +368,7 @@ paths:
         "204":
           description: Purged
 
-  /clusters/{clusterId}/streams/{name}/consumers:
+  /api/v1/clusters/{clusterId}/streams/{name}/consumers:
     parameters:
       - $ref: "#/components/parameters/clusterId"
       - $ref: "#/components/parameters/streamName"
@@ -279,7 +399,7 @@ paths:
               schema:
                 type: object
 
-  /clusters/{clusterId}/streams/{name}/consumers/{consumer}:
+  /api/v1/clusters/{clusterId}/streams/{name}/consumers/{consumer}:
     parameters:
       - $ref: "#/components/parameters/clusterId"
       - $ref: "#/components/parameters/streamName"
@@ -303,7 +423,7 @@ paths:
         "204":
           description: Deleted
 
-  /clusters/{clusterId}/streams/{name}/messages:
+  /api/v1/clusters/{clusterId}/streams/{name}/messages:
     parameters:
       - $ref: "#/components/parameters/clusterId"
       - $ref: "#/components/parameters/streamName"
@@ -332,7 +452,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /clusters/{clusterId}/live/ws:
+  /api/v1/clusters/{clusterId}/live/ws:
     parameters:
       - $ref: "#/components/parameters/clusterId"
     get:
@@ -362,7 +482,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
-  /clusters/{clusterId}/kv/buckets:
+  /api/v1/clusters/{clusterId}/kv/buckets:
     parameters:
       - $ref: "#/components/parameters/clusterId"
     get:
@@ -392,7 +512,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/KVBucketInfo"
 
-  /clusters/{clusterId}/kv/buckets/{bucket}:
+  /api/v1/clusters/{clusterId}/kv/buckets/{bucket}:
     parameters:
       - $ref: "#/components/parameters/clusterId"
       - $ref: "#/components/parameters/bucketName"
@@ -413,7 +533,7 @@ paths:
         "204":
           description: Deleted
 
-  /clusters/{clusterId}/kv/buckets/{bucket}/keys:
+  /api/v1/clusters/{clusterId}/kv/buckets/{bucket}/keys:
     parameters:
       - $ref: "#/components/parameters/clusterId"
       - $ref: "#/components/parameters/bucketName"
@@ -428,7 +548,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/KVKeyListResponse"
 
-  /clusters/{clusterId}/kv/buckets/{bucket}/keys/{key}:
+  /api/v1/clusters/{clusterId}/kv/buckets/{bucket}/keys/{key}:
     parameters:
       - $ref: "#/components/parameters/clusterId"
       - $ref: "#/components/parameters/bucketName"
@@ -466,7 +586,7 @@ paths:
         "204":
           description: Deleted
 
-  /clusters/{clusterId}/kv/buckets/{bucket}/keys/{key}/history:
+  /api/v1/clusters/{clusterId}/kv/buckets/{bucket}/keys/{key}/history:
     parameters:
       - $ref: "#/components/parameters/clusterId"
       - $ref: "#/components/parameters/bucketName"
@@ -482,7 +602,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/KVHistoryResponse"
 
-  /clusters/{clusterId}/objects/buckets:
+  /api/v1/clusters/{clusterId}/objects/buckets:
     parameters:
       - $ref: "#/components/parameters/clusterId"
     get:
@@ -512,7 +632,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ObjectBucketInfo"
 
-  /clusters/{clusterId}/objects/buckets/{bucket}:
+  /api/v1/clusters/{clusterId}/objects/buckets/{bucket}:
     parameters:
       - $ref: "#/components/parameters/clusterId"
       - $ref: "#/components/parameters/bucketName"
@@ -533,7 +653,7 @@ paths:
         "204":
           description: Deleted
 
-  /clusters/{clusterId}/objects/buckets/{bucket}/objects:
+  /api/v1/clusters/{clusterId}/objects/buckets/{bucket}/objects:
     parameters:
       - $ref: "#/components/parameters/clusterId"
       - $ref: "#/components/parameters/bucketName"
@@ -548,7 +668,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ObjectListResponse"
 
-  /clusters/{clusterId}/objects/buckets/{bucket}/objects/{objectName}:
+  /api/v1/clusters/{clusterId}/objects/buckets/{bucket}/objects/{objectName}:
     parameters:
       - $ref: "#/components/parameters/clusterId"
       - $ref: "#/components/parameters/bucketName"
@@ -656,6 +776,12 @@ components:
       type: object
       properties:
         status:
+          type: string
+          example: ok
+        postgres:
+          type: string
+          example: ok
+        nats_default_cluster:
           type: string
           example: ok
 

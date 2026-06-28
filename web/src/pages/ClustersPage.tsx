@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api, Cluster } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
 
 type TestResponse = {
@@ -11,6 +12,7 @@ type TestResponse = {
 
 export default function ClustersPage() {
   const { clusters, reload } = useCluster();
+  const { canWrite, isAdmin } = useAuth();
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
@@ -63,9 +65,11 @@ export default function ClustersPage() {
     <div>
       <div className="page-header">
         <h1>Clusters</h1>
-        <button className="btn" onClick={() => setShowForm((v) => !v)}>
-          {showForm ? "Cancel" : "Add Cluster"}
-        </button>
+        {canWrite && (
+          <button className="btn" onClick={() => setShowForm((v) => !v)}>
+            {showForm ? "Cancel" : "Add Cluster"}
+          </button>
+        )}
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -120,7 +124,7 @@ export default function ClustersPage() {
                   )}
                 </td>
                 <td>
-                  {!cluster.is_default && (
+                  {!cluster.is_default && isAdmin && (
                     <button className="btn danger" onClick={() => deleteCluster(cluster)}>
                       Delete
                     </button>

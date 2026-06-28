@@ -588,6 +588,57 @@ tr:hover td {
   margin-bottom: 10px;
 }
 
+.user-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.role-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8125rem;
+}
+
+.btn--small {
+  padding: 4px 10px;
+  font-size: 0.8125rem;
+}
+
+.mb-16 {
+  margin-bottom: 16px;
+}
+
+.code-block {
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 12px;
+  overflow: auto;
+  font-size: 0.8125rem;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.mt-8 {
+  margin-top: 8px;
+}
+
 /* ── Responsive ── */
 
 @media (max-width: 900px) {

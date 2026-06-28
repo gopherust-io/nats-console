@@ -10,6 +10,7 @@ import {
   tryParseJSON,
 } from "../lib/api";
 import { useCluster } from "../lib/cluster";
+import { useAuth } from "../lib/auth";
 
 type ConsumerListResponse = {
   consumers: ConsumerInfo[];
@@ -19,6 +20,7 @@ type ConsumerListResponse = {
 export default function StreamDetailPage() {
   const { name = "" } = useParams();
   const { clusterId } = useCluster();
+  const { canWrite } = useAuth();
   const [stream, setStream] = useState<StreamInfo | null>(null);
   const [consumers, setConsumers] = useState<ConsumerInfo[]>([]);
   const [seq, setSeq] = useState("");
@@ -116,9 +118,11 @@ export default function StreamDetailPage() {
           <Link className="btn secondary" to={`/streams/${name}/live`}>
             Live Tail
           </Link>
-          <button className="btn secondary" onClick={purgeStream}>
-            Purge Stream
-          </button>
+          {canWrite && (
+            <button className="btn secondary" onClick={purgeStream}>
+              Purge Stream
+            </button>
+          )}
         </div>
       </div>
 
@@ -145,9 +149,11 @@ export default function StreamDetailPage() {
 
       <div className="section-header">
         <h2>Consumers</h2>
-        <button className="btn" onClick={() => setShowConsumerForm((v) => !v)}>
-          {showConsumerForm ? "Cancel" : "Create Consumer"}
-        </button>
+        {canWrite && (
+          <button className="btn" onClick={() => setShowConsumerForm((v) => !v)}>
+            {showConsumerForm ? "Cancel" : "Create Consumer"}
+          </button>
+        )}
       </div>
 
       {showConsumerForm && (

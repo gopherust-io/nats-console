@@ -101,11 +101,16 @@ func (s *Store) CreateCluster(ctx context.Context, in ClusterCreate) (Cluster, e
 		}
 	}
 
+	token, err := s.encryptToken(in.Token)
+	if err != nil {
+		return Cluster{}, fmt.Errorf("encrypt token: %w", err)
+	}
+
 	row := tx.QueryRow(ctx, `
 		INSERT INTO clusters (id, name, nats_url, monitoring_url, creds_file_path, token, is_default, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, name, nats_url, monitoring_url, creds_file_path, token, is_default, created_at, updated_at`,
-		id, in.Name, in.NATSURL, in.MonitoringURL, in.CredsFilePath, in.Token, in.IsDefault, now, now)
+		id, in.Name, in.NATSURL, in.MonitoringURL, in.CredsFilePath, token, in.IsDefault, now, now)
 
 	c, err := scanClusterRow(row)
 	if err != nil {
@@ -136,7 +141,11 @@ func (s *Store) UpdateCluster(ctx context.Context, id string, in ClusterUpdate) 
 		current.CredsFilePath = *in.CredsFilePath
 	}
 	if in.Token != nil {
-		current.Token = *in.Token
+		token, err := s.encryptToken(*in.Token)
+		if err != nil {
+			return Cluster{}, fmt.Errorf("encrypt token: %w", err)
+		}
+		current.Token = token
 	}
 	if in.IsDefault != nil {
 		current.IsDefault = *in.IsDefault
@@ -171,6 +180,19 @@ func (s *Store) UpdateCluster(ctx context.Context, id string, in ClusterUpdate) 
 		return Cluster{}, err
 	}
 	return c, nil
+}
+
+func (s *Store) GetClusterCredentials(ctx context.Context, id string) (Cluster, error) {
+	cluster, err := s.GetCluster(ctx, id)
+	if err != nil {
+		return Cluster{}, err
+	}
+	token, err := s.decryptToken(cluster.Token)
+	if err != nil {
+		return Cluster{}, fmt.Errorf("decrypt token: %w", err)
+	}
+	cluster.Token = token
+	return cluster, nil
 }
 
 func (s *Store) DeleteCluster(ctx context.Context, id string) error {
