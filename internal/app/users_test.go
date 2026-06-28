@@ -101,6 +101,7 @@ func TestUserServiceProtectsRoot(t *testing.T) {
 		ID:    "bob",
 		Roles: []string{domain.RoleAdmin},
 		AccessRules: &domain.AccessRules{
+			ClusterIDs:      []string{"cluster-a"},
 			ManageUsers:     true,
 			AssignableRoles: []string{domain.RoleViewer},
 		},
@@ -124,6 +125,7 @@ func TestUserServiceRootCanCreateDelegatedAdmin(t *testing.T) {
 		Password: "secret",
 		Roles:    []string{domain.RoleAdmin},
 		AccessRules: &domain.AccessRules{
+			ClusterIDs:      []string{"cluster-a"},
 			ManageUsers:     true,
 			ViewAudit:       true,
 			AssignableRoles: []string{domain.RoleOperator, domain.RoleViewer},

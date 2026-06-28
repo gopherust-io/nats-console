@@ -138,4 +138,19 @@ func TestSuperclusterContract(t *testing.T) {
 	for _, key := range []string{"gateways", "routes", "leafnodes", "streamReplication"} {
 		assert.NotEqual(t, "null", string(payload[key]), "%s should be an array, not null", key)
 	}
+	for _, key := range []string{"sourceErrors", "warnings"} {
+		raw, ok := payload[key]
+		if !ok {
+			continue
+		}
+		assert.NotEqual(t, "null", string(raw), "%s should not be null when present", key)
+		switch key {
+		case "sourceErrors":
+			var errs map[string]string
+			require.NoError(t, json.Unmarshal(raw, &errs))
+		case "warnings":
+			var warns []string
+			require.NoError(t, json.Unmarshal(raw, &warns))
+		}
+	}
 }

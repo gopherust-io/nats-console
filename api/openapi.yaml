@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: NATS Consol API
-  version: 0.4.0
+  version: 0.5.0
   description: Self-hosted admin console for NATS JetStream — cluster-scoped REST and WebSocket API.
 
 servers:
@@ -288,6 +288,26 @@ paths:
               schema:
                 type: object
 
+  /api/v1/clusters/{clusterId}/supercluster:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [Monitoring]
+      summary: Supercluster overview (gateways, routes, leafnodes, replication)
+      description: |
+        Aggregates NATS monitoring endpoints (varz, gatewayz, routez, leafz, jsz).
+        Returns 200 with partial data and `warnings` / `sourceErrors` when some sources fail.
+        Returns 502 when all monitoring sources are unavailable.
+      responses:
+        "200":
+          description: Supercluster overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperclusterOverview"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
   /api/v1/clusters/{clusterId}/streams:
     parameters:
       - $ref: "#/components/parameters/clusterId"
@@ -471,7 +491,7 @@ paths:
           in: query
           schema:
             type: string
-        - name: from_seq
+        - name: fromSeq
           in: query
           schema:
             type: integer
@@ -1106,3 +1126,145 @@ components:
         data:
           type: string
           description: Base64-encoded object data
+
+    SuperclusterOverview:
+      type: object
+      required: [fetchedAt, serverName, gateways, routes, leafnodes, streamReplication, routeCount, leafCount, gatewayEnabled]
+      properties:
+        fetchedAt:
+          type: string
+          format: date-time
+        serverName:
+          type: string
+        clusterName:
+          type: string
+        jetstreamDomain:
+          type: string
+        gatewayEnabled:
+          type: boolean
+        routeCount:
+          type: integer
+        leafCount:
+          type: integer
+        metaCluster:
+          $ref: "#/components/schemas/SuperclusterMeta"
+        gateways:
+          type: array
+          items:
+            $ref: "#/components/schemas/SuperclusterGateway"
+        routes:
+          type: array
+          items:
+            $ref: "#/components/schemas/SuperclusterRoute"
+        leafnodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/SuperclusterLeafnode"
+        streamReplication:
+          type: array
+          items:
+            $ref: "#/components/schemas/StreamReplication"
+        sourceErrors:
+          type: object
+          additionalProperties:
+            type: string
+          description: Per-endpoint monitoring errors (varz, gatewayz, routez, leafz, jsz)
+        warnings:
+          type: array
+          items:
+            type: string
+          description: Human-readable partial-failure warnings
+
+    SuperclusterGateway:
+      type: object
+      properties:
+        name:
+          type: string
+        direction:
+          type: string
+        host:
+          type: string
+        port:
+          type: integer
+        connections:
+          type: integer
+        subscriptions:
+          type: integer
+
+    SuperclusterRoute:
+      type: object
+      properties:
+        remoteId:
+          type: string
+        url:
+          type: string
+        connected:
+          type: boolean
+        inMsgs:
+          type: integer
+          format: int64
+        outMsgs:
+          type: integer
+          format: int64
+
+    SuperclusterLeafnode:
+      type: object
+      properties:
+        name:
+          type: string
+        remote:
+          type: string
+        rtt:
+          type: string
+        connected:
+          type: boolean
+
+    SuperclusterMeta:
+      type: object
+      properties:
+        leader:
+          type: string
+        clusterSize:
+          type: integer
+        replicas:
+          type: array
+          items:
+            $ref: "#/components/schemas/SuperclusterReplica"
+
+    SuperclusterReplica:
+      type: object
+      properties:
+        name:
+          type: string
+        id:
+          type: string
+        active:
+          type: string
+        lag:
+          type: integer
+          format: int64
+        leader:
+          type: boolean
+        current:
+          type: boolean
+        online:
+          type: boolean
+
+    StreamReplication:
+      type: object
+      properties:
+        streamName:
+          type: string
+        kind:
+          type: string
+        targetName:
+          type: string
+        targetDomain:
+          type: string
+        error:
+          type: string
+        lag:
+          type: integer
+          format: int64
+        active:
+          type: boolean

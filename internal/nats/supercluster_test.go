@@ -19,7 +19,7 @@ func TestApplyVarz(t *testing.T) {
 		"leafnodes": 1
 	}`)
 	var out domain.SuperclusterOverview
-	applyVarz(raw, &out)
+	require.NoError(t, applyVarz(raw, &out))
 
 	require.Equal(t, "n1", out.ServerName)
 	assert.Equal(t, "east", out.ClusterName)
@@ -35,7 +35,8 @@ func TestParseGateways(t *testing.T) {
 		"outbound_gateways": [{"name": "west", "host": "10.0.0.1", "port": 7222, "connections": 1}],
 		"inbound_gateways": [{"name": "central", "host": "10.0.0.2", "port": 7222, "connections": 2}]
 	}`)
-	gws := parseGateways(raw)
+	gws, err := parseGateways(raw)
+	require.NoError(t, err)
 	require.Len(t, gws, 2)
 	assert.Equal(t, "outbound", gws[0].Direction)
 	assert.Equal(t, "inbound", gws[1].Direction)
@@ -68,7 +69,7 @@ func TestApplyJSZ(t *testing.T) {
 		"account_details":[{"stream_detail":[{"name":"S","mirror":{"name":"S","domain":"west","active":true}}]}]
 	}`)
 	var out domain.SuperclusterOverview
-	applyJSZ(raw, &out)
+	require.NoError(t, applyJSZ(raw, &out))
 	assert.Equal(t, "east", out.JetStreamDomain)
 	require.NotNil(t, out.MetaCluster)
 	assert.Equal(t, "n1", out.MetaCluster.Leader)

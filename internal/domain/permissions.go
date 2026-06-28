@@ -7,6 +7,7 @@ type Permissions struct {
 	ClusterIDs      []string
 	AssignableRoles []string
 	IsRoot          bool
+	AllClusters     bool
 	ManageUsers     bool
 	ViewAudit       bool
 	DeleteClusters  bool
@@ -15,6 +16,7 @@ type Permissions struct {
 func FullPermissions() Permissions {
 	return Permissions{
 		IsRoot:          true,
+		AllClusters:     true,
 		ManageUsers:     true,
 		ViewAudit:       true,
 		DeleteClusters:  true,
@@ -26,29 +28,29 @@ func PermissionsFor(user User) Permissions {
 	if user.IsRoot {
 		return FullPermissions()
 	}
-	if HasRole(user.Roles, RoleAdmin) {
-		if user.AccessRules == nil {
-			return Permissions{
-				ManageUsers:     true,
-				ViewAudit:       true,
-				DeleteClusters:  true,
-				AssignableRoles: []string{RoleAdmin, RoleOperator, RoleViewer},
-			}
-		}
-		rules := user.AccessRules
+	if HasRole(user.Roles, RoleAdmin) && user.AccessRules == nil {
 		return Permissions{
-			ManageUsers:     rules.ManageUsers,
-			ViewAudit:       rules.ViewAudit,
-			DeleteClusters:  rules.DeleteClusters,
-			ClusterIDs:      rules.ClusterIDs,
-			AssignableRoles: append([]string(nil), rules.AssignableRoles...),
+			AllClusters:     true,
+			ManageUsers:     true,
+			ViewAudit:       true,
+			DeleteClusters:  true,
+			AssignableRoles: []string{RoleAdmin, RoleOperator, RoleViewer},
 		}
 	}
-	return Permissions{}
+	perms := Permissions{}
+	if user.AccessRules != nil {
+		rules := user.AccessRules
+		perms.ClusterIDs = append([]string(nil), rules.ClusterIDs...)
+		perms.ManageUsers = rules.ManageUsers
+		perms.ViewAudit = rules.ViewAudit
+		perms.DeleteClusters = rules.DeleteClusters
+		perms.AssignableRoles = append([]string(nil), rules.AssignableRoles...)
+	}
+	return perms
 }
 
 func (p Permissions) AllowsCluster(clusterID string) bool {
-	if p.IsRoot || len(p.ClusterIDs) == 0 {
+	if p.IsRoot || p.AllClusters {
 		return true
 	}
 	return slices.Contains(p.ClusterIDs, clusterID)

@@ -43,8 +43,8 @@ Before pointing real users at the console:
 - [ ] `PUBLIC_BASE_URL` or `OIDC_*` URLs match your public hostname  
 - [ ] PostgreSQL backups enabled  
 - [ ] Network: console → NATS `:4222` and monitoring `:8222` only from private networks  
-- [ ] Consider `METRICS_AUTH_ENABLED=true` if Prometheus scrapes cross-network  
-- [ ] Keep `PPROF_ENABLED=false` unless admins need runtime profiling  
+- [ ] Set `METRICS_AUTH_ENABLED=true` in production (required when `ENV=production`)
+- [ ] Keep `PPROF_ENABLED=false` unless admins need runtime profiling
 
 The server **refuses to start** in production if encryption key, session secret, or weak admin password is missing.
 
@@ -187,9 +187,9 @@ See the main [README SSO section](../README.md#sso-oidc) for Keycloak, Okta, and
 | Endpoint | Auth | Use |
 |----------|------|-----|
 | `GET /api/health` | Public | Liveness/readiness |
-| `GET /metrics` | Public* | Prometheus metrics |
+| `GET /metrics` | Admin/root* | Prometheus metrics |
 
-\* Set `METRICS_AUTH_ENABLED=true` to require login for scrapes.
+\* `METRICS_AUTH_ENABLED=true` is required when `ENV=production`. Scrapers must authenticate as admin/root.
 
 Metrics include HTTP latency, active NATS connections, reconnects, and WebSocket counts.
 
@@ -206,11 +206,12 @@ Structured JSON logs include request ID, path, status, duration.
 
 ```bash
 PPROF_ENABLED=true
-PPROF_AUTH_ENABLED=true   # default — admin only
+PPROF_AUTH_ENABLED=true   # required in production
 PPROF_CPU_MAX_SECONDS=120
+HTTP_WRITE_TIMEOUT=125s   # must be >= PPROF_CPU_MAX_SECONDS + buffer
 ```
 
-Exposes `/debug/pprof/*` and `/api/v1/pprof/*` for admins. **Off by default** — enable only when debugging console performance.
+Exposes `/api/v1/pprof/*` for admins. Raw `/debug/pprof` returns **404 in production**. **Off by default** — enable only when debugging console performance.
 
 ---
 

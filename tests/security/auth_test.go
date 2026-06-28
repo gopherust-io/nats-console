@@ -75,10 +75,11 @@ func TestViewerCannotMutateStreams(t *testing.T) {
 	ctx := context.Background()
 
 	viewer, err := stack.Store.CreateUser(ctx, store.UserCreate{
-		Username: "viewer-user",
-		Email:    "viewer@example.com",
-		Password: "viewer-pass",
-		Roles:    []string{store.RoleViewer},
+		Username:    "viewer-user",
+		Email:       "viewer@example.com",
+		Password:    "viewer-pass",
+		Roles:       []string{store.RoleViewer},
+		AccessRules: stack.ClusterAccessRules(t),
 	})
 	require.NoError(t, err)
 	_ = viewer
@@ -103,18 +104,20 @@ func TestOperatorCannotManageUsers(t *testing.T) {
 	ctx := context.Background()
 
 	op, err := stack.Store.CreateUser(ctx, store.UserCreate{
-		Username: "operator-user",
-		Email:    "op@example.com",
-		Password: "op-pass",
-		Roles:    []string{store.RoleOperator},
+		Username:    "operator-user",
+		Email:       "op@example.com",
+		Password:    "op-pass",
+		Roles:       []string{store.RoleOperator},
+		AccessRules: stack.ClusterAccessRules(t),
 	})
 	require.NoError(t, err)
 
 	viewer, err := stack.Store.CreateUser(ctx, store.UserCreate{
-		Username: "target-viewer",
-		Email:    "target@example.com",
-		Password: "v-pass",
-		Roles:    []string{store.RoleViewer},
+		Username:    "target-viewer",
+		Email:       "target@example.com",
+		Password:    "v-pass",
+		Roles:       []string{store.RoleViewer},
+		AccessRules: stack.ClusterAccessRules(t),
 	})
 	require.NoError(t, err)
 	_ = op

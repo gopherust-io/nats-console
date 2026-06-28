@@ -229,6 +229,12 @@ func rbacMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 			return
 		}
 
+		if method == fasthttp.MethodPost && path == "/api/v1/clusters" && !auth.CanCreateCluster(user) {
+			ctx.SetStatusCode(fasthttp.StatusForbidden)
+			ctx.SetBodyString("forbidden")
+			return
+		}
+
 		if method == fasthttp.MethodDelete && strings.HasPrefix(path, "/api/v1/clusters/") && !strings.Contains(strings.TrimPrefix(path, "/api/v1/clusters/"), "/") {
 			if !auth.CanDeleteCluster(user) {
 				ctx.SetStatusCode(fasthttp.StatusForbidden)

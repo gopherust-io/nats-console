@@ -7,17 +7,20 @@ Manage streams, consumers, browse messages, tail live traffic, manage KV/Object 
 **📖 Documentation:** friendly guides for everyone — [docs/README.md](docs/README.md)
 - [Getting started](docs/getting-started.md) · [User guide](docs/user-guide.md) · [DevOps setup](docs/devops-setup.md) · [Developer setup](docs/developer-setup.md)
 
-## Features (v0.3)
+## Features (v0.5)
 
 - **Multi-cluster registry** with PostgreSQL persistence
-- **Enterprise security** — AES-GCM credential encryption, audit log, OIDC SSO, RBAC
+- **Multi-tenant RBAC** — operator/viewer/admin scoped by `accessRules.clusterIds`; root and legacy unscoped admin retain full access
+- **Enterprise security** — AES-GCM credential encryption, audit log, OIDC SSO, hardened pprof/metrics
 - Dashboard with JetStream account usage, server info, and jsz metrics
 - Stream list, create, update, delete, purge
 - Consumer CRUD with detail pages
 - Message browser with prev/next navigation and JSON/raw view
-- **Live mode** — real-time WebSocket tail per stream
+- **Live mode** — real-time WebSocket tail per stream (race-safe hub)
 - **KV Store** and **Object Store** management
-- **Prometheus metrics** at `/metrics`
+- **Supercluster view** — gateways, routes, leafnodes, replication with partial-failure warnings
+- **Continuous profiling** — admin-only `/api/v1/pprof/*` (raw `/debug/pprof` disabled in production)
+- **Prometheus metrics** at `/metrics` (auth on by default in production)
 - **Helm chart** for Kubernetes deployment
 - OpenAPI spec served at `/api/openapi.yaml`
 - Docker Compose quickstart with NATS + PostgreSQL + JetStream
@@ -216,19 +219,21 @@ Open the **AI** floating button in the console (bottom-right) after signing in.
 | Role | Permissions |
 |------|-------------|
 | **root** | Single bootstrap superuser (`is_root`); full access; creates delegated admins with access rules |
-| **admin** | Full access by default, or scoped via `accessRules` when created by root |
-| **operator** | CRUD streams/consumers/KV/objects; no cluster delete |
-| **viewer** | Read-only (dashboard, browse, live tail) |
+| **admin** | Full access when unscoped (legacy), or limited via `accessRules` when created by root |
+| **operator** | CRUD streams/consumers/KV/objects within assigned clusters; no cluster delete |
+| **viewer** | Read-only (dashboard, browse, live tail) within assigned clusters |
 
-The bootstrap account (`ADMIN_USERNAME` / `ADMIN_PASSWORD`) is seeded as the **root** user on first start. Root can create additional admin users with configurable **access rules**:
+The bootstrap account (`ADMIN_USERNAME` / `ADMIN_PASSWORD`) is seeded as the **root** user on first start. Root can create additional admin users with configurable **access rules**. **Operator and viewer users must be assigned at least one cluster** via `accessRules.clusterIds` (multi-tenant scoping).
 
 | Access rule | Meaning |
 |-------------|---------|
-| `clusterIds` | Limit cluster-scoped API access (empty = all clusters) |
-| `manageUsers` | Create, update, delete users and assign roles |
+| `clusterIds` | **Required** for non-root users (except legacy unscoped admin). Limits API access to listed cluster UUIDs. Empty list = no cluster access. |
+| `manageUsers` | Create, update, delete users and assign roles (delegated admin only) |
 | `viewAudit` | Read the audit log |
 | `deleteClusters` | Delete cluster registrations |
 | `assignableRoles` | Roles this admin may grant to others |
+
+**Migration (v0.5):** After upgrading, assign `clusterIds` to existing operator/viewer (and scoped admin) accounts that previously had implicit access to all clusters. Users with empty `clusterIds` lose cluster access until clusters are assigned.
 
 Root cannot be deleted or demoted by non-root users. Only one root account may exist.
 

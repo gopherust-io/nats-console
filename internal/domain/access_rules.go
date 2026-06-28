@@ -2,9 +2,8 @@ package domain
 
 import "slices"
 
-// AccessRules scopes delegated admin users created by the root account.
-// Root users ignore access rules and have full permissions.
-// Legacy admin users without access rules retain full admin permissions.
+// AccessRules scopes non-root users to specific clusters and delegated admin capabilities.
+// Root users and legacy admin users without access rules ignore these fields.
 type AccessRules struct {
 	ClusterIDs      []string `json:"clusterIds,omitempty"`
 	AssignableRoles []string `json:"assignableRoles,omitempty"`
@@ -14,8 +13,8 @@ type AccessRules struct {
 }
 
 func (r *AccessRules) AllowsCluster(clusterID string) bool {
-	if r == nil || len(r.ClusterIDs) == 0 {
-		return true
+	if r == nil {
+		return false
 	}
 	return slices.Contains(r.ClusterIDs, clusterID)
 }

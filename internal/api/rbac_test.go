@@ -46,6 +46,23 @@ func TestFilterClustersForActor(t *testing.T) {
 	assert.Equal(t, "allowed", filtered[0].Name)
 }
 
+func TestFilterClustersForScopedOperator(t *testing.T) {
+	clusters := []domain.Cluster{
+		{ID: "550e8400-e29b-41d4-a716-446655440000", Name: "allowed"},
+		{ID: "660e8400-e29b-41d4-a716-446655440001", Name: "denied"},
+	}
+	actor := domain.User{
+		Roles: []string{domain.RoleOperator},
+		AccessRules: &domain.AccessRules{
+			ClusterIDs: []string{"550e8400-e29b-41d4-a716-446655440000"},
+		},
+	}
+
+	filtered := filterClustersForActor(clusters, actor)
+	require.Len(t, filtered, 1)
+	assert.Equal(t, "allowed", filtered[0].Name)
+}
+
 func TestAuditFilterForActor(t *testing.T) {
 	actor := domain.User{
 		Roles: []string{domain.RoleAdmin},

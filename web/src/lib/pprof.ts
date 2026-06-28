@@ -82,7 +82,7 @@ export function pprofProfileDownloadUrl(profile: string, seconds?: number) {
 }
 
 export function pprofDebugIndexUrl() {
-  return "/debug/pprof/";
+  return "/api/v1/pprof/config";
 }
 
 export function formatPprofBytes(value: number) {

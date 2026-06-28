@@ -34,7 +34,7 @@ func clusterIDFromPath(path string) string {
 
 func filterClustersForActor(clusters []domain.Cluster, actor domain.User) []domain.Cluster {
 	perms := domain.PermissionsFor(actor)
-	if !hasClusterScope(perms) {
+	if !shouldFilterClusters(perms) {
 		return clusters
 	}
 	out := make([]domain.Cluster, 0, len(clusters))
@@ -48,7 +48,7 @@ func filterClustersForActor(clusters []domain.Cluster, actor domain.User) []doma
 
 func filterConnectionStatusesForActor(statuses []domain.NATSConnectionStatus, actor domain.User) []domain.NATSConnectionStatus {
 	perms := domain.PermissionsFor(actor)
-	if !hasClusterScope(perms) {
+	if !shouldFilterClusters(perms) {
 		return statuses
 	}
 	out := make([]domain.NATSConnectionStatus, 0, len(statuses))
@@ -70,12 +70,12 @@ func auditFilterForActor(actor domain.User, clusterID string) (domain.AuditFilte
 		filter.ClusterID = clusterID
 		return filter, nil
 	}
-	if hasClusterScope(perms) {
+	if shouldFilterClusters(perms) {
 		filter.ClusterIDs = append([]string(nil), perms.ClusterIDs...)
 	}
 	return filter, nil
 }
 
-func hasClusterScope(perms domain.Permissions) bool {
-	return !perms.IsRoot && len(perms.ClusterIDs) > 0
+func shouldFilterClusters(perms domain.Permissions) bool {
+	return !perms.IsRoot && !perms.AllClusters
 }

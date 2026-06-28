@@ -3,32 +3,91 @@ package natsclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/port"
 )
 
-func BuildSuperclusterOverview(ctx context.Context, client port.JetStreamExecutor) (domain.SuperclusterOverview, error) {
-	out := domain.SuperclusterOverview{FetchedAt: time.Now().UTC()}
+var errSuperclusterUnavailable = errors.New("supercluster monitoring unavailable")
 
-	if raw, err := client.Monitoring(ctx, "/varz"); err == nil {
-		applyVarz(raw, &out)
+func BuildSuperclusterOverview(ctx context.Context, client port.JetStreamExecutor) (domain.SuperclusterOverview, error) {
+	out := domain.SuperclusterOverview{
+		FetchedAt:    time.Now().UTC(),
+		SourceErrors: map[string]string{},
 	}
-	if raw, err := client.Monitoring(ctx, "/gatewayz"); err == nil {
-		out.Gateways = parseGateways(raw)
+	successes := 0
+
+	record := func(source string, err error) {
+		if err != nil {
+			out.SourceErrors[source] = err.Error()
+			return
+		}
+		successes++
 	}
-	if raw, err := client.Monitoring(ctx, "/routez"); err == nil {
-		out.Routes = parseRoutes(raw)
+
+	if raw, err := client.Monitoring(ctx, "/varz"); err != nil {
+		record("varz", err)
+	} else {
+		record("varz", applyVarz(raw, &out))
 	}
-	if raw, err := client.Monitoring(ctx, "/leafz"); err == nil {
-		out.Leafnodes = parseLeafnodes(raw)
+
+	if raw, err := client.Monitoring(ctx, "/gatewayz"); err != nil {
+		record("gatewayz", err)
+	} else {
+		gateways, parseErr := parseGateways(raw)
+		if parseErr == nil {
+			out.Gateways = gateways
+		}
+		record("gatewayz", parseErr)
 	}
-	if raw, err := client.Monitoring(ctx, "/jsz?raft=1&streams=1&config=1&leader-only=1"); err == nil {
-		applyJSZ(raw, &out)
+
+	if raw, err := client.Monitoring(ctx, "/routez"); err != nil {
+		record("routez", err)
+	} else {
+		routes, parseErr := parseRoutes(raw)
+		if parseErr == nil {
+			out.Routes = routes
+		}
+		record("routez", parseErr)
+	}
+
+	if raw, err := client.Monitoring(ctx, "/leafz"); err != nil {
+		record("leafz", err)
+	} else {
+		leafnodes, parseErr := parseLeafnodes(raw)
+		if parseErr == nil {
+			out.Leafnodes = leafnodes
+		}
+		record("leafz", parseErr)
+	}
+
+	if raw, err := client.Monitoring(ctx, "/jsz?raft=1&streams=1&config=1&leader-only=1"); err != nil {
+		record("jsz", err)
+	} else {
+		record("jsz", applyJSZ(raw, &out))
+	}
+
+	if successes == 0 {
+		if ctx.Err() != nil {
+			return out, ctx.Err()
+		}
+		return out, fmt.Errorf("%w: %v", errSuperclusterUnavailable, out.SourceErrors)
+	}
+
+	if len(out.SourceErrors) > 0 {
+		out.Warnings = make([]string, 0, len(out.SourceErrors))
+		for source, msg := range out.SourceErrors {
+			out.Warnings = append(out.Warnings, source+": "+msg)
+		}
 	}
 
 	normalizeSuperclusterOverview(&out)
+	if len(out.SourceErrors) == 0 {
+		out.SourceErrors = nil
+	}
 	return out, nil
 }
 
@@ -47,7 +106,7 @@ func normalizeSuperclusterOverview(out *domain.SuperclusterOverview) {
 	}
 }
 
-func applyVarz(raw []byte, out *domain.SuperclusterOverview) {
+func applyVarz(raw []byte, out *domain.SuperclusterOverview) error {
 	var payload struct {
 		ServerName string `json:"server_name"`
 		Cluster    struct {
@@ -60,22 +119,23 @@ func applyVarz(raw []byte, out *domain.SuperclusterOverview) {
 		Leafnodes int `json:"leafnodes"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return
+		return err
 	}
 	out.ServerName = payload.ServerName
 	out.ClusterName = payload.Cluster.Name
 	out.GatewayEnabled = payload.Gateway.Name != ""
 	out.RouteCount = payload.Routes
 	out.LeafCount = payload.Leafnodes
+	return nil
 }
 
-func parseGateways(raw []byte) []domain.SuperclusterGateway {
+func parseGateways(raw []byte) ([]domain.SuperclusterGateway, error) {
 	var payload struct {
 		OutboundGateways []gatewayEntry `json:"outbound_gateways"`
 		InboundGateways  []gatewayEntry `json:"inbound_gateways"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil
+		return nil, err
 	}
 	var out []domain.SuperclusterGateway
 	for _, gw := range payload.OutboundGateways {
@@ -84,7 +144,7 @@ func parseGateways(raw []byte) []domain.SuperclusterGateway {
 	for _, gw := range payload.InboundGateways {
 		out = append(out, gatewayToDomain(gw, "inbound"))
 	}
-	return out
+	return out, nil
 }
 
 type gatewayEntry struct {
@@ -106,7 +166,7 @@ func gatewayToDomain(gw gatewayEntry, direction string) domain.SuperclusterGatew
 	}
 }
 
-func parseRoutes(raw []byte) []domain.SuperclusterRoute {
+func parseRoutes(raw []byte) ([]domain.SuperclusterRoute, error) {
 	var payload struct {
 		Routes []struct {
 			RemoteID  string `json:"remote_id"`
@@ -117,7 +177,7 @@ func parseRoutes(raw []byte) []domain.SuperclusterRoute {
 		} `json:"routes"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil
+		return nil, err
 	}
 	out := make([]domain.SuperclusterRoute, 0, len(payload.Routes))
 	for _, route := range payload.Routes {
@@ -129,10 +189,10 @@ func parseRoutes(raw []byte) []domain.SuperclusterRoute {
 			OutMsgs:   route.OutMsgs,
 		})
 	}
-	return out
+	return out, nil
 }
 
-func parseLeafnodes(raw []byte) []domain.SuperclusterLeafnode {
+func parseLeafnodes(raw []byte) ([]domain.SuperclusterLeafnode, error) {
 	var payload struct {
 		Leafs []struct {
 			Name      string `json:"name"`
@@ -142,7 +202,7 @@ func parseLeafnodes(raw []byte) []domain.SuperclusterLeafnode {
 		} `json:"leafs"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil
+		return nil, err
 	}
 	out := make([]domain.SuperclusterLeafnode, 0, len(payload.Leafs))
 	for _, leaf := range payload.Leafs {
@@ -153,10 +213,10 @@ func parseLeafnodes(raw []byte) []domain.SuperclusterLeafnode {
 			RTT:       leaf.RTT,
 		})
 	}
-	return out
+	return out, nil
 }
 
-func applyJSZ(raw []byte, out *domain.SuperclusterOverview) {
+func applyJSZ(raw []byte, out *domain.SuperclusterOverview) error {
 	var payload struct {
 		Domain         string `json:"domain"`
 		AccountDetails []struct {
@@ -166,7 +226,7 @@ func applyJSZ(raw []byte, out *domain.SuperclusterOverview) {
 		MetaCluster metaJSZ `json:"meta_cluster"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return
+		return err
 	}
 	out.JetStreamDomain = payload.Domain
 	meta := payload.MetaCluster
@@ -198,6 +258,7 @@ func applyJSZ(raw []byte, out *domain.SuperclusterOverview) {
 			out.StreamReplication = append(out.StreamReplication, replicationFromStream(stream)...)
 		}
 	}
+	return nil
 }
 
 type metaJSZ struct {

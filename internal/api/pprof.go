@@ -34,10 +34,11 @@ func isPprofPath(path string) bool {
 }
 
 func isLongRunningProfilePath(path string) bool {
-	if !isPprofPath(path) {
-		return strings.HasPrefix(path, "/api/v1/pprof/profile/cpu")
+	if isPprofPath(path) {
+		return strings.HasPrefix(path, pprofPathPrefix+"/profile")
 	}
-	return strings.HasPrefix(path, pprofPathPrefix+"/profile")
+	return strings.HasPrefix(path, "/api/v1/pprof/profile/cpu") ||
+		strings.HasPrefix(path, "/api/v1/pprof/profile/profile")
 }
 
 func (h *Handler) PprofConfig(ctx *fasthttp.RequestCtx) {

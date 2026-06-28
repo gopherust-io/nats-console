@@ -145,5 +145,11 @@ func validateUserInput(roles []string, rules *domain.AccessRules) error {
 			return errors.New("invalid role: " + role)
 		}
 	}
+	if domain.HasRole(roles, domain.RoleAdmin) && rules == nil {
+		return domain.ValidateAccessRules(rules)
+	}
+	if rules == nil {
+		return errors.New("accessRules required")
+	}
 	return domain.ValidateAccessRules(rules)
 }

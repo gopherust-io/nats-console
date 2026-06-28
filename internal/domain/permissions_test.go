@@ -35,6 +35,27 @@ func TestDelegatedAdminPermissions(t *testing.T) {
 	assert.False(t, perms.AllowsRole(domain.RoleAdmin), "should not assign admin")
 }
 
+func TestScopedOperatorPermissions(t *testing.T) {
+	user := domain.User{
+		Roles: []string{domain.RoleOperator},
+		AccessRules: &domain.AccessRules{
+			ClusterIDs: []string{"cluster-a"},
+		},
+	}
+	perms := domain.PermissionsFor(user)
+	assert.False(t, perms.AllClusters)
+	assert.True(t, perms.AllowsCluster("cluster-a"))
+	assert.False(t, perms.AllowsCluster("cluster-b"))
+}
+
+func TestOperatorWithoutRulesHasNoClusterAccess(t *testing.T) {
+	user := domain.User{
+		Roles: []string{domain.RoleOperator},
+	}
+	perms := domain.PermissionsFor(user)
+	assert.False(t, perms.AllowsCluster("cluster-a"))
+}
+
 func TestCannotEscalateAccessRules(t *testing.T) {
 	actor := domain.User{
 		Roles: []string{domain.RoleAdmin},
@@ -54,6 +75,6 @@ func TestCannotEscalateAccessRules(t *testing.T) {
 }
 
 func TestValidateAccessRulesRequiresAssignableRoles(t *testing.T) {
-	err := domain.ValidateAccessRules(&domain.AccessRules{ManageUsers: true})
+	err := domain.ValidateAccessRules(&domain.AccessRules{ManageUsers: true, ClusterIDs: []string{"cluster-a"}})
 	require.Error(t, err, "expected validation error")
 }

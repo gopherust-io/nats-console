@@ -32,6 +32,16 @@ fi
 echo "==> smoke: streams list (cluster ${cluster_id})"
 curl -sf -b "$cookie_jar" "${BASE_URL}/api/v1/clusters/${cluster_id}/streams" | grep -q '"streams"'
 
+echo "==> smoke: create live stream"
+if ! curl -sf -b "$cookie_jar" -X POST "${BASE_URL}/api/v1/clusters/${cluster_id}/streams" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"LIVE_SMOKE","subjects":["live.>"]}'; then
+  curl -sf -b "$cookie_jar" "${BASE_URL}/api/v1/clusters/${cluster_id}/streams" | grep -q 'LIVE_SMOKE'
+fi
+
+echo "==> smoke: live websocket"
+AUTH="${AUTH}" go run ./tests/e2e/ws_check.go "${BASE_URL}" "${cluster_id}" "${cookie_jar}"
+
 echo "==> smoke: openapi spec"
 curl -sf "${BASE_URL}/api/openapi.yaml" | grep -q 'openapi:'
 

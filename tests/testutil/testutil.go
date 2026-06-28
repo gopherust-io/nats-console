@@ -187,6 +187,12 @@ func (s *Stack) DefaultClusterID(t *testing.T) string {
 	return clusters[0].ID
 }
 
+// ClusterAccessRules returns access rules scoped to the default test cluster.
+func (s *Stack) ClusterAccessRules(t *testing.T) *store.AccessRules {
+	t.Helper()
+	return &store.AccessRules{ClusterIDs: []string{s.DefaultClusterID(t)}}
+}
+
 // Services builds app services for the stack.
 func (s *Stack) Services(t *testing.T) *app.Services {
 	t.Helper()
@@ -204,6 +210,12 @@ func (s *Stack) Services(t *testing.T) *app.Services {
 // Server wraps an in-memory HTTP server backed by fasthttp.
 type Server struct {
 	Client *http.Client
+	ln     *fasthttputil.InmemoryListener
+}
+
+// DialConn returns a connection to the in-memory server (for WebSocket tests).
+func (s *Server) DialConn() (net.Conn, error) {
+	return s.ln.Dial()
 }
 
 // NewServer starts an in-memory API server with the given config overrides applied to stack cfg.
@@ -246,7 +258,7 @@ func (s *Stack) NewServer(t *testing.T, mutate func(*config.Config)) *Server {
 			},
 		},
 	}
-	return &Server{Client: client}
+	return &Server{Client: client, ln: ln}
 }
 
 // BaseURL is a helper for building cluster-scoped paths.

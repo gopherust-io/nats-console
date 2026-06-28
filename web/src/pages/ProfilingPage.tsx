@@ -191,7 +191,7 @@ export default function ProfilingPage() {
               Continuous
             </label>
             <a className="btn btn--secondary" href={pprofDebugIndexUrl()} target="_blank" rel="noreferrer">
-              Open pprof index
+              Open pprof API
             </a>
           </div>
         }

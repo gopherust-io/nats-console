@@ -202,11 +202,20 @@ func (s *Service) HandleSSOCallback(ctx context.Context, providerID, code string
 
 	user, err := s.store.GetUserByOIDCSub(ctx, sub)
 	if errors.Is(err, store.ErrNotFound) {
+		clusterIDs, listErr := s.defaultClusterIDs(ctx)
+		if listErr != nil {
+			return store.User{}, listErr
+		}
+		var accessRules *store.AccessRules
+		if len(clusterIDs) > 0 {
+			accessRules = &store.AccessRules{ClusterIDs: clusterIDs}
+		}
 		user, err = s.store.CreateUser(ctx, store.UserCreate{
-			Username: username,
-			Email:    email,
-			OIDCSub:  sub,
-			Roles:    []string{store.RoleViewer},
+			Username:    username,
+			Email:       email,
+			OIDCSub:     sub,
+			Roles:       []string{store.RoleViewer},
+			AccessRules: accessRules,
 		})
 	}
 	if err != nil {
@@ -307,4 +316,16 @@ func UserFromContext(ctx context.Context) (store.User, bool) {
 
 func ContextWithUser(ctx context.Context, user store.User) context.Context {
 	return context.WithValue(ctx, ContextUser, user)
+}
+
+func (s *Service) defaultClusterIDs(ctx context.Context) ([]string, error) {
+	clusters, err := s.store.ListClusters(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(clusters))
+	for _, cluster := range clusters {
+		ids = append(ids, cluster.ID)
+	}
+	return ids, nil
 }

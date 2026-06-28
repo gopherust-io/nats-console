@@ -73,6 +73,13 @@ type liveFrame struct {
 	Seq     uint64 `json:"seq,omitempty"`
 }
 
+func requestContext(ctx *fasthttp.RequestCtx) context.Context {
+	if c, ok := ctx.UserValue("context").(context.Context); ok && c != nil {
+		return c
+	}
+	return context.Background()
+}
+
 func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 	clusterID, ok := ctx.UserValue("clusterId").(string)
 	if !ok || clusterID == "" {
@@ -96,7 +103,8 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 		fromSeq = parsed
 	}
 
-	client, err := h.gateway.GetExecutor(context.Background(), clusterID)
+	reqCtx := requestContext(ctx)
+	client, err := h.gateway.GetExecutor(reqCtx, clusterID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			ctx.Error("cluster not found", fasthttp.StatusNotFound)
@@ -107,86 +115,159 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 	}
 
 	err = upgrader.Upgrade(ctx, func(conn *websocket.Conn) {
-		defer func() { _ = conn.Close() }()
-		metrics.IncWS()
-		defer metrics.DecWS()
+		h.serveConn(conn, client, stream, subjectFilter, fromSeq)
+	})
+	if err != nil {
+		log.Error().Err(err).Str("component", "live").Msg("websocket upgrade failed")
+	}
+}
 
-		paused := false
-		var pauseMu sync.Mutex
-		msgCount := 0
-		lastSent := time.Time{}
+func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, stream, subjectFilter string, fromSeq uint64) {
+	defer func() { _ = conn.Close() }()
+	metrics.IncWS()
+	defer metrics.DecWS()
 
-		send := func(frame liveFrame) {
-			data, err := sonic.Marshal(frame)
-			if err != nil {
-				return
-			}
-			_ = conn.WriteMessage(websocket.TextMessage, data)
-		}
+	sessionCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-		send(liveFrame{Type: "connected", Subject: stream})
+	var (
+		mu         sync.Mutex
+		writeMu    sync.Mutex
+		paused     bool
+		msgCount   int
+		lastSent   time.Time
+		maxReached bool
+		closed     bool
+	)
 
-		subject := ">"
-		subOpts := []nats.SubOpt{nats.BindStream(stream)}
-		if subjectFilter != "" {
-			subject = subjectFilter
-		}
-		if fromSeq > 0 {
-			subOpts = append(subOpts, nats.StartSequence(fromSeq))
-		} else {
-			subOpts = append(subOpts, nats.DeliverNew())
-		}
+	writeFrameOnce := func(frame liveFrame) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		return h.writeFrame(conn, frame)
+	}
 
-		sub, err := client.JetStream().Subscribe(subject, func(msg *nats.Msg) {
-			pauseMu.Lock()
-			p := paused
-			pauseMu.Unlock()
-			if p {
-				return
-			}
-			if msgCount >= h.liveWSMaxMessages() {
-				send(liveFrame{Type: "error", Error: "max messages reached"})
-				return
-			}
-			if !lastSent.IsZero() && time.Since(lastSent) < h.liveWSRateLimit() {
-				return
-			}
-			lastSent = time.Now()
-			msgCount++
-
-			meta, _ := msg.Metadata()
-			seq := uint64(0)
-			if meta != nil {
-				seq = meta.Sequence.Stream
-			}
-			send(liveFrame{
-				Type:    "message",
-				Seq:     seq,
-				Subject: msg.Subject,
-				Time:    time.Now().UTC().Format(time.RFC3339Nano),
-				Data:    base64.StdEncoding.EncodeToString(msg.Data),
-			})
-		}, subOpts...)
-		if err != nil {
-			send(liveFrame{Type: "error", Error: err.Error()})
+	closeSession := func(message string) {
+		mu.Lock()
+		if closed {
+			mu.Unlock()
 			return
 		}
-		defer func() { _ = sub.Unsubscribe() }()
+		closed = true
+		mu.Unlock()
+		cancel()
+		if message != "" {
+			_ = writeFrameOnce(liveFrame{Type: "error", Error: message})
+		}
+		_ = conn.Close()
+	}
 
-		idleTimer := time.NewTimer(h.liveWSIdleTimeout())
-		defer idleTimer.Stop()
+	send := func(frame liveFrame) bool {
+		mu.Lock()
+		if closed {
+			mu.Unlock()
+			return false
+		}
+		mu.Unlock()
+		if err := writeFrameOnce(frame); err != nil {
+			closeSession("")
+			return false
+		}
+		return true
+	}
 
+	if !send(liveFrame{Type: "connected", Subject: stream}) {
+		return
+	}
+
+	subject := ">"
+	subOpts := []nats.SubOpt{nats.BindStream(stream)}
+	if subjectFilter != "" {
+		subject = subjectFilter
+	}
+	if fromSeq > 0 {
+		subOpts = append(subOpts, nats.StartSequence(fromSeq))
+	} else {
+		subOpts = append(subOpts, nats.DeliverNew())
+	}
+
+	sub, err := client.JetStream().Subscribe(subject, func(msg *nats.Msg) {
+		mu.Lock()
+		if closed || paused || maxReached {
+			mu.Unlock()
+			return
+		}
+		if msgCount >= h.liveWSMaxMessages() {
+			maxReached = true
+			mu.Unlock()
+			send(liveFrame{Type: "error", Error: "max messages reached"})
+			closeSession("")
+			return
+		}
+		if !lastSent.IsZero() && time.Since(lastSent) < h.liveWSRateLimit() {
+			mu.Unlock()
+			return
+		}
+		msgCount++
+		lastSent = time.Now()
+		mu.Unlock()
+
+		seq := uint64(0)
+		if meta, metaErr := msg.Metadata(); metaErr == nil && meta != nil {
+			seq = meta.Sequence.Stream
+		}
+		if !send(liveFrame{
+			Type:    "message",
+			Seq:     seq,
+			Subject: msg.Subject,
+			Time:    time.Now().UTC().Format(time.RFC3339Nano),
+			Data:    base64.StdEncoding.EncodeToString(msg.Data),
+		}) {
+			return
+		}
+	}, subOpts...)
+	if err != nil {
+		closeSession(err.Error())
+		return
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	if nc := client.Conn(); nc != nil {
+		if prev := nc.DisconnectErrHandler(); prev != nil {
+			nc.SetDisconnectErrHandler(func(c *nats.Conn, err error) {
+				prev(c, err)
+				closeSession("nats disconnected")
+			})
+		} else {
+			nc.SetDisconnectErrHandler(func(_ *nats.Conn, _ error) {
+				closeSession("nats disconnected")
+			})
+		}
+	}
+
+	idleTimer := time.NewTimer(h.liveWSIdleTimeout())
+	defer idleTimer.Stop()
+
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
 		for {
 			select {
-			case <-idleTimer.C:
-				send(liveFrame{Type: "error", Error: "idle timeout"})
+			case <-sessionCtx.Done():
 				return
 			default:
 			}
-
-			_, data, err := conn.ReadMessage()
-			if err != nil {
+			_ = conn.SetReadDeadline(time.Now().Add(h.liveWSIdleTimeout()))
+			_, data, readErr := conn.ReadMessage()
+			if readErr != nil {
+				closeSession("")
 				return
+			}
+
+			if !idleTimer.Stop() {
+				select {
+				case <-idleTimer.C:
+				default:
+				}
 			}
 			idleTimer.Reset(h.liveWSIdleTimeout())
 
@@ -196,22 +277,37 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 			}
 			switch ctrl.Action {
 			case "pause":
-				pauseMu.Lock()
+				mu.Lock()
 				paused = true
-				pauseMu.Unlock()
+				mu.Unlock()
 				send(liveFrame{Type: "paused"})
 			case "resume":
-				pauseMu.Lock()
+				mu.Lock()
 				paused = false
-				pauseMu.Unlock()
+				mu.Unlock()
 				send(liveFrame{Type: "resumed"})
 			case "clear":
+				mu.Lock()
 				msgCount = 0
+				maxReached = false
+				mu.Unlock()
 				send(liveFrame{Type: "cleared"})
 			}
 		}
-	})
-	if err != nil {
-		log.Error().Err(err).Str("component", "live").Msg("websocket upgrade failed")
+	}()
+
+	select {
+	case <-sessionCtx.Done():
+	case <-idleTimer.C:
+		closeSession("idle timeout")
+	case <-readDone:
 	}
+}
+
+func (h *Hub) writeFrame(conn *websocket.Conn, frame liveFrame) error {
+	data, err := sonic.Marshal(frame)
+	if err != nil {
+		return err
+	}
+	return conn.WriteMessage(websocket.TextMessage, data)
 }

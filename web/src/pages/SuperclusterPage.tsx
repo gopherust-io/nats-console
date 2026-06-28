@@ -5,7 +5,7 @@ import PageHeader from "../components/ui/PageHeader";
 import StatCard from "../components/ui/StatCard";
 import { useCluster } from "../lib/cluster";
 import { clusterQueryKey } from "../lib/query";
-import { fetchSupercluster, hasSuperclusterFeatures } from "../lib/supercluster";
+import { fetchSupercluster, hasSuperclusterFeatures, hasSuperclusterWarnings } from "../lib/supercluster";
 
 function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
   return (
@@ -29,7 +29,7 @@ export default function SuperclusterPage() {
   const routes = data?.routes ?? [];
   const leafnodes = data?.leafnodes ?? [];
   const streamReplication = data?.streamReplication ?? [];
-  const standalone = data && !hasSuperclusterFeatures(data);
+  const standalone = data && !hasSuperclusterFeatures(data) && !hasSuperclusterWarnings(data);
 
   return (
     <div className="page">
@@ -58,6 +58,12 @@ export default function SuperclusterPage() {
       />
 
       <Alert variant="error">{error}</Alert>
+
+      {data?.warnings && data.warnings.length > 0 && (
+        <Alert variant="info">
+          Partial supercluster data: {data.warnings.join(" · ")}
+        </Alert>
+      )}
 
       {superclusterQuery.isLoading && <div className="skeleton skeleton--panel" />}
 

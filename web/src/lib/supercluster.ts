@@ -12,6 +12,8 @@ export type SuperclusterOverview = {
   leafnodes: SuperclusterLeafnode[];
   metaCluster?: SuperclusterMeta;
   streamReplication: StreamReplication[];
+  sourceErrors?: Record<string, string>;
+  warnings?: string[];
   fetchedAt: string;
 };
 
@@ -67,6 +69,10 @@ export type StreamReplication = {
 
 export function fetchSupercluster(clusterId: string) {
   return api<SuperclusterOverview>(clusterPath(clusterId, "/supercluster"));
+}
+
+export function hasSuperclusterWarnings(overview: SuperclusterOverview) {
+  return (overview.warnings?.length ?? 0) > 0 || Object.keys(overview.sourceErrors ?? {}).length > 0;
 }
 
 export function hasSuperclusterFeatures(overview: SuperclusterOverview) {

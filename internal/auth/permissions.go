@@ -69,3 +69,17 @@ func CanViewProfiling(user store.User) bool {
 func CanAccessCluster(user store.User, clusterID string) bool {
 	return permissionsForUser(user).AllowsCluster(clusterID)
 }
+
+func CanCreateCluster(user store.User) bool {
+	if user.IsRoot {
+		return true
+	}
+	return store.HighestRole(user.Roles) == store.RoleAdmin && user.AccessRules == nil
+}
+
+func CanViewMetrics(user store.User) bool {
+	if user.IsRoot {
+		return true
+	}
+	return store.HighestRole(user.Roles) == store.RoleAdmin
+}

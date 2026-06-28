@@ -7,6 +7,9 @@ func ValidateAccessRules(rules *AccessRules) error {
 	if rules == nil {
 		return nil
 	}
+	if len(rules.ClusterIDs) == 0 {
+		return errors.New("clusterIds required: assign at least one cluster")
+	}
 	for _, role := range rules.AssignableRoles {
 		switch role {
 		case RoleAdmin, RoleOperator, RoleViewer:

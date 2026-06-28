@@ -71,6 +71,7 @@ func TestDelegatedAdminCannotModifyRoot(t *testing.T) {
 		Password: "delegate-pass",
 		Roles:    []string{store.RoleAdmin},
 		AccessRules: &store.AccessRules{
+			ClusterIDs:      []string{stack.DefaultClusterID(t)},
 			ManageUsers:     true,
 			ViewAudit:       false,
 			DeleteClusters:  false,
@@ -102,7 +103,7 @@ func TestRootCanCreateDelegatedAdmin(t *testing.T) {
 		"password":"scoped-pass",
 		"roles":["admin"],
 		"accessRules":{
-			"clusterIds":[],
+			"clusterIds":["` + stack.DefaultClusterID(t) + `"],
 			"manageUsers":true,
 			"viewAudit":false,
 			"deleteClusters":false,
@@ -130,6 +131,7 @@ func TestDelegatedAdminCannotEscalateRoles(t *testing.T) {
 		Password: "delegate-pass",
 		Roles:    []string{store.RoleAdmin},
 		AccessRules: &store.AccessRules{
+			ClusterIDs:      []string{stack.DefaultClusterID(t)},
 			ManageUsers:     true,
 			AssignableRoles: []string{store.RoleViewer},
 		},
@@ -137,10 +139,11 @@ func TestDelegatedAdminCannotEscalateRoles(t *testing.T) {
 	require.NoError(t, err)
 
 	target, err := stack.Store.CreateUser(ctx, store.UserCreate{
-		Username: "target-viewer",
-		Email:    "target@example.com",
-		Password: "target-pass",
-		Roles:    []string{store.RoleViewer},
+		Username:    "target-viewer",
+		Email:       "target@example.com",
+		Password:    "target-pass",
+		Roles:       []string{store.RoleViewer},
+		AccessRules: stack.ClusterAccessRules(t),
 	})
 	require.NoError(t, err)
 

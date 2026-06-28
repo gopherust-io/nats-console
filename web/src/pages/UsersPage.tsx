@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api, AccessRules, UserRecord } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useCluster } from "../lib/cluster";
 
 const ROLES = ["admin", "operator", "viewer"];
 
@@ -14,6 +15,7 @@ const emptyRules: AccessRules = {
 
 export default function UsersPage() {
   const { user: currentUser, canManageUsers, isRoot } = useAuth();
+  const { clusters } = useCluster();
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
@@ -23,8 +25,42 @@ export default function UsersPage() {
     email: "",
     password: "",
     roles: ["admin"] as string[],
+    unscopedAdmin: false,
     accessRules: { ...emptyRules, manageUsers: true, assignableRoles: ["operator", "viewer"] },
   });
+
+  function toggleClusterSelection(clusterIds: string[], clusterId: string, checked: boolean) {
+    const next = new Set(clusterIds);
+    if (checked) next.add(clusterId);
+    else next.delete(clusterId);
+    return Array.from(next).sort();
+  }
+
+  function ClusterAccessPicker({
+    clusterIds,
+    onChange,
+    disabled,
+  }: {
+    clusterIds: string[];
+    onChange: (ids: string[]) => void;
+    disabled?: boolean;
+  }) {
+    return (
+      <div className="role-grid">
+        {clusters.map((cluster) => (
+          <label key={cluster.id} className="role-chip">
+            <input
+              type="checkbox"
+              checked={clusterIds.includes(cluster.id)}
+              disabled={disabled}
+              onChange={(e) => onChange(toggleClusterSelection(clusterIds, cluster.id, e.target.checked))}
+            />
+            {cluster.name}
+          </label>
+        ))}
+      </div>
+    );
+  }
 
   async function load() {
     setError("");
@@ -100,7 +136,10 @@ export default function UsersPage() {
           email: form.email,
           password: form.password,
           roles: form.roles,
-          accessRules: form.roles.includes("admin") ? form.accessRules : undefined,
+          accessRules:
+            isRoot && form.roles.length === 1 && form.roles[0] === "admin" && form.unscopedAdmin
+              ? undefined
+              : { ...form.accessRules, clusterIds: form.accessRules.clusterIds },
         }),
       });
       setForm({
@@ -108,6 +147,7 @@ export default function UsersPage() {
         email: "",
         password: "",
         roles: ["admin"],
+        unscopedAdmin: false,
         accessRules: { ...emptyRules, manageUsers: true, assignableRoles: ["operator", "viewer"] },
       });
       await load();
@@ -211,6 +251,14 @@ export default function UsersPage() {
                 <label className="role-chip">
                   <input
                     type="checkbox"
+                    checked={form.unscopedAdmin}
+                    onChange={(e) => setForm((f) => ({ ...f, unscopedAdmin: e.target.checked }))}
+                  />
+                  Unscoped admin (all clusters)
+                </label>
+                <label className="role-chip">
+                  <input
+                    type="checkbox"
                     checked={form.accessRules.manageUsers}
                     onChange={(e) =>
                       setForm((f) => ({
@@ -248,6 +296,20 @@ export default function UsersPage() {
                   Delete clusters
                 </label>
               </div>
+            )}
+            {!(form.roles.length === 1 && form.roles[0] === "admin" && form.unscopedAdmin) && (
+              <label>
+                Cluster access
+                <ClusterAccessPicker
+                  clusterIds={form.accessRules.clusterIds ?? []}
+                  onChange={(clusterIds) =>
+                    setForm((f) => ({
+                      ...f,
+                      accessRules: { ...f.accessRules, clusterIds },
+                    }))
+                  }
+                />
+              </label>
             )}
             <button className="btn btn--primary" type="submit" disabled={creating}>
               {creating ? "Creating…" : "Create user"}
@@ -294,53 +356,67 @@ export default function UsersPage() {
                 <td>
                   {user.isRoot ? (
                     <span className="muted">Full access</span>
-                  ) : user.roles.includes("admin") && user.accessRules ? (
+                  ) : user.accessRules ? (
                     <div className="role-grid">
-                      <label className="role-chip">
-                        <input
-                          type="checkbox"
-                          checked={user.accessRules.manageUsers}
-                          disabled={saving === user.id || !canEditUser(user)}
-                          onChange={(e) =>
-                            updateAccessRules(user, {
-                              ...user.accessRules!,
-                              manageUsers: e.target.checked,
-                            })
-                          }
-                        />
-                        users
-                      </label>
-                      <label className="role-chip">
-                        <input
-                          type="checkbox"
-                          checked={user.accessRules.viewAudit}
-                          disabled={saving === user.id || !canEditUser(user)}
-                          onChange={(e) =>
-                            updateAccessRules(user, {
-                              ...user.accessRules!,
-                              viewAudit: e.target.checked,
-                            })
-                          }
-                        />
-                        audit
-                      </label>
-                      <label className="role-chip">
-                        <input
-                          type="checkbox"
-                          checked={user.accessRules.deleteClusters}
-                          disabled={saving === user.id || !canEditUser(user)}
-                          onChange={(e) =>
-                            updateAccessRules(user, {
-                              ...user.accessRules!,
-                              deleteClusters: e.target.checked,
-                            })
-                          }
-                        />
-                        delete clusters
-                      </label>
+                      {user.roles.includes("admin") && (
+                        <>
+                          <label className="role-chip">
+                            <input
+                              type="checkbox"
+                              checked={user.accessRules.manageUsers}
+                              disabled={saving === user.id || !canEditUser(user)}
+                              onChange={(e) =>
+                                updateAccessRules(user, {
+                                  ...user.accessRules!,
+                                  manageUsers: e.target.checked,
+                                })
+                              }
+                            />
+                            users
+                          </label>
+                          <label className="role-chip">
+                            <input
+                              type="checkbox"
+                              checked={user.accessRules.viewAudit}
+                              disabled={saving === user.id || !canEditUser(user)}
+                              onChange={(e) =>
+                                updateAccessRules(user, {
+                                  ...user.accessRules!,
+                                  viewAudit: e.target.checked,
+                                })
+                              }
+                            />
+                            audit
+                          </label>
+                          <label className="role-chip">
+                            <input
+                              type="checkbox"
+                              checked={user.accessRules.deleteClusters}
+                              disabled={saving === user.id || !canEditUser(user)}
+                              onChange={(e) =>
+                                updateAccessRules(user, {
+                                  ...user.accessRules!,
+                                  deleteClusters: e.target.checked,
+                                })
+                              }
+                            />
+                            delete clusters
+                          </label>
+                        </>
+                      )}
+                      <ClusterAccessPicker
+                        clusterIds={user.accessRules.clusterIds ?? []}
+                        disabled={saving === user.id || !canEditUser(user)}
+                        onChange={(clusterIds) =>
+                          updateAccessRules(user, {
+                            ...user.accessRules!,
+                            clusterIds,
+                          })
+                        }
+                      />
                     </div>
                   ) : (
-                    <span className="muted">Role-based</span>
+                    <span className="muted">Unscoped admin</span>
                   )}
                 </td>
                 <td>{new Date(user.createdAt).toLocaleDateString()}</td>

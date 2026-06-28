@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"os"
 	"path"
 	"path/filepath"
@@ -134,7 +135,7 @@ func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
 		path := string(ctx.Path())
 		if strings.HasPrefix(path, pprofPathPrefix) {
-			if !deps.Config.PprofEnabled {
+			if !deps.Config.PprofEnabled || deps.Config.IsProduction() {
 				ctx.SetStatusCode(fasthttp.StatusNotFound)
 				return
 			}
@@ -143,6 +144,14 @@ func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
 				if !ok {
 					ctx.SetStatusCode(fasthttp.StatusUnauthorized)
 					return
+				}
+				if user.ID != "" {
+					loaded, err := deps.Services.Auth.LoadUser(context.Background(), user.ID)
+					if err != nil {
+						ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+						return
+					}
+					user = loaded
 				}
 				if !auth.CanViewProfiling(user) {
 					ctx.SetStatusCode(fasthttp.StatusForbidden)
@@ -154,8 +163,22 @@ func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
 			return
 		}
 		if deps.Config.MetricsAuthEnabled && path == "/metrics" {
-			if _, ok := authenticate(ctx, deps.Services.Auth); !ok {
+			user, ok := authenticate(ctx, deps.Services.Auth)
+			if !ok {
 				ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+				return
+			}
+			if user.ID != "" {
+				loaded, err := deps.Services.Auth.LoadUser(context.Background(), user.ID)
+				if err != nil {
+					ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+					return
+				}
+				user = loaded
+			}
+			if !auth.CanViewMetrics(user) {
+				ctx.SetStatusCode(fasthttp.StatusForbidden)
+				ctx.SetBodyString("forbidden")
 				return
 			}
 		}

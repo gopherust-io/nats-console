@@ -12,6 +12,8 @@ type SuperclusterOverview struct {
 	Routes            []SuperclusterRoute    `json:"routes"`
 	Leafnodes         []SuperclusterLeafnode `json:"leafnodes"`
 	StreamReplication []StreamReplication    `json:"streamReplication"`
+	SourceErrors      map[string]string      `json:"sourceErrors,omitempty"`
+	Warnings          []string               `json:"warnings,omitempty"`
 	RouteCount        int                    `json:"routeCount"`
 	LeafCount         int                    `json:"leafCount"`
 	GatewayEnabled    bool                   `json:"gatewayEnabled"`

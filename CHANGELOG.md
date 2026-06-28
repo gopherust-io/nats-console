@@ -2,6 +2,37 @@
 
 All notable changes to NATS Consol are documented in this file.
 
+## [0.5.0] - 2026-06-28
+
+### Added
+
+- **Multi-tenant RBAC** — `accessRules.clusterIds` enforced for operator, viewer, and scoped admin; cluster picker on Users page
+- **Supercluster reliability** — per-source errors and `warnings` in API/UI for partial monitoring failures
+- **Live WebSocket hardening** — single-writer pattern, read deadlines, NATS disconnect handling, max-message cap
+- **CI race job** — `-race` detector for `internal/live`
+- Security/integration tests for scoped operator/viewer and cluster create blocking
+
+### Changed
+
+- **Breaking:** Non-root users with empty `clusterIds` have **no cluster access** (previously operator/viewer saw all clusters). Assign clusters before/after upgrade.
+- Scoped admins cannot `POST /api/v1/clusters`; only root and legacy unscoped admin can register clusters
+- `/metrics` auth defaults to **on** in production (`METRICS_AUTH_ENABLED=true` required when `ENV=production`); admin/root only
+- Raw `/debug/pprof` returns **404 in production**; use authenticated `/api/v1/pprof/*`
+- Production config validates `PPROF_AUTH_ENABLED`, `HTTP_WRITE_TIMEOUT >= PPROF_CPU_MAX_SECONDS + buffer`
+- Profiling UI links to API config instead of raw debug index
+
+### Fixed
+
+- Concurrent WebSocket writes and hub state races in live mode
+- CPU profile collection truncated by write timeout middleware
+- Supercluster handler 502 branch and silent monitoring parse failures
+
+### Security
+
+- Close scoped-user cluster creation bypass
+- Stale JWT reload on pprof/metrics bypass routes
+- Metrics restricted to admin/root when auth enabled
+
 ## [0.4.0] - 2026-06-28
 
 ### Added

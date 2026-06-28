@@ -177,10 +177,13 @@ Useful for compliance and "who purged that stream?" moments.
 ### Users & roles (admin / root)
 
 - **Root** creates delegated **admin** users with optional **access rules**:
-  - Limit to specific `clusterIds`  
-  - Allow/deny user management, audit, cluster delete  
-  - Restrict which roles they may assign  
-- Legacy admins without access rules keep full admin powers  
+  - Limit to specific `clusterIds` (required for operator/viewer and scoped admins)
+  - Allow/deny user management, audit, cluster delete
+  - Restrict which roles they may assign
+- Legacy admins without access rules keep full admin powers
+- **Operator** and **viewer** users must have at least one cluster in `clusterIds` — they only see and act on those clusters
+
+**Upgrading to v0.5:** Assign `clusterIds` to existing operator/viewer accounts; empty scope no longer grants access to all clusters.
 
 ### Profiling (admin, optional)
 

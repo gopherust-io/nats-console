@@ -164,6 +164,15 @@ func (c Config) Validate() error {
 	if c.AdminPassword == "admin" {
 		errs = append(errs, "ADMIN_PASSWORD must be changed when ENV=production")
 	}
+	if c.PprofEnabled && !c.PprofAuthEnabled {
+		errs = append(errs, "PPROF_AUTH_ENABLED must be true when ENV=production and PPROF_ENABLED is true")
+	}
+	if !c.MetricsAuthEnabled {
+		errs = append(errs, "METRICS_AUTH_ENABLED must be true when ENV=production")
+	}
+	if c.PprofEnabled && c.HTTPWriteTimeout < time.Duration(c.MaxPprofCPUSecs())*time.Second+5*time.Second {
+		errs = append(errs, "HTTP_WRITE_TIMEOUT must be at least PPROF_CPU_MAX_SECONDS + 5s when PPROF_ENABLED is true")
+	}
 	if len(errs) == 0 {
 		return nil
 	}
