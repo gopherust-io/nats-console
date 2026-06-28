@@ -34,6 +34,10 @@ textarea {
   font: inherit;
 }
 
+textarea {
+  resize: none;
+}
+
 button {
   cursor: pointer;
 }
@@ -992,7 +996,6 @@ tr:hover td {
 }
 
 .assistant-panel__form textarea {
-  resize: vertical;
   min-height: 44px;
   max-height: 160px;
   border: 1px solid var(--border);
