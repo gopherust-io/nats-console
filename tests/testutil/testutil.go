@@ -3,6 +3,7 @@ package testutil
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -10,10 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/nats"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttputil"
 
@@ -66,7 +67,7 @@ func StartPostgres(t *testing.T, ctx context.Context) string {
 		postgres.WithDatabase("natsconsol"),
 		postgres.WithUsername("natsconsol"),
 		postgres.WithPassword("natsconsol"),
-		testcontainers.WithWaitStrategy(wait.ForListeningPort("5432/tcp")),
+		postgres.BasicWaitStrategies(),
 	)
 	if err != nil {
 		t.Fatalf("postgres container: %v", err)
@@ -77,7 +78,34 @@ func StartPostgres(t *testing.T, ctx context.Context) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := waitPostgresReady(ctx, pgURL); err != nil {
+		t.Fatalf("postgres ready: %v", err)
+	}
 	return pgURL
+}
+
+func waitPostgresReady(ctx context.Context, pgURL string) error {
+	backoff := 200 * time.Millisecond
+	var lastErr error
+	for range 30 {
+		pool, err := pgxpool.New(ctx, pgURL)
+		if err != nil {
+			lastErr = err
+			time.Sleep(backoff)
+			continue
+		}
+		err = pool.Ping(ctx)
+		pool.Close()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		time.Sleep(backoff)
+		if backoff < 2*time.Second {
+			backoff += 100 * time.Millisecond
+		}
+	}
+	return fmt.Errorf("ping postgres: %w", lastErr)
 }
 
 // NATSEndpoints holds client and monitoring URLs from a NATS testcontainer.
