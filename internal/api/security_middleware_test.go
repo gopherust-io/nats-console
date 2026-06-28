@@ -15,7 +15,7 @@ import (
 func TestSecurityHeaders(t *testing.T) {
 	cfg := config.Config{PublicBaseURL: "https://nats.example.com"}
 	var called bool
-	h := securityHeadersMiddleware(cfg)(func(ctx *fasthttp.RequestCtx) {
+	h := securityHeadersMiddleware(buildCSP(cfg), cfg.TLSEnabled())(func(ctx *fasthttp.RequestCtx) {
 		called = true
 	})
 

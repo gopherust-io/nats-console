@@ -41,6 +41,8 @@ type Claims struct {
 type Service struct {
 	store     *store.Store
 	providers map[string]*oauthProvider
+	users     *userCache
+	sessions  *sessionCache
 	cfg       config.Config
 }
 
@@ -49,7 +51,13 @@ func NewService(cfg config.Config, st *store.Store) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{cfg: cfg, store: st, providers: providers}, nil
+	return &Service{
+		cfg:       cfg,
+		store:     st,
+		providers: providers,
+		users:     newUserCache(defaultUserCacheTTL),
+		sessions:  newSessionCache(defaultSessionCacheTTL),
+	}, nil
 }
 
 func (s *Service) SeedAdmin(ctx context.Context) error {
@@ -74,7 +82,19 @@ func (s *Service) LoadUser(ctx context.Context, userID string) (store.User, erro
 	if userID == "" {
 		return store.User{}, ErrUnauthorized
 	}
-	return s.store.GetUserByID(ctx, userID)
+	if user, ok := s.users.Get(userID); ok {
+		return user, nil
+	}
+	user, err := s.store.GetUserByID(ctx, userID)
+	if err != nil {
+		return store.User{}, err
+	}
+	s.users.Set(user)
+	return user, nil
+}
+
+func (s *Service) InvalidateUser(userID string) {
+	s.users.Invalidate(userID)
 }
 
 func (s *Service) AuthenticateBasic(ctx context.Context, username, password string) (store.User, error) {
@@ -117,6 +137,9 @@ func (s *Service) CreateSession(user store.User) (string, error) {
 }
 
 func (s *Service) ParseSession(tokenStr string) (store.User, error) {
+	if user, ok := s.sessions.Get(tokenStr); ok {
+		return user, nil
+	}
 	secret, err := s.sessionSecret()
 	if err != nil {
 		return store.User{}, ErrUnauthorized
@@ -131,12 +154,14 @@ func (s *Service) ParseSession(tokenStr string) (store.User, error) {
 	if !ok {
 		return store.User{}, ErrUnauthorized
 	}
-	return store.User{
+	user := store.User{
 		ID:       claims.UserID,
 		Username: claims.Username,
 		Roles:    claims.Roles,
 		IsRoot:   claims.IsRoot,
-	}, nil
+	}
+	s.sessions.Set(tokenStr, user)
+	return user, nil
 }
 
 func (s *Service) OIDCEnabled() bool {

@@ -8,9 +8,10 @@ import (
 	"net/url"
 	"sync"
 
+	"github.com/quic-go/quic-go/http3"
+
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/log"
-	"github.com/quic-go/quic-go/http3"
 )
 
 type Listener struct {

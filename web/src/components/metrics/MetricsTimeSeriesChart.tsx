@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import {
   Area,
   AreaChart,
@@ -45,13 +46,13 @@ function formatAxisTime(ts: number) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function MetricsTimeSeriesChart({
+function MetricsTimeSeriesChart({
   title,
   series,
   variant = "line",
   emptyMessage = "Collecting historical data…",
 }: Props) {
-  const data = mergeSeries(series);
+  const data = useMemo(() => mergeSeries(series), [series]);
   const hasData = data.length > 0;
 
   return (
@@ -99,6 +100,7 @@ export default function MetricsTimeSeriesChart({
                     fillOpacity={0.12}
                     strokeWidth={2}
                     dot={false}
+                    isAnimationActive={false}
                   />
                 ))}
               </AreaChart>
@@ -135,6 +137,7 @@ export default function MetricsTimeSeriesChart({
                     stroke={item.color}
                     strokeWidth={2}
                     dot={false}
+                    isAnimationActive={false}
                   />
                 ))}
               </LineChart>
@@ -145,3 +148,5 @@ export default function MetricsTimeSeriesChart({
     </div>
   );
 }
+
+export default memo(MetricsTimeSeriesChart);

@@ -23,9 +23,11 @@ import { clusterQueryKey } from "../lib/query";
 type TopologyView = "overview" | "explorer";
 
 const FLOW_AUTO_MAX = 3;
+const FILTER_DEBOUNCE_MS = 200;
 
 export default function TopologyPage() {
   const { clusterId, cluster } = useCluster();
+  const [filterInput, setFilterInput] = useState("");
   const [filterQuery, setFilterQuery] = useState("");
   const [treeExpanded, setTreeExpanded] = useState(false);
   const [selectedStreamId, setSelectedStreamId] = useState<string | null>(null);
@@ -40,6 +42,11 @@ export default function TopologyPage() {
     refetchInterval: 30_000,
   });
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setFilterQuery(filterInput.trim()), FILTER_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [filterInput]);
+
   const error = topologyQuery.error instanceof Error ? topologyQuery.error.message : "";
   const root = topologyQuery.data ?? null;
 
@@ -48,7 +55,7 @@ export default function TopologyPage() {
     return filterTopology(root, filterQuery) ?? null;
   }, [root, filterQuery]);
 
-  const counts = root ? countTopology(root) : null;
+  const counts = useMemo(() => (root ? countTopology(root) : null), [root]);
   const streams = useMemo(
     () => (filteredRoot ? sortStreamNodes(getStreamNodes(filteredRoot), sortBy) : []),
     [filteredRoot, sortBy],
@@ -108,8 +115,8 @@ export default function TopologyPage() {
               className="topology-toolbar__search"
               type="search"
               placeholder="Filter streams, subjects, consumers…"
-              value={filterQuery}
-              onChange={(event) => setFilterQuery(event.target.value)}
+              value={filterInput}
+              onChange={(event) => setFilterInput(event.target.value)}
               aria-label="Filter topology"
             />
             <div className="topology-toolbar__views" role="tablist" aria-label="Topology view">
@@ -189,9 +196,9 @@ export default function TopologyPage() {
 
       {filteredRoot && streams.length > 0 && (view === "explorer" || showTree) && (
         <TopologyTree
-          key={`tree:${filteredRoot.id}:${treeExpanded}:${filterQuery}:${selectedStreamId}`}
           root={filteredRoot}
           defaultExpanded={treeExpanded}
+          expandAll={treeExpanded}
           selectedStreamId={selectedStreamId}
         />
       )}

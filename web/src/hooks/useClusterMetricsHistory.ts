@@ -17,5 +17,7 @@ export function useClusterMetricsHistory(clusterId: string | null, range: Metric
     queryFn: () => api<MetricsHistoryResponse>(`${clusterPath(clusterId!, "/metrics/history")}?${queryString}`),
     enabled: Boolean(clusterId),
     refetchInterval: 60_000,
+    refetchOnWindowFocus: false,
+    refetchIntervalInBackground: false,
   });
 }

@@ -11,9 +11,13 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/config"
 )
 
-const csrfHeader = "X-CSRF-Token"
+const (
+	csrfHeader              = "X-CSRF-Token"
+	ipRateLimiterPurgeEvery   = 256
+	ipRateLimiterMaxStaleKeys = 512
+)
 
-func securityHeadersMiddleware(cfg config.Config) middleware {
+func securityHeadersMiddleware(csp string, tlsEnabled bool) middleware {
 	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(ctx *fasthttp.RequestCtx) {
 			h := &ctx.Response.Header
@@ -21,8 +25,8 @@ func securityHeadersMiddleware(cfg config.Config) middleware {
 			h.Set("X-Frame-Options", "DENY")
 			h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 			h.Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-			h.Set("Content-Security-Policy", buildCSP(cfg))
-			if cfg.TLSEnabled() {
+			h.Set("Content-Security-Policy", csp)
+			if tlsEnabled {
 				h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 			}
 			next(ctx)
@@ -96,7 +100,7 @@ func requiresCSRF(ctx *fasthttp.RequestCtx) bool {
 	if method == fasthttp.MethodGet || method == fasthttp.MethodHead || method == fasthttp.MethodOptions {
 		return false
 	}
-	path := string(ctx.Path())
+	path := requestPath(ctx)
 	if !isAPIPath(path) || isPublicPath(path) {
 		return false
 	}
@@ -110,10 +114,11 @@ func requiresCSRF(ctx *fasthttp.RequestCtx) bool {
 }
 
 type ipRateLimiter struct {
-	events map[string][]time.Time
-	limit  int
-	window time.Duration
-	mu     sync.Mutex
+	events     map[string][]time.Time
+	limit      int
+	window     time.Duration
+	allowCount int
+	mu         sync.Mutex
 }
 
 func newIPRateLimiter(limit int, window time.Duration) *ipRateLimiter {
@@ -144,14 +149,36 @@ func (rl *ipRateLimiter) allow(key string) bool {
 		return false
 	}
 	rl.events[key] = append(times, now)
+
+	rl.allowCount++
+	if rl.allowCount%ipRateLimiterPurgeEvery == 0 || len(rl.events) > ipRateLimiterMaxStaleKeys {
+		rl.purgeStaleLocked(cutoff)
+	}
 	return true
+}
+
+func (rl *ipRateLimiter) purgeStaleLocked(cutoff time.Time) {
+	for key, times := range rl.events {
+		n := 0
+		for _, t := range times {
+			if t.After(cutoff) {
+				times[n] = t
+				n++
+			}
+		}
+		if n == 0 {
+			delete(rl.events, key)
+			continue
+		}
+		rl.events[key] = times[:n]
+	}
 }
 
 func authRateLimitMiddleware(cfg config.Config) middleware {
 	limiter := newIPRateLimiter(cfg.AuthRateLimitPerWindow(), cfg.AuthRateLimitDuration())
 	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(ctx *fasthttp.RequestCtx) {
-			path := string(ctx.Path())
+			path := requestPath(ctx)
 			if !isAuthRateLimitPath(path) {
 				next(ctx)
 				return

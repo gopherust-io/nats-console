@@ -14,7 +14,10 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/store"
 )
 
-const defaultContextCacheTTL = 45 * time.Second
+const (
+	defaultContextCacheTTL = 45 * time.Second
+	maxContextCacheEntries = 100
+)
 
 var (
 	ErrNotEnabled         = errors.New("assistant is not enabled")
@@ -38,8 +41,8 @@ type ContextBuilder struct {
 }
 
 type contextCacheEntry struct {
-	data      map[string]any
 	expiresAt time.Time
+	formatted string
 }
 
 func NewContextBuilder(st *store.Store, nats *natsclient.Manager, cacheTTL time.Duration) *ContextBuilder {
@@ -54,47 +57,68 @@ func NewContextBuilder(st *store.Store, nats *natsclient.Manager, cacheTTL time.
 	}
 }
 
-func (b *ContextBuilder) Build(ctx context.Context, clusterID string, page PageContext) (map[string]any, error) {
+func (b *ContextBuilder) BuildContextBlock(ctx context.Context, clusterID string, page PageContext) (string, error) {
 	key := contextCacheKey(clusterID, page)
 	now := time.Now()
 
 	b.mu.Lock()
 	if entry, ok := b.cache[key]; ok && now.Before(entry.expiresAt) {
-		out := entry.data
+		formatted := entry.formatted
 		b.mu.Unlock()
-		return cloneContext(out), nil
+		return formatted, nil
 	}
+	b.purgeExpiredLocked(now)
 	b.mu.Unlock()
 
-	out, err := b.buildFresh(ctx, clusterID, page)
+	raw, err := b.buildFresh(ctx, clusterID, page)
 	if err != nil {
-		return nil, err
+		return "", err
+	}
+	formatted, err := FormatContextBlock(raw)
+	if err != nil {
+		return "", err
 	}
 
 	b.mu.Lock()
+	b.purgeExpiredLocked(now)
+	if len(b.cache) >= maxContextCacheEntries {
+		b.evictOldestLocked()
+	}
 	b.cache[key] = contextCacheEntry{
-		data:      cloneContext(out),
+		formatted: formatted,
 		expiresAt: now.Add(b.cacheTTL),
 	}
 	b.mu.Unlock()
 
-	return out, nil
+	return formatted, nil
 }
 
 func contextCacheKey(clusterID string, page PageContext) string {
 	return clusterID + "|" + page.Route + "|" + page.Stream + "|" + page.Consumer + "|" + page.Bucket + "|" + page.Key
 }
 
-func cloneContext(in map[string]any) map[string]any {
-	raw, err := sonic.Marshal(in)
-	if err != nil {
-		return in
+func (b *ContextBuilder) purgeExpiredLocked(now time.Time) {
+	for key, entry := range b.cache {
+		if !now.Before(entry.expiresAt) {
+			delete(b.cache, key)
+		}
 	}
-	var out map[string]any
-	if err := sonic.Unmarshal(raw, &out); err != nil {
-		return in
+}
+
+func (b *ContextBuilder) evictOldestLocked() {
+	var oldestKey string
+	var oldestExpiry time.Time
+	first := true
+	for key, entry := range b.cache {
+		if first || entry.expiresAt.Before(oldestExpiry) {
+			oldestKey = key
+			oldestExpiry = entry.expiresAt
+			first = false
+		}
 	}
-	return out
+	if oldestKey != "" {
+		delete(b.cache, oldestKey)
+	}
 }
 
 func (b *ContextBuilder) buildFresh(ctx context.Context, clusterID string, page PageContext) (map[string]any, error) {
@@ -215,6 +239,9 @@ func consumerSummary(info *nats.ConsumerInfo) map[string]any {
 }
 
 func compactJSON(raw []byte, maxLen int) any {
+	if len(raw) > maxLen {
+		raw = raw[:maxLen]
+	}
 	var v any
 	if err := sonic.Unmarshal(raw, &v); err != nil {
 		s := redactString(string(raw))
