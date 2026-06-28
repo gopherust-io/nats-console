@@ -7,10 +7,11 @@ Manage streams, consumers, browse messages, tail live traffic, manage KV/Object 
 **📖 Documentation:** friendly guides for everyone — [docs/README.md](docs/README.md)
 - [Getting started](docs/getting-started.md) · [User guide](docs/user-guide.md) · [DevOps setup](docs/devops-setup.md) · [Developer setup](docs/developer-setup.md)
 
-## Features (v0.7)
+## Features (v0.8)
 
 - **Multi-cluster registry** with PostgreSQL persistence
 - **Multi-tenant RBAC** — operator/viewer/admin scoped by `accessRules.clusterIds`
+- **HTTP/3 + QUIC** — Caddy edge termination (Compose/Helm) and optional outbound h3 for OIDC/AI
 - **Historical metrics** — Postgres snapshots + Dashboard trend charts
 - **Message publish** — publish to JetStream streams from UI and API
 - **JWT resolver** — import/manage account JWTs per cluster
@@ -146,6 +147,12 @@ make lint
 | `HTTP_READ_TIMEOUT` | `10s` | HTTP server read timeout |
 | `HTTP_WRITE_TIMEOUT` | `30s` | HTTP server write timeout |
 | `HTTP_IDLE_TIMEOUT` | `60s` | HTTP server idle timeout |
+| `HTTP3_OUTBOUND_ENABLED` | `true` | Use HTTP/3 transport for outbound OIDC/AI when supported |
+| `HTTP3_OUTBOUND_FALLBACK` | `true` | Fall back to HTTP/2/1.1 when HTTP/3 fails |
+| `HTTP3_ENABLED` | `false` | In-process HTTP/3 listener (bare metal; use Caddy/Ingress when available) |
+| `HTTP3_ADDR` | `:443` | HTTP/3 listen address when `HTTP3_ENABLED=true` |
+| `HTTP3_CERT_FILE` / `HTTP3_KEY_FILE` | — | TLS cert for in-process HTTP/3 |
+| `HTTP3_BACKEND_ADDR` | `127.0.0.1:8080` | Upstream for in-process HTTP/3 reverse proxy |
 | `PUBLIC_BASE_URL` | `http://localhost:8080` | Public base URL when OIDC redirect URL is not set |
 | `ENV` | `development` | Set to `production` to enforce encryption key |
 | `DATABASE_URL` | `postgres://…` | PostgreSQL connection string |

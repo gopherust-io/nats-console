@@ -8,6 +8,7 @@ import (
 
 //go:generate envgen -type Config -output config_env_gen.go
 
+//nolint:govet // fieldalignment: env-backed config struct is intentionally flat
 type Config struct {
 	OIDCMicrosoftClientSecret string        `env:"OIDC_MICROSOFT_CLIENT_SECRET"                                                   sensitive:"true"`
 	HTTPAddr                  string        `default:":8080"                                                                      env:"HTTP_ADDR"`
@@ -88,6 +89,13 @@ type Config struct {
 	OIDCGoogleEnabled         bool          `default:"false"                                                                      env:"OIDC_GOOGLE_ENABLED"`
 	AuthEnabled               bool          `default:"true"                                                                       env:"AUTH_ENABLED"`
 	MetricsSnapshotEnabled    bool          `default:"true"                                                                       env:"METRICS_SNAPSHOT_ENABLED"`
+	HTTP3CertFile             string        `env:"HTTP3_CERT_FILE"`
+	HTTP3KeyFile              string        `env:"HTTP3_KEY_FILE"`
+	HTTP3BackendAddrRaw       string        `default:"127.0.0.1:8080"                                                             env:"HTTP3_BACKEND_ADDR"`
+	HTTP3Addr                 string        `default:":443"                                                                       env:"HTTP3_ADDR"`
+	HTTP3OutboundEnabled      bool          `default:"true"                                                                       env:"HTTP3_OUTBOUND_ENABLED"`
+	HTTP3OutboundFallback     bool          `default:"true"                                                                       env:"HTTP3_OUTBOUND_FALLBACK"`
+	HTTP3Enabled              bool          `default:"false"                                                                      env:"HTTP3_ENABLED"`
 }
 
 func (c Config) IsProduction() bool {
@@ -252,4 +260,11 @@ func (c Config) SnapshotCleanupInterval() time.Duration {
 		return time.Hour
 	}
 	return c.MetricsSnapshotCleanupInterval
+}
+
+func (c Config) HTTP3BackendAddr() string {
+	if c.HTTP3BackendAddrRaw == "" {
+		return "127.0.0.1:8080"
+	}
+	return c.HTTP3BackendAddrRaw
 }

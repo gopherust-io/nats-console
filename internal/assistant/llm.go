@@ -15,6 +15,7 @@ import (
 	"github.com/valyala/fasthttp"
 
 	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/httpclient"
 )
 
 type Message struct {
@@ -55,7 +56,7 @@ func NewLLM(cfg config.Config) (LLM, error) {
 		maxTokens = 4096
 	}
 	return &gemini{
-		client:    &http.Client{Timeout: timeout},
+		client:    httpclient.NewClient(cfg, timeout),
 		apiKey:    cfg.AIAPIKey,
 		model:     model,
 		maxTokens: maxTokens,

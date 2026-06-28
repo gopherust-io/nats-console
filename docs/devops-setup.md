@@ -72,7 +72,38 @@ console:
     LOG_JSON: "true"
 ```
 
-Put TLS termination on a reverse proxy (nginx, Caddy, Traefik) in front of `:8080`.
+Put TLS termination on a reverse proxy (nginx, Caddy, Traefik) in front of `:8080`. For **HTTP/3 (QUIC)**, prefer Caddy and open **UDP 443** to clients.
+
+### HTTP/3 with Docker Compose
+
+```bash
+docker compose --profile http3 up --build
+```
+
+Open **https://localhost** (Caddy terminates TLS + HTTP/3; console stays on internal `:8080`).
+
+Set on the console service when using the profile:
+
+- `PUBLIC_BASE_URL=https://localhost`
+- `OIDC_PUBLIC_URL=https://localhost`
+- `OIDC_REDIRECT_URL=https://localhost/api/v1/auth/oidc/callback`
+
+Caddy config: [`deploy/caddy/Caddyfile.dev`](deploy/caddy/Caddyfile.dev). Live WebSocket tail uses HTTP/1.1 upgrade through the proxy (Caddy handles `Upgrade` automatically).
+
+### HTTP/3 with Helm
+
+Enable the optional Caddy gateway (LoadBalancer with TCP+UDP 443):
+
+```bash
+helm upgrade --install nats-consol ./deploy/helm/nats-consol \
+  --set http3.enabled=true \
+  --set http3.host=nats-consol.example.com \
+  --set http3.tlsSecretName=nats-consol-tls
+```
+
+Or use a **Caddy Ingress Controller** and set `ingress.annotations` / `http3.enabled` for `h1,h2,h3` protocols.
+
+**Not migrated to HTTP/3:** NATS JetStream (`4222`), NATS monitoring (`8222`), Postgres — these remain on their native protocols.
 
 ---
 

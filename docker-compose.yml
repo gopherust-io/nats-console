@@ -54,6 +54,8 @@ services:
 
   console:
     build: .
+    expose:
+      - "8080"
     ports:
       - "8080:8080"
     env_file:
@@ -99,6 +101,25 @@ services:
       keycloak:
         condition: service_healthy
 
+  caddy:
+    profiles: ["http3"]
+    image: caddy:2.9-alpine
+    ports:
+      - "443:443/tcp"
+      - "443:443/udp"
+    environment:
+      HTTP3_HOST: localhost
+      HTTP3_UPSTREAM: console:8080
+      HTTP3_TLS_MODE: internal
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - console
+
 volumes:
   nats-data:
   postgres-data:
+  caddy-data:
+  caddy-config:

@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: registry.gitlab.time2go.tech/gopherust-io/nats-consol
-  tag: "0.7.0"
+  tag: "0.8.0"
   pullPolicy: IfNotPresent
 
 service:
@@ -19,6 +19,27 @@ ingress:
         - path: /
           pathType: Prefix
   tls: []
+
+http3:
+  enabled: false
+  host: nats-consol.example.com
+  tlsSecretName: nats-consol-tls
+  replicas: 1
+  image:
+    repository: caddy
+    tag: "2.9-alpine"
+    pullPolicy: IfNotPresent
+  service:
+    type: LoadBalancer
+    port: 443
+    annotations: {}
+  resources:
+    limits:
+      cpu: 200m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
 
 resources:
   limits:

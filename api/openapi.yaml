@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: NATS Consol API
-  version: 0.7.0
+  version: 0.8.0
   description: Self-hosted admin console for NATS JetStream — cluster-scoped REST and WebSocket API.
 
 servers:

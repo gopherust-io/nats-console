@@ -8,6 +8,12 @@ metadata:
   {{- with .Values.ingress.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
+    {{- if $.Values.http3.enabled }}
+    caddy.ingress.kubernetes.io/protocols: "h1,h2,h3"
+    {{- end }}
+  {{- else if .Values.http3.enabled }}
+  annotations:
+    caddy.ingress.kubernetes.io/protocols: "h1,h2,h3"
   {{- end }}
 spec:
   {{- if .Values.ingress.className }}

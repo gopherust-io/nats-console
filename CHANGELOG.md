@@ -2,6 +2,19 @@
 
 All notable changes to NATS Consol are documented in this file.
 
+## [0.8.0] - 2026-06-28
+
+### Added
+
+- **HTTP/3 + QUIC** — optional Caddy reverse proxy (`docker compose --profile http3`) and Helm `http3` gateway Deployment
+- Outbound HTTP/3 transport with fallback for OIDC and AI assistant (`HTTP3_OUTBOUND_*`)
+- Optional in-process HTTP/3 listener proxying to fasthttp (`HTTP3_ENABLED`)
+- E2E `h3_check` smoke helper and Alt-Svc verification in `smoke.sh`
+
+### Changed
+
+- DevOps docs cover UDP 443, WebSocket compatibility, and protocols that remain HTTP/1.1 (NATS monitoring)
+
 ## [0.7.0] - 2026-06-28
 
 ### Added

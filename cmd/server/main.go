@@ -14,6 +14,7 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/bootstrap"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/crypto"
+	"github.com/gopherust-io/nats-consol/internal/http3edge"
 	"github.com/gopherust-io/nats-consol/internal/log"
 	"github.com/gopherust-io/nats-consol/internal/profiler"
 	"github.com/gopherust-io/nats-consol/internal/snapshot"
@@ -56,6 +57,14 @@ func main() {
 	metricsCollector := snapshot.Start(app.UoW.Raw(), app.NATSManager, cfg)
 	if metricsCollector != nil {
 		defer metricsCollector.Stop()
+	}
+
+	h3Listener, err := http3edge.Start(cfg)
+	if err != nil {
+		log.Fatal().Err(err).Str("component", "http3").Msg("HTTP/3 listener setup failed")
+	}
+	if h3Listener != nil {
+		defer h3Listener.Stop()
 	}
 
 	server := newHTTPServer(cfg, app)

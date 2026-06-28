@@ -123,6 +123,8 @@ Useful for smoke tests without leaving the console. Viewers do not see the publi
 
 Live sessions are rate-limited server-side to protect NATS.
 
+When the console is served over HTTP/3 (via Caddy or Ingress), live tail still uses WebSocket over HTTP/1.1 or HTTP/2 upgrade — browsers negotiate this automatically.
+
 ---
 
 ## KV Stores

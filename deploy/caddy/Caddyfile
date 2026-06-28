@@ -1,0 +1,11 @@
+{
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+{$HTTP3_HOST:localhost} {
+	tls {$HTTP3_TLS_MODE:internal}
+
+	reverse_proxy {$HTTP3_UPSTREAM:console:8080}
+}

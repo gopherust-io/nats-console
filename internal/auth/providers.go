@@ -133,7 +133,7 @@ func newOIDCProvider(cfg config.Config, id, name, issuer, discoveryURL, clientID
 			return nil, fmt.Errorf("%s discovery url: %w", id, err)
 		}
 		if issuerURL.Host != discoveryParsed.Host {
-			oidcHTTP = hostRewriteHTTPClient(issuerURL.Host, discoveryParsed.Host)
+			oidcHTTP = hostRewriteHTTPClient(issuerURL.Host, discoveryParsed.Host, cfg)
 			providerCtx = oidc.ClientContext(providerCtx, oidcHTTP)
 		}
 		providerCtx = oidc.InsecureIssuerURLContext(providerCtx, issuer)

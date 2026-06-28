@@ -2,12 +2,15 @@ package auth
 
 import (
 	"net/http"
+
+	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/httpclient"
 )
 
-func hostRewriteHTTPClient(publicHost, internalHost string) *http.Client {
+func hostRewriteHTTPClient(publicHost, internalHost string, cfg config.Config) *http.Client {
 	return &http.Client{
 		Transport: &hostRewriteTransport{
-			base:         http.DefaultTransport,
+			base:         httpclient.NewTransport(cfg),
 			publicHost:   publicHost,
 			internalHost: internalHost,
 		},

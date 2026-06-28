@@ -1,0 +1,93 @@
+{{- if .Values.http3.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nats-consol.fullname" . }}-http3
+  labels:
+    {{- include "nats-consol.labels" . | nindent 4 }}
+data:
+  Caddyfile: |
+    {
+      servers {
+        protocols h1 h2 h3
+      }
+    }
+
+    {{ .Values.http3.host }} {
+      tls /etc/caddy/tls/tls.crt /etc/caddy/tls/tls.key
+      reverse_proxy {{ include "nats-consol.fullname" . }}:{{ .Values.service.port }}
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nats-consol.fullname" . }}-http3
+  labels:
+    {{- include "nats-consol.labels" . | nindent 4 }}
+    app.kubernetes.io/component: http3-gateway
+spec:
+  replicas: {{ .Values.http3.replicas }}
+  selector:
+    matchLabels:
+      {{- include "nats-consol.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: http3-gateway
+  template:
+    metadata:
+      labels:
+        {{- include "nats-consol.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: http3-gateway
+    spec:
+      containers:
+        - name: caddy
+          image: "{{ .Values.http3.image.repository }}:{{ .Values.http3.image.tag }}"
+          imagePullPolicy: {{ .Values.http3.image.pullPolicy }}
+          ports:
+            - name: https
+              containerPort: 443
+              protocol: TCP
+            - name: quic
+              containerPort: 443
+              protocol: UDP
+          volumeMounts:
+            - name: caddyfile
+              mountPath: /etc/caddy/Caddyfile
+              subPath: Caddyfile
+            - name: tls
+              mountPath: /etc/caddy/tls
+              readOnly: true
+          resources:
+            {{- toYaml .Values.http3.resources | nindent 12 }}
+      volumes:
+        - name: caddyfile
+          configMap:
+            name: {{ include "nats-consol.fullname" . }}-http3
+        - name: tls
+          secret:
+            secretName: {{ .Values.http3.tlsSecretName }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nats-consol.fullname" . }}-http3
+  labels:
+    {{- include "nats-consol.labels" . | nindent 4 }}
+    app.kubernetes.io/component: http3-gateway
+  {{- with .Values.http3.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.http3.service.type }}
+  selector:
+    {{- include "nats-consol.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: http3-gateway
+  ports:
+    - name: https
+      port: {{ .Values.http3.service.port }}
+      targetPort: https
+      protocol: TCP
+    - name: quic
+      port: {{ .Values.http3.service.port }}
+      targetPort: quic
+      protocol: UDP
+{{- end }}

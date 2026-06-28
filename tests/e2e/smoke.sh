@@ -9,6 +9,11 @@ AUTH="${AUTH:-admin:admin}"
 echo "==> smoke: health"
 curl -sf "${BASE_URL}/api/health" | grep -q '"ok"'
 
+if [[ "${BASE_URL}" == https://* ]]; then
+  echo "==> smoke: https health + Alt-Svc (HTTP/3 discovery)"
+  HTTP3_INSECURE="${HTTP3_INSECURE:-1}" go run ./tests/e2e/h3_check.go "${BASE_URL}"
+fi
+
 echo "==> smoke: auth config"
 curl -sf "${BASE_URL}/api/v1/auth/config" | grep -q '"authEnabled"'
 
