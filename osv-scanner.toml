@@ -1,0 +1,5 @@
+# Scorecard/OSV flags golang.org/x/crypto for unmaintained openpgp.
+# This repo only imports golang.org/x/crypto/bcrypt; govulncheck finds 0 callable vulns.
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+reason = "openpgp is unused; only bcrypt is imported (confirmed via govulncheck)"
