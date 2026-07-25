@@ -18,10 +18,10 @@ type MessageNavigation struct {
 }
 
 type StreamMessage struct {
+	Headers map[string]string `json:"headers,omitempty"`
 	Subject string            `json:"subject"`
 	Time    string            `json:"time"`
 	Data    string            `json:"data"`
-	Headers map[string]string `json:"headers,omitempty"`
 	Seq     uint64            `json:"seq"`
 }
 
