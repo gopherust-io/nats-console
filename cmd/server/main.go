@@ -110,6 +110,7 @@ func newTelemetry(cfg config.Config) *tel.Telemetry {
 		telCfg.Traces.Enable = v == "1" || strings.EqualFold(v, "true")
 	}
 
+	tel.ConfigureLogger(telCfg)
 	return tel.NewWithConfig(telCfg)
 }
 

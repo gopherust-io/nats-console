@@ -12,7 +12,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gopherust-io/env v0.4.0
 	github.com/gopherust-io/nats v0.2.1
-	github.com/gopherust-io/tel v0.1.2-0.20260725141526-e231ddde1404
+	github.com/gopherust-io/tel v0.1.2-0.20260725142247-8366a5335b16
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/nats-io/jwt/v2 v2.8.2
 	github.com/nats-io/nats.go v1.52.0
