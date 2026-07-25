@@ -450,4 +450,4 @@ CI (`.github/workflows/test.yml`) runs on every pull request to `main`: Go lint/
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache License 2.0 — see [LICENSE](LICENSE).
