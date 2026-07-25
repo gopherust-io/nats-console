@@ -5,18 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/gopherust-io/nats-consol/internal/domain"
 )
 
 const (
-	RoleAdmin    = "admin"
-	RoleOperator = "operator"
-	RoleViewer   = "viewer"
+	RoleAdmin    = domain.RoleAdmin
+	RoleOperator = domain.RoleOperator
+	RoleViewer   = domain.RoleViewer
 )
 
 // goalign:ignore
@@ -383,21 +384,8 @@ func CheckPassword(hash, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
-func HasRole(roles []string, role string) bool {
-	return slices.Contains(roles, role)
-}
-
 func HighestRole(roles []string) string {
-	if HasRole(roles, RoleAdmin) {
-		return RoleAdmin
-	}
-	if HasRole(roles, RoleOperator) {
-		return RoleOperator
-	}
-	if HasRole(roles, RoleViewer) {
-		return RoleViewer
-	}
-	return ""
+	return domain.HighestRole(roles)
 }
 
 func encodeAccessRules(rules *AccessRules) ([]byte, error) {

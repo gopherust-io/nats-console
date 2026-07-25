@@ -14,6 +14,7 @@ import (
 
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/log"
 	"github.com/gopherust-io/nats-consol/internal/metrics"
 	"github.com/gopherust-io/nats-consol/internal/port"
@@ -87,10 +88,7 @@ type liveFrame struct {
 }
 
 func requestContext(ctx *fasthttp.RequestCtx) context.Context {
-	if c, ok := ctx.UserValue("context").(context.Context); ok && c != nil {
-		return c
-	}
-	return context.Background()
+	return httpctx.FromRequest(ctx)
 }
 
 func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {

@@ -143,6 +143,11 @@ func (c *Collector) Profile(name string) (domain.PprofProfileSummary, bool) {
 }
 
 func readRuntimeStats() domain.PprofRuntimeStats {
+	return ReadRuntimeStats()
+}
+
+// ReadRuntimeStats snapshots goroutine count and heap MemStats.
+func ReadRuntimeStats() domain.PprofRuntimeStats {
 	var stats runtime.MemStats
 	runtime.ReadMemStats(&stats)
 	return domain.PprofRuntimeStats{

@@ -4,10 +4,8 @@ import (
 	"errors"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec // G108: gated by PPROF_ENABLED and admin auth
-	"runtime"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
@@ -81,7 +79,7 @@ func (h *Handler) PprofRuntime(ctx *fasthttp.RequestCtx) {
 			return
 		}
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, readRuntimeStats())
+	serializer.WriteJSON(ctx, fasthttp.StatusOK, profiler.ReadRuntimeStats())
 }
 
 func (h *Handler) PprofProfileSummary(ctx *fasthttp.RequestCtx) {
@@ -165,24 +163,6 @@ func useContinuousSource(ctx *fasthttp.RequestCtx) bool {
 		return true
 	}
 	return false
-}
-
-func readRuntimeStats() domain.PprofRuntimeStats {
-	var stats runtime.MemStats
-	runtime.ReadMemStats(&stats)
-	return domain.PprofRuntimeStats{
-		FetchedAt:  time.Now().UTC(),
-		Goroutines: runtime.NumGoroutine(),
-		Memory: domain.PprofMemoryStats{
-			Alloc:       stats.Alloc,
-			TotalAlloc:  stats.TotalAlloc,
-			Sys:         stats.Sys,
-			HeapAlloc:   stats.HeapAlloc,
-			HeapInuse:   stats.HeapInuse,
-			HeapObjects: stats.HeapObjects,
-			NumGC:       stats.NumGC,
-		},
-	}
 }
 
 func parseCPUSeconds(ctx *fasthttp.RequestCtx, maxSeconds int) int {
