@@ -17,7 +17,6 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/crypto"
 	"github.com/gopherust-io/nats-consol/internal/http3edge"
-	"github.com/gopherust-io/nats-consol/internal/log"
 	"github.com/gopherust-io/nats-consol/internal/profiler"
 	"github.com/gopherust-io/nats-consol/internal/snapshot"
 )
@@ -27,34 +26,33 @@ func main() {
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatal().Err(err).Str("component", "config").Msg("failed to load config")
+		tel.Fatal().Err(err).Str("component", "config").Msg("failed to load config")
 	}
 	if err := cfg.Validate(); err != nil {
-		log.Fatal().Err(err).Str("component", "config").Msg("invalid production config")
+		tel.Fatal().Err(err).Str("component", "config").Msg("invalid production config")
 	}
-	log.Init(log.Options{JSON: cfg.LogJSON, Level: cfg.LogLevel})
 
 	telem := newTelemetry(cfg)
 	tel.SetGlobal(telem)
 	ctx := context.Background()
 	if err := telem.Start(ctx); err != nil {
-		log.Fatal().Err(err).Str("component", "tel").Msg("failed to start telemetry")
+		tel.Fatal().Err(err).Str("component", "tel").Msg("failed to start telemetry")
 	}
 	defer func() {
 		if err := telem.Shutdown(context.Background()); err != nil {
-			log.Error().Err(err).Str("component", "tel").Msg("telemetry shutdown failed")
+			tel.Error().Err(err).Str("component", "tel").Msg("telemetry shutdown failed")
 		}
 	}()
 	ctx = tel.WrapContext(ctx, telem)
 
 	encryptor, err := buildEncryptor(cfg)
 	if err != nil {
-		log.Fatal().Err(err).Str("component", "encryption").Msg("encryption setup failed")
+		tel.Fatal().Err(err).Str("component", "encryption").Msg("encryption setup failed")
 	}
 
 	app, err := bootstrap.New(ctx, cfg, encryptor)
 	if err != nil {
-		log.Fatal().Err(err).Str("component", "bootstrap").Msg("failed to bootstrap application")
+		tel.Fatal().Err(err).Str("component", "bootstrap").Msg("failed to bootstrap application")
 	}
 	defer app.Close()
 
@@ -75,7 +73,7 @@ func main() {
 
 	h3Listener, err := http3edge.Start(cfg)
 	if err != nil {
-		log.Fatal().Err(err).Str("component", "http3").Msg("HTTP/3 listener setup failed")
+		tel.Fatal().Err(err).Str("component", "http3").Msg("HTTP/3 listener setup failed")
 	}
 	if h3Listener != nil {
 		defer h3Listener.Stop()
@@ -95,6 +93,12 @@ func newTelemetry(cfg config.Config) *tel.Telemetry {
 	telCfg.Service = "nats-consol"
 	// Consol already exposes /api/health; keep tel's side monitor off by default.
 	telCfg.MonitorConfig.Enable = false
+	telCfg.LogLevel = cfg.LogLevel
+	if cfg.LogJSON {
+		telCfg.LogEncode = "json"
+	} else {
+		telCfg.LogEncode = "console"
+	}
 
 	if v := os.Getenv("TEL_ENABLE"); v != "" {
 		telCfg.TelConfig.Enable = v == "1" || strings.EqualFold(v, "true")
@@ -106,6 +110,7 @@ func newTelemetry(cfg config.Config) *tel.Telemetry {
 		telCfg.Traces.Enable = v == "1" || strings.EqualFold(v, "true")
 	}
 
+	tel.ConfigureLogger(telCfg)
 	return tel.NewWithConfig(telCfg)
 }
 
@@ -123,7 +128,7 @@ func logAssistantEnabled(app *bootstrap.Application, cfg config.Config) {
 	if app.Assistant == nil {
 		return
 	}
-	log.Info().
+	tel.Info().
 		Str("component", "assistant").
 		Str("provider", app.Assistant.Provider()).
 		Str("model", cfg.AIModel).
@@ -147,9 +152,9 @@ func newHTTPServer(cfg config.Config, app *bootstrap.Application) *fasthttp.Serv
 
 func runUntilSignal(server *fasthttp.Server, addr string) {
 	go func() {
-		log.Info().Str("component", "server").Str("addr", addr).Msg("nats-consol v0.3 listening")
+		tel.Info().Str("component", "server").Str("addr", addr).Msg("nats-consol v0.3 listening")
 		if err := server.ListenAndServe(addr); err != nil {
-			log.Fatal().Err(err).Str("component", "server").Msg("server failed")
+			tel.Fatal().Err(err).Str("component", "server").Msg("server failed")
 		}
 	}()
 
@@ -158,6 +163,6 @@ func runUntilSignal(server *fasthttp.Server, addr string) {
 	<-stop
 
 	if err := server.Shutdown(); err != nil {
-		log.Error().Err(err).Str("component", "server").Msg("shutdown failed")
+		tel.Error().Err(err).Str("component", "server").Msg("shutdown failed")
 	}
 }

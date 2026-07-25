@@ -7,10 +7,10 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/gopherust-io/nats-consol/internal/config"
-	"github.com/gopherust-io/nats-consol/internal/log"
 	"github.com/gopherust-io/nats-consol/internal/metrics"
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
 	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/tel"
 )
 
 // Collector scrapes NATS monitoring endpoints and stores normalized samples.
@@ -85,7 +85,7 @@ func (c *Collector) sample() {
 
 	clusters, err := c.store.ListClusters(ctx)
 	if err != nil {
-		log.Error().Err(err).Str("component", "metrics_snapshot").Msg("list clusters failed")
+		tel.Error().Err(err).Str("component", "metrics_snapshot").Msg("list clusters failed")
 		return
 	}
 
@@ -106,14 +106,14 @@ func (c *Collector) sampleCluster(ctx context.Context, clusterID string, capture
 	client, err := c.manager.Get(ctx, clusterID)
 	if err != nil {
 		metrics.IncSnapshotErrors(clusterID)
-		log.Warn().Err(err).Str("component", "metrics_snapshot").Str("cluster_id", clusterID).Msg("get client failed")
+		tel.Warn().Err(err).Str("component", "metrics_snapshot").Str("cluster_id", clusterID).Msg("get client failed")
 		return
 	}
 
 	samples, err := natsclient.CollectClusterMetrics(client, ctx)
 	if err != nil {
 		metrics.IncSnapshotErrors(clusterID)
-		log.Warn().Err(err).Str("component", "metrics_snapshot").Str("cluster_id", clusterID).Msg("collect metrics failed")
+		tel.Warn().Err(err).Str("component", "metrics_snapshot").Str("cluster_id", clusterID).Msg("collect metrics failed")
 		return
 	}
 	if len(samples) == 0 {
@@ -121,7 +121,7 @@ func (c *Collector) sampleCluster(ctx context.Context, clusterID string, capture
 	}
 	if err := c.store.InsertMetricSamples(ctx, clusterID, capturedAt, samples); err != nil {
 		metrics.IncSnapshotErrors(clusterID)
-		log.Warn().Err(err).Str("component", "metrics_snapshot").Str("cluster_id", clusterID).Msg("insert samples failed")
+		tel.Warn().Err(err).Str("component", "metrics_snapshot").Str("cluster_id", clusterID).Msg("insert samples failed")
 		return
 	}
 	metrics.IncSnapshotSuccess(clusterID)
@@ -138,10 +138,10 @@ func (c *Collector) cleanup() {
 	cutoff := time.Now().UTC().Add(-retention)
 	deleted, err := c.store.DeleteMetricSamplesOlderThan(ctx, cutoff)
 	if err != nil {
-		log.Warn().Err(err).Str("component", "metrics_snapshot").Msg("cleanup failed")
+		tel.Warn().Err(err).Str("component", "metrics_snapshot").Msg("cleanup failed")
 		return
 	}
 	if deleted > 0 {
-		log.Info().Int64("deleted", deleted).Str("component", "metrics_snapshot").Msg("purged old samples")
+		tel.Info().Int64("deleted", deleted).Str("component", "metrics_snapshot").Msg("purged old samples")
 	}
 }

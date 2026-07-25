@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
-	"github.com/gopherust-io/nats-consol/internal/log"
 	"github.com/gopherust-io/nats-consol/internal/metrics"
+	"github.com/gopherust-io/tel"
 	"github.com/nats-io/nats.go"
 )
 
@@ -26,7 +26,7 @@ func (m *Manager) connectionHooks(clusterID string) ConnectionHooks {
 	return ConnectionHooks{
 		OnDisconnect: func(_ *nats.Conn, err error) {
 			m.markDisconnected(clusterID, err)
-			log.Warn().
+			tel.Warn().
 				Str("component", "nats").
 				Str("cluster_id", clusterID).
 				Err(err).
@@ -35,7 +35,7 @@ func (m *Manager) connectionHooks(clusterID string) ConnectionHooks {
 		OnReconnect: func(nc *nats.Conn) {
 			m.markReconnected(clusterID, nc)
 			metrics.IncNATSReconnect(clusterID)
-			log.Info().
+			tel.Info().
 				Str("component", "nats").
 				Str("cluster_id", clusterID).
 				Str("server", nc.ConnectedServerName()).
@@ -44,7 +44,7 @@ func (m *Manager) connectionHooks(clusterID string) ConnectionHooks {
 		OnClosed: func(_ *nats.Conn) {
 			m.evict(clusterID)
 			metrics.SetNATSConnectionsActive(m.activeConnectionCount())
-			log.Info().
+			tel.Info().
 				Str("component", "nats").
 				Str("cluster_id", clusterID).
 				Msg("nats connection closed")
@@ -234,7 +234,7 @@ func (m *Manager) sweepExpired() {
 
 	if len(expired) > 0 {
 		metrics.SetNATSConnectionsActive(m.activeConnectionCount())
-		log.Debug().
+		tel.Debug().
 			Str("component", "nats").
 			Strs("cluster_ids", expired).
 			Msg("swept stale nats connections")

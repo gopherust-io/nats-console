@@ -11,7 +11,7 @@ import (
 	"github.com/quic-go/quic-go/http3"
 
 	"github.com/gopherust-io/nats-consol/internal/config"
-	"github.com/gopherust-io/nats-consol/internal/log"
+	"github.com/gopherust-io/tel"
 )
 
 type Listener struct {
@@ -33,7 +33,7 @@ func Start(cfg config.Config) (*Listener, error) {
 	}
 	proxy := httputil.NewSingleHostReverseProxy(backend)
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		log.Error().Err(err).Str("component", "http3").Str("path", r.URL.Path).Msg("reverse proxy error")
+		tel.Error().Err(err).Str("component", "http3").Str("path", r.URL.Path).Msg("reverse proxy error")
 		http.Error(w, "upstream unavailable", http.StatusBadGateway)
 	}
 
@@ -55,9 +55,9 @@ func Start(cfg config.Config) (*Listener, error) {
 	}
 
 	l.wg.Go(func() {
-		log.Info().Str("component", "http3").Str("addr", cfg.HTTP3Addr).Msg("HTTP/3 listener started")
+		tel.Info().Str("component", "http3").Str("addr", cfg.HTTP3Addr).Msg("HTTP/3 listener started")
 		if err := l.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error().Err(err).Str("component", "http3").Msg("HTTP/3 listener failed")
+			tel.Error().Err(err).Str("component", "http3").Msg("HTTP/3 listener failed")
 		}
 	})
 

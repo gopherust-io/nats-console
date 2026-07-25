@@ -15,9 +15,9 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
-	"github.com/gopherust-io/nats-consol/internal/log"
 	"github.com/gopherust-io/nats-consol/internal/metrics"
 	"github.com/gopherust-io/nats-consol/internal/port"
+	"github.com/gopherust-io/tel"
 )
 
 const (
@@ -140,7 +140,7 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 		h.serveConn(conn, client, clusterID, stream, subjectFilter, fromSeq)
 	})
 	if err != nil {
-		log.Error().Err(err).Str("component", "live").Msg("websocket upgrade failed")
+		tel.Error().Err(err).Str("component", "live").Msg("websocket upgrade failed")
 	}
 }
 
