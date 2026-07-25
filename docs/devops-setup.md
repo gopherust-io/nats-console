@@ -43,7 +43,7 @@ Before pointing real users at the console:
 - [ ] `PUBLIC_BASE_URL` or `OIDC_*` URLs match your public hostname  
 - [ ] PostgreSQL backups enabled  
 - [ ] Network: console → NATS `:4222` and monitoring `:8222` only from private networks  
-- [ ] Set `METRICS_AUTH_ENABLED=true` in production (required when `ENV=production`)
+- [ ] Configure OTLP collector (`TEL_ENABLE` / `TEL_COLLECTOR_GRPC_ADDR`) when process metrics are needed
 - [ ] Keep `PPROF_ENABLED=false` unless admins need runtime profiling
 - [ ] Set `PPROF_CONTINUOUS=false` in production (continuous CPU profiling can use 20–35% CPU)
 - [ ] Consider `LOG_LEVEL=warn` and `METRICS_SNAPSHOT_INTERVAL=120s` under load
@@ -220,11 +220,10 @@ See the main [README SSO section](../README.md#sso-oidc) for Keycloak, Okta, and
 | Endpoint | Auth | Use |
 |----------|------|-----|
 | `GET /api/health` | Public | Liveness/readiness |
-| `GET /metrics` | Admin/root* | Prometheus metrics |
+| OTLP (tel) | Collector | Process metrics/traces (`nats_consol_*` instruments) |
+| `GET /api/v1/clusters/{id}/metrics/history` | Authenticated | JetStream/server history for the UI |
 
-\* `METRICS_AUTH_ENABLED=true` is required when `ENV=production`. Scrapers must authenticate as admin/root.
-
-Metrics include HTTP latency, active NATS connections, reconnects, and WebSocket counts.
+Process metrics (HTTP latency, NATS dials/reconnects, WebSocket counts) export via [tel](https://github.com/gopherust-io/tel) OTLP, not a Prometheus scrape endpoint.
 
 ### Logging
 
@@ -359,9 +358,6 @@ make test-smoke   # against running stack
 ```bash
 # Health
 curl -s https://nats-consol.example.com/api/health | jq
-
-# Metrics (if unauthenticated)
-curl -s https://nats-consol.example.com/metrics | head
 
 # Logs — look for component=http request lines with status 5xx
 ```

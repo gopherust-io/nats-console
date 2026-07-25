@@ -1,95 +1,113 @@
 package metrics
 
 import (
+	"context"
 	"strconv"
+	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/gopherust-io/tel"
 )
 
 var (
-	HTTPRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "nats_consol_http_requests_total",
-		Help: "Total HTTP requests processed.",
-	}, []string{"method", "path", "status"})
+	initOnce sync.Once
 
-	HTTPRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "nats_consol_http_request_duration_seconds",
-		Help:    "HTTP request duration in seconds.",
-		Buckets: prometheus.DefBuckets,
-	}, []string{"method", "path"})
-
-	WSConnectionsActive = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "nats_consol_ws_connections_active",
-		Help: "Active WebSocket connections.",
-	})
-
-	NATSConnectionsActive = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "nats_consol_nats_connections_active",
-		Help: "Active cached NATS client connections.",
-	})
-
-	NATSDialErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "nats_consol_nats_dial_errors_total",
-		Help: "Total NATS dial errors by cluster.",
-	}, []string{"cluster"})
-
-	NATSReconnectsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "nats_consol_nats_reconnects_total",
-		Help: "Total NATS client reconnects by cluster.",
-	}, []string{"cluster"})
-
-	MetricsSnapshotSuccessTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "nats_consol_metrics_snapshot_success_total",
-		Help: "Successful metric snapshot collections by cluster.",
-	}, []string{"cluster"})
-
-	MetricsSnapshotErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "nats_consol_metrics_snapshot_errors_total",
-		Help: "Failed metric snapshot collections by cluster.",
-	}, []string{"cluster"})
-
-	LiveWSFramesDroppedTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "nats_consol_live_ws_frames_dropped_total",
-		Help: "Live WebSocket frames dropped due to rate limiting.",
-	})
+	httpRequests   *tel.FastCounter
+	httpDuration   *tel.FastHistogram
+	wsActive       *tel.FastGauge
+	natsActive     *tel.FastGauge
+	natsDialErrors *tel.FastCounter
+	natsReconnects *tel.FastCounter
+	snapSuccess    *tel.FastCounter
+	snapErrors     *tel.FastCounter
+	wsFramesDrop   *tel.FastCounter
 )
 
-func ObserveHTTP(method, path string, status int, duration time.Duration) {
-	statusStr := strconv.Itoa(status)
-	HTTPRequestsTotal.WithLabelValues(method, path, statusStr).Inc()
-	HTTPRequestDuration.WithLabelValues(method, path).Observe(duration.Seconds())
+func ensure() {
+	initOnce.Do(func() {
+		r := tel.Global().Registry()
+		httpRequests, _ = r.Counter("nats_consol_http_requests_total")
+		httpDuration, _ = r.Histogram("nats_consol_http_request_duration_seconds")
+		wsActive, _ = r.Gauge("nats_consol_ws_connections_active")
+		natsActive, _ = r.Gauge("nats_consol_nats_connections_active")
+		natsDialErrors, _ = r.Counter("nats_consol_nats_dial_errors_total")
+		natsReconnects, _ = r.Counter("nats_consol_nats_reconnects_total")
+		snapSuccess, _ = r.Counter("nats_consol_metrics_snapshot_success_total")
+		snapErrors, _ = r.Counter("nats_consol_metrics_snapshot_errors_total")
+		wsFramesDrop, _ = r.Counter("nats_consol_live_ws_frames_dropped_total")
+	})
 }
 
+func ObserveHTTP(method, path string, status int, duration time.Duration) {
+	ensure()
+	ctx := context.Background()
+	subject := method + "|" + path + "|" + strconv.Itoa(status)
+	if httpRequests != nil {
+		httpRequests.AddWith(ctx, 1, subject)
+	}
+	if httpDuration != nil {
+		httpDuration.RecordWith(ctx, duration.Seconds(), method+"|"+path)
+	}
+}
+
+var wsCount int64
+
 func IncWS() {
-	WSConnectionsActive.Inc()
+	ensure()
+	wsCount++
+	if wsActive != nil {
+		wsActive.Record(context.Background(), wsCount)
+	}
 }
 
 func DecWS() {
-	WSConnectionsActive.Dec()
+	ensure()
+	if wsCount > 0 {
+		wsCount--
+	}
+	if wsActive != nil {
+		wsActive.Record(context.Background(), wsCount)
+	}
 }
 
 func SetNATSConnectionsActive(count int) {
-	NATSConnectionsActive.Set(float64(count))
+	ensure()
+	if natsActive != nil {
+		natsActive.Record(context.Background(), int64(count))
+	}
 }
 
 func IncNATSDialError(clusterID string) {
-	NATSDialErrorsTotal.WithLabelValues(clusterID).Inc()
+	ensure()
+	if natsDialErrors != nil {
+		natsDialErrors.AddWith(context.Background(), 1, clusterID)
+	}
 }
 
 func IncNATSReconnect(clusterID string) {
-	NATSReconnectsTotal.WithLabelValues(clusterID).Inc()
+	ensure()
+	if natsReconnects != nil {
+		natsReconnects.AddWith(context.Background(), 1, clusterID)
+	}
 }
 
 func IncSnapshotSuccess(clusterID string) {
-	MetricsSnapshotSuccessTotal.WithLabelValues(clusterID).Inc()
+	ensure()
+	if snapSuccess != nil {
+		snapSuccess.AddWith(context.Background(), 1, clusterID)
+	}
 }
 
 func IncSnapshotErrors(clusterID string) {
-	MetricsSnapshotErrorsTotal.WithLabelValues(clusterID).Inc()
+	ensure()
+	if snapErrors != nil {
+		snapErrors.AddWith(context.Background(), 1, clusterID)
+	}
 }
 
 func IncLiveWSFramesDropped() {
-	LiveWSFramesDroppedTotal.Inc()
+	ensure()
+	if wsFramesDrop != nil {
+		wsFramesDrop.Add(context.Background(), 1)
+	}
 }

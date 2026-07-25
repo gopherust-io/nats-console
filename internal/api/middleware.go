@@ -10,9 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/valyala/fasthttp"
-	"github.com/valyala/fasthttp/fasthttpadaptor"
 
 	"github.com/gopherust-io/nats-consol/internal/audit"
 	"github.com/gopherust-io/nats-consol/internal/auth"
@@ -366,7 +364,7 @@ func authenticate(ctx *fasthttp.RequestCtx, authSvc *auth.Service) (store.User, 
 
 func isPublicPath(path string) bool {
 	switch path {
-	case "/api/health", "/metrics", "/api/openapi.yaml",
+	case "/api/health", "/api/openapi.yaml",
 		"/api/v1/auth/config", "/api/v1/auth/login", "/api/v1/auth/logout":
 		return true
 	default:
@@ -390,8 +388,6 @@ func clientIP(ctx *fasthttp.RequestCtx) string {
 	}
 	return ctx.RemoteIP().String()
 }
-
-var promMetricsHandler = fasthttpadaptor.NewFastHTTPHandler(promhttp.Handler())
 
 func openapiHandler(path string) fasthttp.RequestHandler {
 	// Path comes from server config (OPENAPI_PATH), not user input.

@@ -2,6 +2,14 @@
 
 All notable changes to NATS Consol are documented in this file.
 
+## [0.10.0] - 2026-07-25
+
+### Changed
+
+- NATS client path uses [`github.com/gopherust-io/nats`](https://github.com/gopherust-io/nats) v0.2.0 (streams/consumers/KV/object store/monitoring).
+- Process metrics moved from Prometheus `/metrics` to [tel](https://github.com/gopherust-io/tel) OTLP; JetStream `/metrics/history` unchanged.
+- Logging remains zerolog.
+
 ## [0.8.0] - 2026-06-28
 
 ### Added

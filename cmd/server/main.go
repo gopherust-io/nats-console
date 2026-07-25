@@ -5,9 +5,11 @@ import (
 	"errors"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/gopherust-io/env"
+	"github.com/gopherust-io/tel"
 	"github.com/valyala/fasthttp"
 
 	"github.com/gopherust-io/nats-consol/internal/api"
@@ -32,12 +34,24 @@ func main() {
 	}
 	log.Init(log.Options{JSON: cfg.LogJSON, Level: cfg.LogLevel})
 
+	telem := newTelemetry(cfg)
+	tel.SetGlobal(telem)
+	ctx := context.Background()
+	if err := telem.Start(ctx); err != nil {
+		log.Fatal().Err(err).Str("component", "tel").Msg("failed to start telemetry")
+	}
+	defer func() {
+		if err := telem.Shutdown(context.Background()); err != nil {
+			log.Error().Err(err).Str("component", "tel").Msg("telemetry shutdown failed")
+		}
+	}()
+	ctx = tel.WrapContext(ctx, telem)
+
 	encryptor, err := buildEncryptor(cfg)
 	if err != nil {
 		log.Fatal().Err(err).Str("component", "encryption").Msg("encryption setup failed")
 	}
 
-	ctx := context.Background()
 	app, err := bootstrap.New(ctx, cfg, encryptor)
 	if err != nil {
 		log.Fatal().Err(err).Str("component", "bootstrap").Msg("failed to bootstrap application")
@@ -71,6 +85,30 @@ func main() {
 	runUntilSignal(server, cfg.HTTPAddr)
 }
 
+func newTelemetry(cfg config.Config) *tel.Telemetry {
+	var telCfg tel.Config
+	if cfg.IsProduction() {
+		telCfg = tel.DefaultConfig()
+	} else {
+		telCfg = tel.DefaultDebugConfig()
+	}
+	telCfg.Service = "nats-consol"
+	// Consol already exposes /api/health; keep tel's side monitor off by default.
+	telCfg.MonitorConfig.Enable = false
+
+	if v := os.Getenv("TEL_ENABLE"); v != "" {
+		telCfg.TelConfig.Enable = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("TEL_COLLECTOR_GRPC_ADDR"); v != "" {
+		telCfg.TelConfig.Address = v
+	}
+	if v := os.Getenv("TEL_TRACES_ENABLE"); v != "" {
+		telCfg.TelConfig.Traces.Enable = v == "1" || strings.EqualFold(v, "true")
+	}
+
+	return tel.NewWithConfig(telCfg)
+}
+
 func buildEncryptor(cfg config.Config) (*crypto.Encryptor, error) {
 	if cfg.EncryptionKey != "" {
 		return crypto.New(cfg.EncryptionKey)
@@ -100,9 +138,9 @@ func newHTTPServer(cfg config.Config, app *bootstrap.Application) *fasthttp.Serv
 			AuditWriter: app.AuditWriter,
 			Store:       app.UoW.Raw(),
 		}),
-		ReadTimeout:       cfg.HTTPReadTimeout,
-		WriteTimeout:      cfg.HTTPWriteTimeout,
-		IdleTimeout:       cfg.HTTPIdleTimeout,
+		ReadTimeout:        cfg.HTTPReadTimeout,
+		WriteTimeout:       cfg.HTTPWriteTimeout,
+		IdleTimeout:        cfg.HTTPIdleTimeout,
 		MaxRequestBodySize: cfg.MaxBodyBytes(),
 	}
 }

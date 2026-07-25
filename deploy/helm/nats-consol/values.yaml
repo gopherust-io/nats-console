@@ -56,9 +56,10 @@ env:
   LOG_LEVEL: warn
   OIDC_ENABLED: "false"
   BASIC_AUTH_ENABLED: "true"
-  METRICS_AUTH_ENABLED: "true"
   PPROF_CONTINUOUS: "false"
   METRICS_SNAPSHOT_INTERVAL: 120s
+  TEL_ENABLE: "true"
+  TEL_COLLECTOR_GRPC_ADDR: "otel-collector:4317"
 
 secrets:
   databaseUrl: ""

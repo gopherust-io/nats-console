@@ -9,13 +9,12 @@ import (
 
 func TestValidateProductionConfig(t *testing.T) {
 	cfg := Config{
-		Env:                 "production",
-		EncryptionKey:       "long-enough-secret-key",
-		SessionSecret:       "another-long-secret",
-		AuthEnabled:         true,
-		AdminPassword:       "not-admin",
-		MetricsAuthEnabled:  true,
-		PprofAuthEnabled:    true,
+		Env:                "production",
+		EncryptionKey:      "long-enough-secret-key",
+		SessionSecret:      "another-long-secret",
+		AuthEnabled:        true,
+		AdminPassword:      "not-admin",
+		PprofAuthEnabled:   true,
 	}
 	require.NoError(t, cfg.Validate(), "valid production config rejected")
 

@@ -11,7 +11,6 @@ import (
 func TestIsPublicPath(t *testing.T) {
 	public := []string{
 		"/api/health",
-		"/metrics",
 		"/api/openapi.yaml",
 		"/api/v1/auth/config",
 		"/api/v1/auth/login",

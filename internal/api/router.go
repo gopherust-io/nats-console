@@ -38,7 +38,6 @@ func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
 	r := router.New()
 
 	r.GET("/api/health", h.Health)
-	r.GET("/metrics", promMetricsHandler)
 	r.GET("/api/openapi.yaml", openapiHandler(deps.Config.OpenAPIPath))
 
 	r.GET("/api/v1/auth/me", authH.Me)
@@ -174,26 +173,6 @@ func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
 			}
 			serveStdPprof(ctx)
 			return
-		}
-		if deps.Config.MetricsAuthEnabled && path == "/metrics" {
-			user, ok := authenticate(ctx, deps.Services.Auth)
-			if !ok {
-				ctx.SetStatusCode(fasthttp.StatusUnauthorized)
-				return
-			}
-			if user.ID != "" {
-				loaded, err := deps.Services.Auth.LoadUser(context.Background(), user.ID)
-				if err != nil {
-					ctx.SetStatusCode(fasthttp.StatusUnauthorized)
-					return
-				}
-				user = loaded
-			}
-			if !auth.CanViewMetrics(user) {
-				ctx.SetStatusCode(fasthttp.StatusForbidden)
-				ctx.SetBodyString("forbidden")
-				return
-			}
 		}
 		finalHandler(ctx)
 	}

@@ -16,7 +16,7 @@ Manage streams, consumers, browse messages, tail live traffic, manage KV/Object 
 - **Message publish** — publish to JetStream streams from UI and API
 - **JWT resolver** — import/manage account JWTs per cluster
 - **Encryption key rotation** — root API to re-encrypt stored credentials
-- **Enterprise security** — AES-GCM credential encryption, audit log, OIDC SSO, hardened pprof/metrics
+- **Enterprise security** — AES-GCM credential encryption, audit log, OIDC SSO, hardened pprof
 - Dashboard with JetStream account usage, server info, and jsz metrics
 - Stream list, create, update, delete, purge
 - Consumer CRUD with detail pages
@@ -25,7 +25,7 @@ Manage streams, consumers, browse messages, tail live traffic, manage KV/Object 
 - **KV Store** and **Object Store** management
 - **Supercluster view** — gateways, routes, leafnodes, replication with partial-failure warnings
 - **Continuous profiling** — admin-only `/api/v1/pprof/*` (raw `/debug/pprof` disabled in production)
-- **Prometheus metrics** at `/metrics` (auth on by default in production)
+- **OTLP process telemetry** via [tel](https://github.com/gopherust-io/tel) (HTTP/NATS counters); JetStream history via `/api/v1/clusters/{id}/metrics/history`
 - **Helm chart** for Kubernetes deployment
 - OpenAPI spec served at `/api/openapi.yaml`
 - Docker Compose quickstart with NATS + PostgreSQL + JetStream
@@ -189,7 +189,8 @@ make lint
 | `CORS_ALLOWED_ORIGINS` | — | Comma-separated allowed origins |
 | `LOG_JSON` | `false` | Emit structured JSON logs |
 | `LOG_LEVEL` | `info` | Log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal` |
-| `METRICS_AUTH_ENABLED` | `false` | Require auth for `/metrics` |
+| `TEL_ENABLE` | (tel default) | Enable OTLP export (`github.com/gopherust-io/tel`); production uses `DefaultConfig`, local uses debug (export off) |
+| `TEL_COLLECTOR_GRPC_ADDR` | `127.0.0.1:4317` | OTLP/gRPC collector address when tel is enabled |
 | `PPROF_ENABLED` | `false` | Enable Go pprof endpoints and profiling UI (admin) |
 | `PPROF_AUTH_ENABLED` | `true` | Require admin auth for pprof |
 | `PPROF_CPU_MAX_SECONDS` | `120` | Max CPU profile duration |
@@ -386,7 +387,7 @@ See [`api/openapi.yaml`](api/openapi.yaml) or live spec at `GET /api/openapi.yam
 Key endpoints:
 
 - `GET /api/health` — readiness (postgres + default NATS cluster)
-- `GET /metrics` — Prometheus metrics
+- `GET /api/v1/clusters/{id}/metrics/history` — JetStream/server metric history (Postgres snapshots)
 - `GET /api/v1/auth/config` — `{ oidc_enabled, basic_enabled, auth_enabled }`
 - `POST /api/v1/auth/login` — session login (when basic auth enabled)
 - `GET /api/v1/auth/me` — current user profile

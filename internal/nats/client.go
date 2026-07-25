@@ -4,22 +4,20 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"io"
-	"net/http"
-	"sort"
 	"time"
+
+	libnats "github.com/gopherust-io/nats"
+	"github.com/nats-io/nats.go"
 
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/domain"
-	"github.com/nats-io/nats.go"
+	"github.com/gopherust-io/nats-consol/internal/store"
 )
 
+// Client wraps gopherust-io/nats with console-specific helpers (monitoring URL, domain mapping).
 type Client struct {
-	js             nats.JetStreamContext
-	nc             *nats.Conn
-	httpClient     *http.Client
-	monitoring     string
-	requestTimeout time.Duration
+	inner      libnats.Client
+	monitoring string
 }
 
 type ConnectionHooks struct {
@@ -28,195 +26,145 @@ type ConnectionHooks struct {
 	OnClosed     func(*nats.Conn)
 }
 
-func Connect(cfg config.Config, hooks ConnectionHooks) (*Client, error) {
-	opts := []nats.Option{
-		nats.Name("nats-consol"),
-		nats.Timeout(cfg.RequestTimeout),
-		nats.MaxReconnects(-1),
-		nats.ReconnectWait(2 * time.Second),
-	}
+func Connect(ctx context.Context, cfg config.Config, hooks ConnectionHooks) (*Client, error) {
+	return dial(ctx, cfg.NATSURL, cfg.NATSCredsFile, cfg.NATSToken, cfg.MonitoringURL, cfg.RequestTimeout, hooks)
+}
 
-	if hooks.OnDisconnect != nil {
-		opts = append(opts, nats.DisconnectErrHandler(hooks.OnDisconnect))
-	}
-	if hooks.OnReconnect != nil {
-		opts = append(opts, nats.ReconnectHandler(hooks.OnReconnect))
-	}
-	if hooks.OnClosed != nil {
-		opts = append(opts, nats.ClosedHandler(hooks.OnClosed))
-	}
+func ConnectCluster(ctx context.Context, cluster store.Cluster, timeout time.Duration, hooks ConnectionHooks) (*Client, error) {
+	return dial(ctx, cluster.NATSURL, cluster.CredsFilePath, cluster.Token, cluster.MonitoringURL, timeout, hooks)
+}
 
-	if cfg.NATSCredsFile != "" {
-		opts = append(opts, nats.UserCredentials(cfg.NATSCredsFile))
+func dial(
+	ctx context.Context,
+	address, credsFile, token, monitoringURL string,
+	timeout time.Duration,
+	hooks ConnectionHooks,
+) (*Client, error) {
+	cfg := libnats.DefaultConfig()
+	cfg.Conn.Address = address
+	cfg.Conn.ClientName = "nats-consol"
+	cfg.Conn.CredentialsFile = credsFile
+	cfg.Conn.Secret = token
+	if timeout > 0 {
+		cfg.Conn.ConnectTimeout = timeout
 	}
-	if cfg.NATSToken != "" {
-		opts = append(opts, nats.Token(cfg.NATSToken))
-	}
+	cfg.Conn.MaxReconnect = -1
+	cfg.Conn.ReconnectWait = 2 * time.Second
+	cfg.Conn.AllowReconnect = true
+	cfg.Conn.InitialRetryAttempts = 0 // single attempt; Manager retries via cache/dial
+	cfg.Conn.OnDisconnect = hooks.OnDisconnect
+	cfg.Conn.OnReconnect = hooks.OnReconnect
+	cfg.Conn.OnClosed = hooks.OnClosed
+	cfg.Metrics.AllowMetrics = true
+	cfg.Metrics.AllowTracing = true
 
-	nc, err := nats.Connect(cfg.NATSURL, opts...)
+	inner, err := libnats.NewClient(ctx, &cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect to nats: %w", err)
 	}
 
-	js, err := nc.JetStream()
-	if err != nil {
-		nc.Close()
-		return nil, fmt.Errorf("jetstream context: %w", err)
-	}
-
 	return &Client{
-		nc:             nc,
-		js:             js,
-		monitoring:     cfg.MonitoringURL,
-		httpClient:     monitoringHTTPClient(cfg.RequestTimeout),
-		requestTimeout: cfg.RequestTimeout,
+		inner:      inner,
+		monitoring: monitoringURL,
 	}, nil
 }
 
 func (c *Client) Close() {
-	if c.nc != nil {
-		c.nc.Close()
+	if c == nil || c.inner == nil {
+		return
 	}
+	_ = c.inner.Connector().Shutdown()
 }
 
 func (c *Client) IsAlive() bool {
-	return c.nc != nil && c.nc.IsConnected() && !c.nc.IsClosed()
+	if c == nil || c.inner == nil {
+		return false
+	}
+	conn := c.inner.Connector().Conn()
+	return conn != nil && conn.IsConnected() && !conn.IsClosed()
 }
 
 func (c *Client) ServerName() string {
-	if c.nc == nil || !c.nc.IsConnected() {
+	if c == nil || c.inner == nil {
 		return ""
 	}
-	return c.nc.ConnectedServerName()
+	conn := c.inner.Connector().Conn()
+	if conn == nil || !conn.IsConnected() {
+		return ""
+	}
+	return conn.ConnectedServerName()
 }
 
 func (c *Client) JetStream() nats.JetStreamContext {
-	return c.js
+	return c.inner.Connector().JetStream()
 }
 
 func (c *Client) Conn() *nats.Conn {
-	return c.nc
+	return c.inner.Connector().Conn()
+}
+
+func (c *Client) Lib() libnats.Client {
+	return c.inner
 }
 
 func (c *Client) AccountInfo(ctx context.Context) (*nats.AccountInfo, error) {
-	info, err := c.js.AccountInfo()
-	if err != nil {
-		return nil, err
-	}
-	return info, nil
+	return c.inner.Connector().AccountInfo(ctx)
 }
 
 func (c *Client) StreamNames(ctx context.Context) ([]string, error) {
-	ch := c.js.StreamNames()
-	names := make([]string, 0, 64)
-	for name := range ch {
-		names = append(names, name)
-	}
-	return names, nil
-}
-
-func sliceStrings(items []string, offset, limit int) ([]string, int) {
-	total := len(items)
-	if offset >= total {
-		return []string{}, total
-	}
-	end := min(offset+limit, total)
-	return items[offset:end], total
+	return libnats.StreamNames(ctx, c.inner.Streams())
 }
 
 func (c *Client) ListStreams(ctx context.Context, offset, limit int) ([]*nats.StreamInfo, int, error) {
-	names, err := c.StreamNames(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
-	sort.Strings(names)
-	total := len(names)
-	if offset >= total {
-		return []*nats.StreamInfo{}, total, nil
-	}
-	end := min(offset+limit, total)
-	pageNames := names[offset:end]
-	streams := make([]*nats.StreamInfo, 0, len(pageNames))
-	for _, name := range pageNames {
-		info, err := c.js.StreamInfo(name)
-		if err != nil {
-			return nil, total, err
-		}
-		streams = append(streams, info)
-	}
-	return streams, total, nil
+	return c.inner.Streams().ListStreamsPage(ctx, offset, limit)
 }
 
 func (c *Client) StreamInfo(ctx context.Context, name string) (*nats.StreamInfo, error) {
-	return c.js.StreamInfo(name)
+	return c.inner.Streams().StreamInfo(ctx, name)
 }
 
 func (c *Client) AddStream(ctx context.Context, cfg *nats.StreamConfig) (*nats.StreamInfo, error) {
-	return c.js.AddStream(cfg)
+	return c.inner.Streams().AddStream(ctx, cfg)
 }
 
 func (c *Client) UpdateStream(ctx context.Context, cfg *nats.StreamConfig) (*nats.StreamInfo, error) {
-	return c.js.UpdateStream(cfg)
+	return c.inner.Streams().UpdateStream(ctx, cfg)
 }
 
 func (c *Client) DeleteStream(ctx context.Context, name string) error {
-	return c.js.DeleteStream(name)
+	return c.inner.Streams().DeleteStream(ctx, name)
 }
 
 func (c *Client) PurgeStream(ctx context.Context, name string) error {
-	return c.js.PurgeStream(name)
+	return c.inner.Streams().PurgeStream(ctx, name)
 }
 
 func (c *Client) ConsumerNames(ctx context.Context, stream string) ([]string, error) {
-	ch := c.js.ConsumerNames(stream)
-	names := make([]string, 0, 64)
-	for name := range ch {
-		names = append(names, name)
-	}
-	return names, nil
+	return c.inner.Consumers().ConsumerNames(ctx, stream)
 }
 
 func (c *Client) ListConsumers(ctx context.Context, stream string, offset, limit int) ([]*nats.ConsumerInfo, int, error) {
-	names, err := c.ConsumerNames(ctx, stream)
-	if err != nil {
-		return nil, 0, err
-	}
-	sort.Strings(names)
-	total := len(names)
-	if offset >= total {
-		return []*nats.ConsumerInfo{}, total, nil
-	}
-	end := min(offset+limit, total)
-	pageNames := names[offset:end]
-	consumers := make([]*nats.ConsumerInfo, 0, len(pageNames))
-	for _, name := range pageNames {
-		info, err := c.js.ConsumerInfo(stream, name)
-		if err != nil {
-			return nil, total, err
-		}
-		consumers = append(consumers, info)
-	}
-	return consumers, total, nil
+	return c.inner.Consumers().ListConsumersPage(ctx, stream, offset, limit)
 }
 
 func (c *Client) ConsumerInfo(ctx context.Context, stream, consumer string) (*nats.ConsumerInfo, error) {
-	return c.js.ConsumerInfo(stream, consumer)
+	return c.inner.Consumers().ConsumerInfo(ctx, stream, consumer)
 }
 
 func (c *Client) AddConsumer(ctx context.Context, stream string, cfg *nats.ConsumerConfig) (*nats.ConsumerInfo, error) {
-	return c.js.AddConsumer(stream, cfg)
+	return c.inner.Consumers().AddConsumer(ctx, stream, cfg)
 }
 
 func (c *Client) DeleteConsumer(ctx context.Context, stream, consumer string) error {
-	return c.js.DeleteConsumer(stream, consumer)
+	return c.inner.Consumers().DeleteConsumer(ctx, stream, consumer)
 }
 
 func (c *Client) GetMessage(ctx context.Context, stream string, seq uint64) (*nats.RawStreamMsg, error) {
-	return c.js.GetMsg(stream, seq)
+	return c.inner.Streams().GetMsg(ctx, stream, seq)
 }
 
 func (c *Client) GetMessageNav(ctx context.Context, stream string, seq uint64, direction string) (*domain.MessageResult, error) {
-	info, err := c.js.StreamInfo(stream)
+	info, err := c.inner.Streams().StreamInfo(ctx, stream)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +183,7 @@ func (c *Client) GetMessageNav(ctx context.Context, stream string, seq uint64, d
 		return nil, nats.ErrMsgNotFound
 	}
 
-	msg, err := c.js.GetMsg(stream, target)
+	msg, err := c.inner.Streams().GetMsg(ctx, stream, target)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +203,7 @@ func (c *Client) GetMessageNav(ctx context.Context, stream string, seq uint64, d
 }
 
 func (c *Client) PublishStreamMessage(ctx context.Context, stream string, in domain.PublishMessageRequest) (domain.PublishMessageResult, error) {
-	info, err := c.js.StreamInfo(stream)
+	info, err := c.inner.Streams().StreamInfo(ctx, stream)
 	if err != nil {
 		return domain.PublishMessageResult{}, err
 	}
@@ -270,15 +218,7 @@ func (c *Client) PublishStreamMessage(ctx context.Context, stream string, in dom
 		return domain.PublishMessageResult{}, err
 	}
 
-	msg := &nats.Msg{Subject: subject, Data: data}
-	for k, v := range in.Headers {
-		if msg.Header == nil {
-			msg.Header = nats.Header{}
-		}
-		msg.Header.Set(k, v)
-	}
-
-	ack, err := c.js.PublishMsg(msg)
+	ack, err := c.inner.PublishRaw(ctx, subject, data, in.Headers)
 	if err != nil {
 		return domain.PublishMessageResult{}, err
 	}
@@ -291,25 +231,5 @@ func (c *Client) PublishStreamMessage(ctx context.Context, stream string, in dom
 }
 
 func (c *Client) Monitoring(ctx context.Context, path string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.monitoring+path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("monitoring request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("monitoring %s: status %d: %s", path, resp.StatusCode, string(body))
-	}
-
-	body, err := readBodyPooled(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	return body, nil
+	return c.inner.Monitoring().Fetch(ctx, c.monitoring, path)
 }

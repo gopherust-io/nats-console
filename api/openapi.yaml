@@ -41,15 +41,6 @@ paths:
         "200":
           description: YAML spec
 
-  /metrics:
-    get:
-      tags: [System]
-      summary: Prometheus metrics
-      security: []
-      responses:
-        "200":
-          description: Metrics payload
-
   /api/v1/auth/config:
     get:
       tags: [Auth]

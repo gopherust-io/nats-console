@@ -94,12 +94,12 @@ func (m *Manager) ping(ctx context.Context, clusterID string) (serverName string
 		return "", false, err
 	}
 
-	if !client.nc.IsConnected() {
+	if !client.IsAlive() {
 		return "", false, errors.New("not connected")
 	}
-	serverName = client.nc.ConnectedServerName()
+	serverName = client.ServerName()
 
-	_, err = client.js.AccountInfo()
+	_, err = client.AccountInfo(ctx)
 	if err != nil {
 		return serverName, false, nil
 	}
@@ -170,7 +170,7 @@ func (m *Manager) connect(cluster store.Cluster) (*Client, error) {
 		}
 		m.mu.Unlock()
 
-		client, err := ConnectCluster(cluster, m.cfg.RequestTimeout, m.connectionHooks(cluster.ID))
+		client, err := ConnectCluster(context.Background(), cluster, m.cfg.RequestTimeout, m.connectionHooks(cluster.ID))
 		if err != nil {
 			metrics.IncNATSDialError(cluster.ID)
 			return nil, err
@@ -204,13 +204,3 @@ func (m *Manager) evict(clusterID string) {
 	delete(m.status, clusterID)
 }
 
-func ConnectCluster(cluster store.Cluster, timeout time.Duration, hooks ConnectionHooks) (*Client, error) {
-	cfg := config.Config{
-		NATSURL:        cluster.NATSURL,
-		NATSCredsFile:  cluster.CredsFilePath,
-		NATSToken:      cluster.Token,
-		MonitoringURL:  cluster.MonitoringURL,
-		RequestTimeout: timeout,
-	}
-	return Connect(cfg, hooks)
-}
