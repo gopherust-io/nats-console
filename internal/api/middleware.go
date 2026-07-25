@@ -15,10 +15,10 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/audit"
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
-	"github.com/gopherust-io/nats-consol/internal/log"
 	"github.com/gopherust-io/nats-consol/internal/metrics"
 	"github.com/gopherust-io/nats-consol/internal/store"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
+	"github.com/gopherust-io/tel"
 )
 
 const (
@@ -92,7 +92,7 @@ func requestLogMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler 
 		}
 		start := time.Now()
 		next(ctx)
-		log.Info().
+		tel.Info().
 			Str("component", "http").
 			Str("method", string(ctx.Method())).
 			Str("path", path).
