@@ -1,6 +1,8 @@
 # NATS Consol
 
-Open-source, self-hosted admin console for **NATS JetStream** — [github.com/gopherust-io/nats-consol](https://github.com/gopherust-io/nats-consol).
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/gopherust-io/nats-console/badge)](https://scorecard.dev/viewer/?uri=github.com/gopherust-io/nats-console)
+
+Open-source, self-hosted admin console for **NATS JetStream** — [github.com/gopherust-io/nats-console](https://github.com/gopherust-io/nats-console).
 
 Manage streams, consumers, browse messages, tail live traffic, manage KV/Object stores, and monitor multi-cluster deployments from a modern web UI — without exposing NATS monitoring ports to the public internet.
 
