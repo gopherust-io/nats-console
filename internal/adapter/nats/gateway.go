@@ -5,9 +5,9 @@ import (
 	"errors"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
 	"github.com/gopherust-io/nats-consol/internal/port"
 	"github.com/gopherust-io/nats-consol/internal/store"
-	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
 	"github.com/nats-io/nats.go"
 )
 
@@ -145,6 +145,10 @@ func (e *Executor) AddConsumer(ctx context.Context, stream string, cfg *nats.Con
 
 func (e *Executor) DeleteConsumer(ctx context.Context, stream, consumer string) error {
 	return e.client.DeleteConsumer(ctx, stream, consumer)
+}
+
+func (e *Executor) ReplayConsumer(ctx context.Context, stream, consumer string, req domain.ReplayConsumerRequest) (domain.ReplayConsumerResult, error) {
+	return e.client.ReplayConsumer(ctx, stream, consumer, req)
 }
 
 func (e *Executor) GetMessage(ctx context.Context, stream string, seq uint64) (*nats.RawStreamMsg, error) {

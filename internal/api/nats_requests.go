@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -45,7 +46,10 @@ type consumerConfigRequest struct {
 	DeliverPolicy  string   `json:"deliverPolicy,omitempty"`
 	AckPolicy      string   `json:"ackPolicy,omitempty"`
 	FilterSubject  string   `json:"filterSubject,omitempty"`
+	OptStartTime   string   `json:"optStartTime,omitempty"` // RFC3339
+	ReplayPolicy   string   `json:"replayPolicy,omitempty"`
 	FilterSubjects []string `json:"filterSubjects,omitempty"`
+	OptStartSeq    uint64   `json:"optStartSeq,omitempty"`
 }
 
 func (r consumerConfigRequest) toNATS() (nats.ConsumerConfig, error) {
@@ -54,6 +58,7 @@ func (r consumerConfigRequest) toNATS() (nats.ConsumerConfig, error) {
 		Name:           r.Name,
 		FilterSubject:  r.FilterSubject,
 		FilterSubjects: r.FilterSubjects,
+		OptStartSeq:    r.OptStartSeq,
 	}
 	if r.DeliverPolicy != "" {
 		if err := unmarshalEnum(r.DeliverPolicy, &cfg.DeliverPolicy); err != nil {
@@ -64,6 +69,21 @@ func (r consumerConfigRequest) toNATS() (nats.ConsumerConfig, error) {
 		if err := unmarshalEnum(r.AckPolicy, &cfg.AckPolicy); err != nil {
 			return cfg, fmt.Errorf("ackPolicy: %w", err)
 		}
+	}
+	if r.ReplayPolicy != "" {
+		if err := unmarshalEnum(r.ReplayPolicy, &cfg.ReplayPolicy); err != nil {
+			return cfg, fmt.Errorf("replayPolicy: %w", err)
+		}
+	}
+	if strings.TrimSpace(r.OptStartTime) != "" {
+		t, err := time.Parse(time.RFC3339Nano, r.OptStartTime)
+		if err != nil {
+			t, err = time.Parse(time.RFC3339, r.OptStartTime)
+			if err != nil {
+				return cfg, fmt.Errorf("optStartTime: %w", err)
+			}
+		}
+		cfg.OptStartTime = &t
 	}
 	return cfg, nil
 }

@@ -96,6 +96,7 @@ func NewRouter(deps RouterDeps) fasthttp.RequestHandler {
 	r.POST(prefix+"/streams/{name}/consumers", h.CreateConsumer)
 	r.GET(prefix+"/streams/{name}/consumers/{consumer}", h.GetConsumer)
 	r.DELETE(prefix+"/streams/{name}/consumers/{consumer}", h.DeleteConsumer)
+	r.POST(prefix+"/streams/{name}/consumers/{consumer}/replay", h.ReplayConsumer)
 	r.GET(prefix+"/streams/{name}/messages", h.GetMessage)
 	r.POST(prefix+"/streams/{name}/messages", h.PublishMessage)
 

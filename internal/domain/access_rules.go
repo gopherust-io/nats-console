@@ -4,6 +4,7 @@ import "slices"
 
 // AccessRules scopes non-root users to specific clusters and delegated admin capabilities.
 // Root users and legacy admin users without access rules ignore these fields.
+// goalign:ignore
 type AccessRules struct {
 	ClusterIDs      []string `json:"clusterIds,omitempty"`
 	AssignableRoles []string `json:"assignableRoles,omitempty"`

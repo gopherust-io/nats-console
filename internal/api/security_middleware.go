@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	csrfHeader              = "X-CSRF-Token"
+	csrfHeader                = "X-CSRF-Token"
 	ipRateLimiterPurgeEvery   = 256
 	ipRateLimiterMaxStaleKeys = 512
 )

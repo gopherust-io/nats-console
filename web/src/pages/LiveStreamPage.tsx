@@ -50,6 +50,8 @@ export default function LiveStreamPage() {
   const [status, setStatus] = useState("disconnected");
   const [subjectInput, setSubjectInput] = useState("");
   const [subjectFilter, setSubjectFilter] = useState("");
+  const [fromSeqInput, setFromSeqInput] = useState("");
+  const [fromSeq, setFromSeq] = useState<number | undefined>(undefined);
   const [paused, setPaused] = useState(false);
   const [rawMode, setRawMode] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -81,9 +83,22 @@ export default function LiveStreamPage() {
   }, [subjectInput]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const trimmed = fromSeqInput.trim();
+      if (!trimmed) {
+        setFromSeq(undefined);
+        return;
+      }
+      const seq = Number(trimmed);
+      setFromSeq(Number.isFinite(seq) && seq > 0 ? seq : undefined);
+    }, LIVE_SUBJECT_FILTER_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [fromSeqInput]);
+
+  useEffect(() => {
     if (!clusterId || !name) return;
 
-    const url = getWebSocketURL(clusterId, name, subjectFilter || undefined);
+    const url = getWebSocketURL(clusterId, name, subjectFilter || undefined, fromSeq);
     const ws = new WebSocket(url);
     wsRef.current = ws;
     setStatus("connecting");
@@ -125,7 +140,7 @@ export default function LiveStreamPage() {
       }
       ws.close();
     };
-  }, [clusterId, name, subjectFilter, flushPending]);
+  }, [clusterId, name, subjectFilter, fromSeq, flushPending]);
 
   const virtualizer = useVirtualizer({
     count: messages.length,
@@ -172,6 +187,16 @@ export default function LiveStreamPage() {
             value={subjectInput}
             onChange={(e) => setSubjectInput(e.target.value)}
             placeholder="events.>"
+          />
+        </label>
+        <label>
+          From sequence
+          <input
+            type="number"
+            min={1}
+            value={fromSeqInput}
+            onChange={(e) => setFromSeqInput(e.target.value)}
+            placeholder="live (new)"
           />
         </label>
         <button className="btn secondary" onClick={() => sendAction(paused ? "resume" : "pause")}>

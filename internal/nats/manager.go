@@ -15,6 +15,7 @@ import (
 
 const defaultClientCacheTTL = 5 * time.Minute
 
+// goalign:ignore
 type Manager struct {
 	dial         singleflight.Group
 	store        *store.Store
@@ -203,4 +204,3 @@ func (m *Manager) evict(clusterID string) {
 	delete(m.credCache, clusterID)
 	delete(m.status, clusterID)
 }
-

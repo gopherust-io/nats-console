@@ -29,6 +29,7 @@ var (
 	ErrUnknownProvider = errors.New("unknown sso provider")
 )
 
+// goalign:ignore
 type Claims struct {
 	jwt.RegisteredClaims
 

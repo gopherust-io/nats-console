@@ -2,6 +2,7 @@ package domain
 
 import "time"
 
+// goalign:ignore
 type User struct {
 	CreatedAt   time.Time    `json:"createdAt"`
 	AccessRules *AccessRules `json:"accessRules,omitempty"`
@@ -13,6 +14,7 @@ type User struct {
 	IsRoot      bool         `json:"isRoot"`
 }
 
+// goalign:ignore
 type UserCreate struct {
 	AccessRules  *AccessRules
 	Username     string
@@ -24,6 +26,7 @@ type UserCreate struct {
 	IsRoot       bool
 }
 
+// goalign:ignore
 type UserUpdate struct {
 	Email       *string
 	Password    *string

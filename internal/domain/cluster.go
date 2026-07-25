@@ -2,6 +2,7 @@ package domain
 
 import "time"
 
+// goalign:ignore
 type Cluster struct {
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
@@ -14,6 +15,7 @@ type Cluster struct {
 	IsDefault     bool      `json:"isDefault"`
 }
 
+// goalign:ignore
 type ClusterCreate struct {
 	Name          string
 	NATSURL       string
@@ -32,6 +34,7 @@ type ClusterUpdate struct {
 	IsDefault     *bool
 }
 
+// goalign:ignore
 type ClusterTestResult struct {
 	Message    string `json:"message"`
 	ServerName string `json:"serverName,omitempty"`

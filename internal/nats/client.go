@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
 	libnats "github.com/gopherust-io/nats"
@@ -157,6 +158,64 @@ func (c *Client) AddConsumer(ctx context.Context, stream string, cfg *nats.Consu
 
 func (c *Client) DeleteConsumer(ctx context.Context, stream, consumer string) error {
 	return c.inner.Consumers().DeleteConsumer(ctx, stream, consumer)
+}
+
+func (c *Client) ReplayConsumer(ctx context.Context, stream, consumer string, req domain.ReplayConsumerRequest) (domain.ReplayConsumerResult, error) {
+	if err := req.Validate(); err != nil {
+		return domain.ReplayConsumerResult{}, err
+	}
+
+	opts, err := replayOptsFromRequest(req)
+	if err != nil {
+		return domain.ReplayConsumerResult{}, err
+	}
+
+	mode := req.NormalizedMode()
+	switch mode {
+	case domain.ReplayModeSidecar:
+		durable, err := c.inner.Replay().CreateReplayConsumer(ctx, stream, consumer, opts...)
+		if err != nil {
+			return domain.ReplayConsumerResult{}, err
+		}
+		return domain.ReplayConsumerResult{Durable: durable, Mode: mode}, nil
+	default:
+		if err := c.inner.Replay().ResetConsumer(ctx, stream, consumer, opts...); err != nil {
+			return domain.ReplayConsumerResult{}, err
+		}
+		return domain.ReplayConsumerResult{Durable: consumer, Mode: mode}, nil
+	}
+}
+
+func replayOptsFromRequest(req domain.ReplayConsumerRequest) ([]libnats.ReplayOpt, error) {
+	opts := make([]libnats.ReplayOpt, 0, 4)
+	switch req.NormalizedFrom() {
+	case domain.ReplayFromSeq:
+		opts = append(opts, libnats.FromSeq(req.Seq))
+	case domain.ReplayFromTime:
+		t, err := req.ParseTime()
+		if err != nil {
+			return nil, fmt.Errorf("time: %w", err)
+		}
+		opts = append(opts, libnats.FromTime(t))
+	case domain.ReplayFromBeginning:
+		opts = append(opts, libnats.FromBeginning())
+	case domain.ReplayFromNew:
+		opts = append(opts, libnats.FromNew())
+	}
+
+	if strings.EqualFold(strings.TrimSpace(req.ReplayPolicy), domain.ReplayPolicyOriginal) {
+		opts = append(opts, libnats.WithReplayPolicy(libnats.ReplayOriginal))
+	}
+
+	if filter := strings.TrimSpace(req.FilterSubject); filter != "" {
+		opts = append(opts, libnats.WithFilterSubject(filter))
+	}
+
+	if durable := strings.TrimSpace(req.Durable); durable != "" && req.NormalizedMode() == domain.ReplayModeSidecar {
+		opts = append(opts, libnats.WithReplayDurable(durable))
+	}
+
+	return opts, nil
 }
 
 func (c *Client) GetMessage(ctx context.Context, stream string, seq uint64) (*nats.RawStreamMsg, error) {

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
-	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/require"
 )
 

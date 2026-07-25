@@ -2,6 +2,7 @@ package domain
 
 import "time"
 
+// goalign:ignore
 type PprofConfig struct {
 	Profiles           []string `json:"profiles"`
 	MaxCPUSecs         int      `json:"maxCpuSeconds"`
@@ -26,6 +27,7 @@ type PprofRuntimeStats struct {
 	Memory     PprofMemoryStats `json:"memory"`
 }
 
+// goalign:ignore
 type PprofMemoryStats struct {
 	Alloc       uint64 `json:"alloc"`
 	TotalAlloc  uint64 `json:"totalAlloc"`

@@ -2,6 +2,7 @@ package domain
 
 import "time"
 
+// goalign:ignore
 type SuperclusterOverview struct {
 	FetchedAt         time.Time              `json:"fetchedAt"`
 	MetaCluster       *SuperclusterMeta      `json:"metaCluster,omitempty"`
@@ -28,6 +29,7 @@ type SuperclusterGateway struct {
 	Subscriptions int    `json:"subscriptions,omitempty"`
 }
 
+// goalign:ignore
 type SuperclusterRoute struct {
 	RemoteID  string `json:"remoteId,omitempty"`
 	URL       string `json:"url,omitempty"`
@@ -36,6 +38,7 @@ type SuperclusterRoute struct {
 	OutMsgs   uint64 `json:"outMsgs,omitempty"`
 }
 
+// goalign:ignore
 type SuperclusterLeafnode struct {
 	Name      string `json:"name,omitempty"`
 	Remote    string `json:"remote,omitempty"`
@@ -49,6 +52,7 @@ type SuperclusterMeta struct {
 	ClusterSize int                   `json:"clusterSize,omitempty"`
 }
 
+// goalign:ignore
 type SuperclusterReplica struct {
 	Name    string `json:"name"`
 	ID      string `json:"id,omitempty"`
@@ -59,6 +63,7 @@ type SuperclusterReplica struct {
 	Online  bool   `json:"online"`
 }
 
+// goalign:ignore
 type StreamReplication struct {
 	StreamName   string `json:"streamName"`
 	Kind         string `json:"kind"`

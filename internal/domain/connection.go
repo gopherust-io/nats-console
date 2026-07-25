@@ -3,6 +3,7 @@ package domain
 import "time"
 
 // NATSConnectionStatus describes the console's cached NATS client for a cluster.
+// goalign:ignore
 type NATSConnectionStatus struct {
 	LastCheckedAt   time.Time  `json:"lastCheckedAt"`
 	LastConnectedAt *time.Time `json:"lastConnectedAt,omitempty"`

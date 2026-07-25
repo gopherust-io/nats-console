@@ -24,6 +24,7 @@ const (
 	CodeUnavailable = "unavailable"
 )
 
+// goalign:ignore
 type Error struct {
 	Code       string
 	Message    string

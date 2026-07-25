@@ -471,6 +471,34 @@ paths:
         "204":
           description: Deleted
 
+  /api/v1/clusters/{clusterId}/streams/{name}/consumers/{consumer}/replay:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/streamName"
+      - $ref: "#/components/parameters/consumerName"
+    post:
+      tags: [Consumers]
+      summary: Replay stream messages by seeking or side-caring a durable consumer
+      description: >
+        Repositions an existing durable (mode=reset) or creates a side-car durable
+        (mode=sidecar) so messages are redelivered from a start sequence, time,
+        beginning, or new messages only. Does not republish payloads onto subjects.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplayConsumerRequest"
+      responses:
+        "200":
+          description: Replay applied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReplayConsumerResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
   /api/v1/clusters/{clusterId}/streams/{name}/messages:
     parameters:
       - $ref: "#/components/parameters/clusterId"
@@ -1079,12 +1107,58 @@ components:
         ack_policy:
           type: string
         filter_subject:
-          type:    string
+          type: string
+        optStartSeq:
+          type: integer
+          format: int64
+        optStartTime:
+          type: string
+          format: date-time
+        replayPolicy:
+          type: string
+          enum: [instant, original]
         max_deliver:
           type: integer
         ack_wait:
           type: integer
           format: int64
+
+    ReplayConsumerRequest:
+      type: object
+      required: [from]
+      properties:
+        mode:
+          type: string
+          enum: [reset, sidecar]
+          default: reset
+        from:
+          type: string
+          enum: [seq, time, beginning, new]
+        seq:
+          type: integer
+          format: int64
+          description: Required when from=seq
+        time:
+          type: string
+          format: date-time
+          description: Required when from=time (RFC3339)
+        replayPolicy:
+          type: string
+          enum: [instant, original]
+        filterSubject:
+          type: string
+        durable:
+          type: string
+          description: Optional side-car durable name when mode=sidecar
+
+    ReplayConsumerResult:
+      type: object
+      properties:
+        durable:
+          type: string
+        mode:
+          type: string
+          enum: [reset, sidecar]
 
     ConsumerListResponse:
       type: object

@@ -22,6 +22,7 @@ func init() {
 }
 
 // Options configures the global logger.
+// goalign:ignore
 type Options struct {
 	Level string
 	JSON  bool

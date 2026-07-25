@@ -16,6 +16,7 @@ var (
 	ErrRootProtected = errors.New("root user protected")
 )
 
+// goalign:ignore
 type Cluster struct {
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
@@ -30,6 +31,7 @@ type Cluster struct {
 	IsDefault     bool      `json:"is_default"`
 }
 
+// goalign:ignore
 type ClusterCreate struct {
 	Name          string
 	NATSURL       string

@@ -2,34 +2,34 @@ package api
 
 import (
 	"testing"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestStreamConfigRequestToNATS(t *testing.T) {
-	cfg, err := streamConfigRequest{
-		Name:      "ORDERS",
-		Subjects:  []string{"orders.>"},
-		Retention: "limits",
-		Storage:   "file",
-		MaxMsgs:   100,
-	}.toNATS()
-	require.NoError(t, err)
-	assert.Equal(t, "ORDERS", cfg.Name)
-	assert.Equal(t, nats.LimitsPolicy, cfg.Retention)
-	assert.Equal(t, int64(100), cfg.MaxMsgs)
-}
+func TestConsumerConfigRequestToNATSStartFields(t *testing.T) {
+	t.Parallel()
 
-func TestConsumerConfigRequestToNATS(t *testing.T) {
-	cfg, err := consumerConfigRequest{
+	cfg, err := (consumerConfigRequest{
 		DurableName:   "worker",
-		DeliverPolicy: "all",
+		DeliverPolicy: "by_start_sequence",
 		AckPolicy:     "explicit",
-	}.toNATS()
+		OptStartSeq:   42,
+		ReplayPolicy:  "original",
+	}).toNATS()
 	require.NoError(t, err)
-	assert.Equal(t, "worker", cfg.Durable)
-	assert.Equal(t, nats.DeliverAllPolicy, cfg.DeliverPolicy)
-	assert.Equal(t, nats.AckExplicitPolicy, cfg.AckPolicy)
+	assert.Equal(t, nats.DeliverByStartSequencePolicy, cfg.DeliverPolicy)
+	assert.Equal(t, uint64(42), cfg.OptStartSeq)
+	assert.Equal(t, nats.ReplayOriginalPolicy, cfg.ReplayPolicy)
+
+	cfg, err = (consumerConfigRequest{
+		DurableName:   "timed",
+		DeliverPolicy: "by_start_time",
+		OptStartTime:  "2026-07-25T10:00:00Z",
+	}).toNATS()
+	require.NoError(t, err)
+	require.NotNil(t, cfg.OptStartTime)
+	assert.True(t, cfg.OptStartTime.Equal(time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)))
 }

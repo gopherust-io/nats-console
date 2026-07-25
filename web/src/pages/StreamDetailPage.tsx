@@ -41,6 +41,9 @@ export default function StreamDetailPage() {
   const [consumerName, setConsumerName] = useState("");
   const [deliverPolicy, setDeliverPolicy] = useState("all");
   const [ackPolicy, setAckPolicy] = useState("explicit");
+  const [optStartSeq, setOptStartSeq] = useState("");
+  const [optStartTime, setOptStartTime] = useState("");
+  const [replayPolicy, setReplayPolicy] = useState("instant");
   const limit = DEFAULT_PAGE_SIZE;
 
   useEffect(() => {
@@ -105,16 +108,37 @@ export default function StreamDetailPage() {
     event.preventDefault();
     if (!clusterId) return;
     try {
+      const body: Record<string, unknown> = {
+        durableName: consumerName,
+        deliverPolicy,
+        ackPolicy,
+        replayPolicy,
+      };
+      if (deliverPolicy === "by_start_sequence") {
+        const seq = Number(optStartSeq);
+        if (!Number.isFinite(seq) || seq < 1) {
+          setError("optStartSeq is required for by_start_sequence");
+          return;
+        }
+        body.optStartSeq = seq;
+      }
+      if (deliverPolicy === "by_start_time") {
+        if (!optStartTime.trim()) {
+          setError("optStartTime is required for by_start_time");
+          return;
+        }
+        body.optStartTime = new Date(optStartTime).toISOString();
+      }
       await api(clusterPath(clusterId, `/streams/${encodeURIComponent(name)}/consumers`), {
         method: "POST",
-        body: JSON.stringify({
-          durableName: consumerName,
-          deliverPolicy,
-          ackPolicy,
-        }),
+        body: JSON.stringify(body),
       });
       setShowConsumerForm(false);
       setConsumerName("");
+      setOptStartSeq("");
+      setOptStartTime("");
+      setDeliverPolicy("all");
+      setReplayPolicy("instant");
       await queryClient.invalidateQueries({ queryKey: clusterQueryKey(clusterId, `consumers:${name}`) });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create consumer");
@@ -196,14 +220,45 @@ export default function StreamDetailPage() {
               <option value="last">last</option>
               <option value="new">new</option>
               <option value="by_start_sequence">by_start_sequence</option>
+              <option value="by_start_time">by_start_time</option>
             </select>
           </label>
+          {deliverPolicy === "by_start_sequence" && (
+            <label>
+              Start Sequence
+              <input
+                type="number"
+                min={1}
+                value={optStartSeq}
+                onChange={(e) => setOptStartSeq(e.target.value)}
+                required
+              />
+            </label>
+          )}
+          {deliverPolicy === "by_start_time" && (
+            <label>
+              Start Time
+              <input
+                type="datetime-local"
+                value={optStartTime}
+                onChange={(e) => setOptStartTime(e.target.value)}
+                required
+              />
+            </label>
+          )}
           <label>
             Ack Policy
             <select value={ackPolicy} onChange={(e) => setAckPolicy(e.target.value)}>
               <option value="explicit">explicit</option>
               <option value="none">none</option>
               <option value="all">all</option>
+            </select>
+          </label>
+          <label>
+            Replay Policy
+            <select value={replayPolicy} onChange={(e) => setReplayPolicy(e.target.value)}>
+              <option value="instant">instant</option>
+              <option value="original">original</option>
             </select>
           </label>
           <button className="btn" type="submit">

@@ -12,16 +12,16 @@ import (
 )
 
 var allowedMonitoringEndpoints = map[string]struct{}{
-	"varz":      {},
-	"jsz":       {},
-	"routez":    {},
-	"gatewayz":  {},
-	"leafz":     {},
-	"connz":     {},
-	"healthz":   {},
-	"subsz":     {},
-	"accountz":  {},
-	"accstatz":  {},
+	"varz":     {},
+	"jsz":      {},
+	"routez":   {},
+	"gatewayz": {},
+	"leafz":    {},
+	"connz":    {},
+	"healthz":  {},
+	"subsz":    {},
+	"accountz": {},
+	"accstatz": {},
 }
 
 func validateMonitoringEndpoint(endpoint string) error {

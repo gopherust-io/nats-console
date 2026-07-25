@@ -20,3 +20,5 @@ web/dist/
 # Env
 .env
 .env.local
+
+.cache/

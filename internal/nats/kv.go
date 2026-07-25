@@ -3,9 +3,9 @@ package natsclient
 import (
 	"context"
 
+	libnats "github.com/gopherust-io/nats"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/pkg/common/b64util"
-	libnats "github.com/gopherust-io/nats"
 	"github.com/nats-io/nats.go"
 )
 

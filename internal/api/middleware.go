@@ -293,8 +293,8 @@ func auditMiddleware(auditWriter *audit.Writer) middleware {
 	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(ctx *fasthttp.RequestCtx) {
 			method := string(ctx.Method())
-	path := requestPath(ctx)
-	if method == fasthttp.MethodGet || method == fasthttp.MethodHead || method == fasthttp.MethodOptions || isPublicPath(path) {
+			path := requestPath(ctx)
+			if method == fasthttp.MethodGet || method == fasthttp.MethodHead || method == fasthttp.MethodOptions || isPublicPath(path) {
 				next(ctx)
 				return
 			}

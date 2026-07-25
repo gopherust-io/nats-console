@@ -23,9 +23,9 @@ const (
 )
 
 var CounterMetrics = map[string]bool{
-	MetricServerInMsgsTotal:  true,
-	MetricServerOutMsgsTotal: true,
-	MetricServerInBytesTotal: true,
+	MetricServerInMsgsTotal:   true,
+	MetricServerOutMsgsTotal:  true,
+	MetricServerInBytesTotal:  true,
 	MetricServerOutBytesTotal: true,
 }
 

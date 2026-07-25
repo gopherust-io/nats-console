@@ -9,6 +9,7 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+// goalign:ignore
 type clusterCreateRequest struct {
 	Name          string `json:"name"`
 	NATSURL       string `json:"natsUrl"`

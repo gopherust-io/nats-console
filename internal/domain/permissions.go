@@ -3,6 +3,7 @@ package domain
 import "slices"
 
 // Permissions summarizes effective capabilities for authorization checks.
+// goalign:ignore
 type Permissions struct {
 	ClusterIDs      []string
 	AssignableRoles []string

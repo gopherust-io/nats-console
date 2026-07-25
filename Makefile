@@ -1,9 +1,22 @@
 .PHONY: dev dev-web build run docker-up docker-down tidy generate \
 	test test-unit test-integration test-contract test-security test-regression \
-	test-e2e test-smoke test-performance ci lint lint-go lint-go-fix lint-web lint-web-docker lint-web-local
+	test-e2e test-smoke test-performance ci lint lint-go lint-go-fix lint-web lint-web-docker lint-web-local align
 
 NODE_IMAGE ?= node:22-alpine
 WEB_DIR := web
+GOALIGN_VERSION := v1.1.0
+GOALIGN_BIN := $(CURDIR)/.cache/goalign-$(GOALIGN_VERSION)
+GOALIGN_FLAGS := analyze -r --arch=amd64 --fail-on-findings --min-waste=1 -e web/,bin/,node_modules/ .
+
+$(GOALIGN_BIN):
+	@mkdir -p $(dir $@)
+	@tmpdir=$$(mktemp -d) && \
+		curl -fsSL https://github.com/gopherust-io/goalign/archive/refs/tags/$(GOALIGN_VERSION).tar.gz | tar -xz -C $$tmpdir && \
+		(cd $$tmpdir/goalign-$(patsubst v%,%,$(GOALIGN_VERSION)) && go build -o $(GOALIGN_BIN) .) && \
+		rm -rf $$tmpdir
+
+align: $(GOALIGN_BIN)
+	$(GOALIGN_BIN) $(GOALIGN_FLAGS)
 
 # Packages for unit tests (exclude tagged integration suites and vendored paths).
 UNIT_PKGS := $(shell go list ./... | grep -v '/tests/integration' | grep -v '/tests/contract' | grep -v '/tests/security' | grep -v '/web/node_modules')
@@ -65,10 +78,10 @@ ci: lint-go lint-web test-unit test-regression
 
 lint: lint-go lint-web
 
-lint-go:
+lint-go: align
 	golangci-lint run ./...
 
-lint-go-fix:
+lint-go-fix: align
 	golangci-lint run ./... --fix
 	@if command -v fieldalignment >/dev/null 2>&1; then \
 		fieldalignment -fix ./...; \

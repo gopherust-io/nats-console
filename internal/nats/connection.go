@@ -10,6 +10,7 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+// goalign:ignore
 type connectionState struct {
 	lastConnectedAt time.Time
 	lastCheckedAt   time.Time

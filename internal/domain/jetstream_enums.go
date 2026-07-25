@@ -4,9 +4,9 @@ import "github.com/nats-io/nats.go"
 
 var (
 	retentionPolicyNames = map[nats.RetentionPolicy]string{
-		nats.LimitsPolicy:      "limits",
-		nats.InterestPolicy:    "interest",
-		nats.WorkQueuePolicy:   "workqueue",
+		nats.LimitsPolicy:    "limits",
+		nats.InterestPolicy:  "interest",
+		nats.WorkQueuePolicy: "workqueue",
 	}
 	storageTypeNames = map[nats.StorageType]string{
 		nats.FileStorage:   "file",

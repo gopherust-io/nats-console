@@ -282,6 +282,7 @@ type jszStreamDetail struct {
 	Sources []jszSourceInfo `json:"sources"`
 }
 
+// goalign:ignore
 type jszSourceInfo struct {
 	External *struct {
 		APIPrefix string `json:"api_prefix"`

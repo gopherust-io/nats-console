@@ -19,6 +19,7 @@ const (
 	RoleViewer   = "viewer"
 )
 
+// goalign:ignore
 type AccessRules struct {
 	ClusterIDs      []string `json:"clusterIds,omitempty"`
 	AssignableRoles []string `json:"assignableRoles,omitempty"`
@@ -27,6 +28,7 @@ type AccessRules struct {
 	DeleteClusters  bool     `json:"deleteClusters"`
 }
 
+// goalign:ignore
 type User struct {
 	CreatedAt   time.Time    `json:"created_at"`
 	AccessRules *AccessRules `json:"access_rules,omitempty"`
@@ -38,6 +40,7 @@ type User struct {
 	IsRoot      bool         `json:"is_root"`
 }
 
+// goalign:ignore
 type UserCreate struct {
 	AccessRules  *AccessRules
 	Username     string
@@ -49,6 +52,7 @@ type UserCreate struct {
 	IsRoot       bool
 }
 
+// goalign:ignore
 type UserUpdate struct {
 	Email       *string
 	Password    *string

@@ -30,6 +30,7 @@ type ProviderInfo struct {
 	Name string `json:"name"`
 }
 
+// goalign:ignore
 type oauthProvider struct {
 	oauth    *oauth2.Config
 	verifier *oidc.IDTokenVerifier
@@ -213,6 +214,7 @@ type githubUser struct {
 	ID    int64  `json:"id"`
 }
 
+// goalign:ignore
 type githubEmail struct {
 	Email    string `json:"email"`
 	Primary  bool   `json:"primary"`

@@ -22,6 +22,7 @@ type JetStreamExecutor interface {
 	ConsumerInfo(ctx context.Context, stream, consumer string) (*nats.ConsumerInfo, error)
 	AddConsumer(ctx context.Context, stream string, cfg *nats.ConsumerConfig) (*nats.ConsumerInfo, error)
 	DeleteConsumer(ctx context.Context, stream, consumer string) error
+	ReplayConsumer(ctx context.Context, stream, consumer string, req domain.ReplayConsumerRequest) (domain.ReplayConsumerResult, error)
 	GetMessage(ctx context.Context, stream string, seq uint64) (*nats.RawStreamMsg, error)
 	GetMessageNav(ctx context.Context, stream string, seq uint64, direction string) (*domain.MessageResult, error)
 	PublishStreamMessage(ctx context.Context, stream string, in domain.PublishMessageRequest) (domain.PublishMessageResult, error)

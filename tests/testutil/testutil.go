@@ -119,7 +119,7 @@ type NATSEndpoints struct {
 func StartNATS(t *testing.T, ctx context.Context) NATSEndpoints {
 	t.Helper()
 	natsContainer, err := nats.Run(ctx, "nats:2.11-alpine",
-		nats.WithArgument("m", "8222"),)
+		nats.WithArgument("m", "8222"))
 	if err != nil {
 		t.Fatalf("nats container: %v", err)
 	}

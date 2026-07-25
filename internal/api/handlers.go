@@ -182,6 +182,37 @@ func (h *Handler) DeleteConsumer(ctx *fasthttp.RequestCtx) {
 	}, fasthttp.StatusBadRequest)
 }
 
+func (h *Handler) ReplayConsumer(ctx *fasthttp.RequestCtx) {
+	stream := routeParam(ctx, "name")
+	consumer := routeParam(ctx, "consumer")
+	if err := validateResourceName(stream); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	if err := validateResourceName(consumer); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+
+	var req domain.ReplayConsumerRequest
+	if err := parseJSONBody(ctx, &req); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	if err := req.Validate(); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
+		result, err := client.ReplayConsumer(c, stream, consumer, req)
+		if err != nil {
+			return nil, fasthttp.StatusBadRequest, err
+		}
+		return result, fasthttp.StatusOK, nil
+	})
+}
+
 func (h *Handler) GetMessage(ctx *fasthttp.RequestCtx) {
 	stream := routeParam(ctx, "name")
 	seqStr := string(ctx.QueryArgs().Peek("seq"))

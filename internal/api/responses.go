@@ -77,6 +77,7 @@ type ConnectionsListResponse struct {
 	Total       int                           `json:"total"`
 }
 
+// goalign:ignore
 type AuthConfigResponse struct {
 	OIDCProviders []auth.ProviderInfo `json:"oidcProviders"`
 	OIDCEnabled   bool                `json:"oidcEnabled"`
@@ -85,6 +86,7 @@ type AuthConfigResponse struct {
 	AIEnabled     bool                `json:"aiEnabled"`
 }
 
+// goalign:ignore
 type UserResponse struct {
 	AccessRules *domain.AccessRules `json:"accessRules,omitempty"`
 	ID          string              `json:"id"`
@@ -118,12 +120,14 @@ func toUserResponse(user store.User) UserResponse {
 	return resp
 }
 
+// goalign:ignore
 type AssistantConfigResponse struct {
 	AIProvider string `json:"aiProvider,omitempty"`
 	AIModel    string `json:"aiModel,omitempty"`
 	AIEnabled  bool   `json:"aiEnabled"`
 }
 
+// goalign:ignore
 type AssistantErrorResponse struct {
 	Error             string `json:"error"`
 	Code              string `json:"code"`

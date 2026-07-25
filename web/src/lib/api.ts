@@ -172,6 +172,25 @@ export type ConsumerInfo = {
     consumerSeq: number;
     streamSeq: number;
   };
+  ackFloor?: {
+    consumerSeq: number;
+    streamSeq: number;
+  };
+};
+
+export type ReplayConsumerRequest = {
+  mode?: "reset" | "sidecar";
+  from: "seq" | "time" | "beginning" | "new";
+  seq?: number;
+  time?: string;
+  replayPolicy?: "instant" | "original";
+  filterSubject?: string;
+  durable?: string;
+};
+
+export type ReplayConsumerResult = {
+  durable: string;
+  mode: "reset" | "sidecar";
 };
 
 export type RawMessage = {
