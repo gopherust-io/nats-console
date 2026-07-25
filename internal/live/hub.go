@@ -23,11 +23,8 @@ const (
 	defaultLiveWSMaxMessages = 1000
 	defaultLiveWSIdleTimeout = 5 * time.Minute
 	defaultLiveWSRateLimit   = 100 * time.Millisecond
+	connPollInterval         = 2 * time.Second
 )
-
-var upgrader = websocket.FastHTTPUpgrader{
-	CheckOrigin: func(_ *fasthttp.RequestCtx) bool { return true },
-}
 
 type Hub struct {
 	gateway port.ClusterGateway
@@ -59,6 +56,23 @@ func (h *Hub) liveWSRateLimit() time.Duration {
 	return defaultLiveWSRateLimit
 }
 
+func (h *Hub) checkOrigin(ctx *fasthttp.RequestCtx) bool {
+	origins := h.cfg.CORSOrigins()
+	if len(origins) == 0 {
+		return true
+	}
+	origin := string(ctx.Request.Header.Peek("Origin"))
+	if origin == "" {
+		return true
+	}
+	for _, allowed := range origins {
+		if allowed == "*" || allowed == origin {
+			return true
+		}
+	}
+	return false
+}
+
 type controlFrame struct {
 	Action string `json:"action"`
 }
@@ -83,6 +97,11 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 	clusterID, ok := ctx.UserValue("clusterId").(string)
 	if !ok || clusterID == "" {
 		ctx.Error("missing clusterId", fasthttp.StatusBadRequest)
+		return
+	}
+
+	if !h.checkOrigin(ctx) {
+		ctx.Error("origin not allowed", fasthttp.StatusForbidden)
 		return
 	}
 
@@ -113,15 +132,21 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	upgrader := websocket.FastHTTPUpgrader{
+		CheckOrigin: func(c *fasthttp.RequestCtx) bool {
+			return h.checkOrigin(c)
+		},
+	}
+
 	err = upgrader.Upgrade(ctx, func(conn *websocket.Conn) {
-		h.serveConn(conn, client, stream, subjectFilter, fromSeq)
+		h.serveConn(conn, client, clusterID, stream, subjectFilter, fromSeq)
 	})
 	if err != nil {
 		log.Error().Err(err).Str("component", "live").Msg("websocket upgrade failed")
 	}
 }
 
-func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, stream, subjectFilter string, fromSeq uint64) {
+func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clusterID, stream, subjectFilter string, fromSeq uint64) {
 	defer func() { _ = conn.Close() }()
 	metrics.IncWS()
 	defer metrics.DecWS()
@@ -132,12 +157,28 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, str
 	var (
 		mu         sync.Mutex
 		writeMu    sync.Mutex
+		idleMu     sync.Mutex
 		paused     bool
 		msgCount   int
 		lastSent   time.Time
 		maxReached bool
 		closed     bool
 	)
+
+	idleTimer := time.NewTimer(h.liveWSIdleTimeout())
+	defer idleTimer.Stop()
+
+	resetIdle := func() {
+		idleMu.Lock()
+		defer idleMu.Unlock()
+		if !idleTimer.Stop() {
+			select {
+			case <-idleTimer.C:
+			default:
+			}
+		}
+		idleTimer.Reset(h.liveWSIdleTimeout())
+	}
 
 	writeFrameOnce := func(frame liveFrame) error {
 		writeMu.Lock()
@@ -171,6 +212,8 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, str
 			closeSession("")
 			return false
 		}
+		resetIdle()
+		h.gateway.Touch(clusterID)
 		return true
 	}
 
@@ -225,21 +268,8 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, str
 	}
 	defer func() { _ = sub.Unsubscribe() }()
 
-	if nc := client.Conn(); nc != nil {
-		if prev := nc.DisconnectErrHandler(); prev != nil {
-			nc.SetDisconnectErrHandler(func(c *nats.Conn, err error) {
-				prev(c, err)
-				closeSession("nats disconnected")
-			})
-		} else {
-			nc.SetDisconnectErrHandler(func(_ *nats.Conn, _ error) {
-				closeSession("nats disconnected")
-			})
-		}
-	}
-
-	idleTimer := time.NewTimer(h.liveWSIdleTimeout())
-	defer idleTimer.Stop()
+	connPoll := time.NewTicker(connPollInterval)
+	defer connPoll.Stop()
 
 	readDone := make(chan struct{})
 	go func() {
@@ -250,20 +280,16 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, str
 				return
 			default:
 			}
-			_ = conn.SetReadDeadline(time.Now().Add(h.liveWSIdleTimeout()))
+			// Idle is enforced by idleTimer (reset on send/recv), not read deadline.
+			_ = conn.SetReadDeadline(time.Time{})
 			_, data, readErr := conn.ReadMessage()
 			if readErr != nil {
 				closeSession("")
 				return
 			}
 
-			if !idleTimer.Stop() {
-				select {
-				case <-idleTimer.C:
-				default:
-				}
-			}
-			idleTimer.Reset(h.liveWSIdleTimeout())
+			resetIdle()
+			h.gateway.Touch(clusterID)
 
 			var ctrl controlFrame
 			if err := sonic.Unmarshal(data, &ctrl); err != nil {
@@ -290,11 +316,23 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, str
 		}
 	}()
 
-	select {
-	case <-sessionCtx.Done():
-	case <-idleTimer.C:
-		closeSession("idle timeout")
-	case <-readDone:
+	for {
+		select {
+		case <-sessionCtx.Done():
+			return
+		case <-idleTimer.C:
+			closeSession("idle timeout")
+			return
+		case <-readDone:
+			return
+		case <-connPoll.C:
+			h.gateway.Touch(clusterID)
+			nc := client.Conn()
+			if nc == nil || !nc.IsConnected() {
+				closeSession("nats disconnected")
+				return
+			}
+		}
 	}
 }
 

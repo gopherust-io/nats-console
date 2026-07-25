@@ -371,10 +371,10 @@ export default function StreamDetailPage() {
         <button className="btn" onClick={() => loadMessage()}>
           Load
         </button>
-        <button className="btn secondary" disabled={!message?.navigation?.prevSeq} onClick={() => loadMessage(String(message?.navigation?.prevSeq), "prev")}>
+        <button className="btn secondary" disabled={!message?.navigation?.prevSeq} onClick={() => loadMessage(String(message?.message.seq), "prev")}>
           ← Prev
         </button>
-        <button className="btn secondary" disabled={!message?.navigation?.nextSeq} onClick={() => loadMessage(String(message?.navigation?.nextSeq), "next")}>
+        <button className="btn secondary" disabled={!message?.navigation?.nextSeq} onClick={() => loadMessage(String(message?.message.seq), "next")}>
           Next →
         </button>
       </div>
@@ -389,9 +389,13 @@ export default function StreamDetailPage() {
               {rawMode ? "Show JSON" : "Show Raw"}
             </button>
           </div>
-          {message.message.hdrs && Array.isArray(message.message.hdrs) && message.message.hdrs.length > 0 && (
+          {message.message.headers && Object.keys(message.message.headers).length > 0 && (
             <div className="mono text-muted mb-8">
-              Headers: {message.message.hdrs.length} bytes
+              {Object.entries(message.message.headers).map(([key, value]) => (
+                <div key={key}>
+                  {key}: {value}
+                </div>
+              ))}
             </div>
           )}
           <div className="mono">

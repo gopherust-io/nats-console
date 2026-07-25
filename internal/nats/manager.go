@@ -29,8 +29,8 @@ type Manager struct {
 }
 
 type cachedClient struct {
-	client    *Client
-	createdAt time.Time
+	client   *Client
+	lastUsed time.Time
 }
 
 type cachedCredentials struct {
@@ -111,6 +111,16 @@ func (m *Manager) Evict(clusterID string) {
 	m.evict(clusterID)
 }
 
+// Touch refreshes lastUsed for a cached client so long-lived WS sessions
+// are not swept while still active.
+func (m *Manager) Touch(clusterID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if entry, ok := m.cache[clusterID]; ok {
+		entry.lastUsed = time.Now()
+	}
+}
+
 func (m *Manager) Close() {
 	if m.sweepStop != nil {
 		close(m.sweepStop)
@@ -147,9 +157,10 @@ func (m *Manager) clusterCredentials(ctx context.Context, clusterID string) (sto
 
 func (m *Manager) connect(cluster store.Cluster) (*Client, error) {
 	m.mu.Lock()
-	if entry, ok := m.cache[cluster.ID]; ok && time.Since(entry.createdAt) < m.clientCacheTTL() {
+	if entry, ok := m.cache[cluster.ID]; ok && time.Since(entry.lastUsed) < m.clientCacheTTL() {
 		client := entry.client
 		if client.IsAlive() {
+			entry.lastUsed = time.Now()
 			m.mu.Unlock()
 			return client, nil
 		}
@@ -160,9 +171,10 @@ func (m *Manager) connect(cluster store.Cluster) (*Client, error) {
 
 	result, err, _ := m.dial.Do(cluster.ID, func() (any, error) {
 		m.mu.Lock()
-		if entry, ok := m.cache[cluster.ID]; ok && time.Since(entry.createdAt) < m.clientCacheTTL() {
+		if entry, ok := m.cache[cluster.ID]; ok && time.Since(entry.lastUsed) < m.clientCacheTTL() {
 			client := entry.client
 			if client.IsAlive() {
+				entry.lastUsed = time.Now()
 				m.mu.Unlock()
 				return client, nil
 			}
@@ -181,7 +193,8 @@ func (m *Manager) connect(cluster store.Cluster) (*Client, error) {
 		if old, ok := m.cache[cluster.ID]; ok {
 			old.client.Close()
 		}
-		m.cache[cluster.ID] = &cachedClient{client: client, createdAt: time.Now()}
+		now := time.Now()
+		m.cache[cluster.ID] = &cachedClient{client: client, lastUsed: now}
 		m.mu.Unlock()
 
 		m.markConnected(cluster.ID, client)

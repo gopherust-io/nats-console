@@ -18,10 +18,11 @@ type MessageNavigation struct {
 }
 
 type StreamMessage struct {
-	Subject string `json:"subject"`
-	Time    string `json:"time"`
-	Data    string `json:"data"`
-	Seq     uint64 `json:"seq"`
+	Subject string            `json:"subject"`
+	Time    string            `json:"time"`
+	Data    string            `json:"data"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Seq     uint64            `json:"seq"`
 }
 
 type PublishMessageRequest struct {
@@ -45,6 +46,17 @@ func StreamMessageFromRaw(msg *nats.RawStreamMsg) StreamMessage {
 		Subject: msg.Subject,
 		Time:    msg.Time.UTC().Format(time.RFC3339Nano),
 		Data:    b64util.EncodeToString(msg.Data),
+	}
+	if msg.Header != nil {
+		headers := make(map[string]string, len(msg.Header))
+		for k, vals := range msg.Header {
+			if len(vals) > 0 {
+				headers[k] = vals[0]
+			}
+		}
+		if len(headers) > 0 {
+			out.Headers = headers
+		}
 	}
 	return out
 }

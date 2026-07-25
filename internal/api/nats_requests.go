@@ -85,6 +85,16 @@ func (r consumerConfigRequest) toNATS() (nats.ConsumerConfig, error) {
 		}
 		cfg.OptStartTime = &t
 	}
+	switch cfg.DeliverPolicy {
+	case nats.DeliverByStartSequencePolicy:
+		if cfg.OptStartSeq == 0 {
+			return cfg, fmt.Errorf("optStartSeq is required when deliverPolicy is by_start_sequence")
+		}
+	case nats.DeliverByStartTimePolicy:
+		if cfg.OptStartTime == nil {
+			return cfg, fmt.Errorf("optStartTime is required when deliverPolicy is by_start_time")
+		}
+	}
 	return cfg, nil
 }
 

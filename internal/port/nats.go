@@ -53,6 +53,7 @@ type ClusterGateway interface {
 	ConnectionStatus(ctx context.Context, clusterID string) (domain.NATSConnectionStatus, error)
 	ListConnectionStatuses(ctx context.Context) []domain.NATSConnectionStatus
 	Evict(clusterID string)
+	Touch(clusterID string)
 	Close()
 	WithExecutor(ctx context.Context, clusterID string, fn func(JetStreamExecutor) error) error
 	GetExecutor(ctx context.Context, clusterID string) (JetStreamExecutor, error)

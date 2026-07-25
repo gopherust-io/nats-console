@@ -213,7 +213,7 @@ func (m *Manager) sweepExpired() {
 
 	m.mu.Lock()
 	for id, entry := range m.cache {
-		if now.Sub(entry.createdAt) >= ttl {
+		if now.Sub(entry.lastUsed) >= ttl {
 			expired = append(expired, id)
 			entry.client.Close()
 			delete(m.cache, id)

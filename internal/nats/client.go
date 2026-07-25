@@ -3,6 +3,7 @@ package natsclient
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -228,37 +229,84 @@ func (c *Client) GetMessageNav(ctx context.Context, stream string, seq uint64, d
 		return nil, err
 	}
 
-	target := seq
+	var msg *nats.RawStreamMsg
 	switch direction {
 	case "next":
-		target = seq + 1
-	case "prev":
-		if seq > 0 {
-			target = seq - 1
+		msg, err = c.inner.Streams().GetNextMsgAfter(ctx, stream, seq)
+		if err != nil {
+			return nil, err
 		}
-	}
-
-	if target < info.State.FirstSeq || target > info.State.LastSeq {
-		return nil, nats.ErrMsgNotFound
-	}
-
-	msg, err := c.inner.Streams().GetMsg(ctx, stream, target)
-	if err != nil {
-		return nil, err
+	case "prev":
+		if seq <= info.State.FirstSeq {
+			return nil, nats.ErrMsgNotFound
+		}
+		// Walk backward through gaps until a message is found or FirstSeq is passed.
+		for target := seq - 1; target >= info.State.FirstSeq; target-- {
+			msg, err = c.inner.Streams().GetMsg(ctx, stream, target)
+			if err == nil {
+				break
+			}
+			if !errors.Is(err, nats.ErrMsgNotFound) {
+				return nil, err
+			}
+			if target == info.State.FirstSeq {
+				return nil, nats.ErrMsgNotFound
+			}
+		}
+		if msg == nil {
+			return nil, nats.ErrMsgNotFound
+		}
+	default:
+		if direction != "" {
+			return nil, fmt.Errorf("invalid direction %q", direction)
+		}
+		msg, err = c.inner.Streams().GetMsg(ctx, stream, seq)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	result := &domain.MessageResult{
 		Message: domain.StreamMessageFromRaw(msg),
 	}
-	if target > info.State.FirstSeq {
-		prev := target - 1
+	target := msg.Sequence
+	if prev, ok := c.findPrevSeq(ctx, stream, target, info.State.FirstSeq); ok {
 		result.Navigation.PrevSeq = &prev
 	}
-	if target < info.State.LastSeq {
-		next := target + 1
+	if next, ok := c.findNextSeq(ctx, stream, target, info.State.LastSeq); ok {
 		result.Navigation.NextSeq = &next
 	}
 	return result, nil
+}
+
+func (c *Client) findPrevSeq(ctx context.Context, stream string, seq, firstSeq uint64) (uint64, bool) {
+	if seq <= firstSeq {
+		return 0, false
+	}
+	for target := seq - 1; target >= firstSeq; target-- {
+		_, err := c.inner.Streams().GetMsg(ctx, stream, target)
+		if err == nil {
+			return target, true
+		}
+		if !errors.Is(err, nats.ErrMsgNotFound) {
+			return 0, false
+		}
+		if target == firstSeq {
+			return 0, false
+		}
+	}
+	return 0, false
+}
+
+func (c *Client) findNextSeq(ctx context.Context, stream string, seq, lastSeq uint64) (uint64, bool) {
+	if seq >= lastSeq {
+		return 0, false
+	}
+	msg, err := c.inner.Streams().GetNextMsgAfter(ctx, stream, seq)
+	if err != nil {
+		return 0, false
+	}
+	return msg.Sequence, true
 }
 
 func (c *Client) PublishStreamMessage(ctx context.Context, stream string, in domain.PublishMessageRequest) (domain.PublishMessageResult, error) {

@@ -60,6 +60,10 @@ func (g *Gateway) Evict(clusterID string) {
 	g.inner.Evict(clusterID)
 }
 
+func (g *Gateway) Touch(clusterID string) {
+	g.inner.Touch(clusterID)
+}
+
 func (g *Gateway) Close() {
 	g.inner.Close()
 }

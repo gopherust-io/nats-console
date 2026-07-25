@@ -25,6 +25,10 @@ var (
 		nats.AckAllPolicy:      "all",
 		nats.AckExplicitPolicy: "explicit",
 	}
+	replayPolicyNames = map[nats.ReplayPolicy]string{
+		nats.ReplayInstantPolicy:  "instant",
+		nats.ReplayOriginalPolicy: "original",
+	}
 )
 
 func enumString(v any) string {
@@ -43,6 +47,10 @@ func enumString(v any) string {
 		}
 	case nats.AckPolicy:
 		if name, ok := ackPolicyNames[typed]; ok {
+			return name
+		}
+	case nats.ReplayPolicy:
+		if name, ok := replayPolicyNames[typed]; ok {
 			return name
 		}
 	}

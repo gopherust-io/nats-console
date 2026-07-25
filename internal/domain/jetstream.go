@@ -63,6 +63,9 @@ type ConsumerConfigDTO struct {
 	AckPolicy      string   `json:"ackPolicy"`
 	FilterSubject  string   `json:"filterSubject,omitempty"`
 	FilterSubjects []string `json:"filterSubjects,omitempty"`
+	OptStartSeq    uint64   `json:"optStartSeq,omitempty"`
+	OptStartTime   string   `json:"optStartTime,omitempty"`
+	ReplayPolicy   string   `json:"replayPolicy,omitempty"`
 }
 
 type SequenceInfoDTO struct {

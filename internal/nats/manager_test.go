@@ -16,24 +16,21 @@ func TestClientIsAlive(t *testing.T) {
 	assert.False(t, client.IsAlive())
 }
 
-func TestManagerEvictRemovesCache(t *testing.T) {
+func TestManagerTouchRefreshesLastUsed(t *testing.T) {
 	t.Parallel()
 
 	m := NewManager(nil, config.Config{NATSClientCacheTTL: time.Minute})
+	old := time.Now().Add(-30 * time.Second)
 	m.cache["cluster-1"] = &cachedClient{
-		client:    &Client{},
-		createdAt: time.Now(),
+		client:   &Client{},
+		lastUsed: old,
 	}
-	m.credCache["cluster-1"] = cachedCredentials{fetchedAt: time.Now()}
 
-	m.Evict("cluster-1")
+	m.Touch("cluster-1")
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	_, cached := m.cache["cluster-1"]
-	_, creds := m.credCache["cluster-1"]
-	require.False(t, cached)
-	require.False(t, creds)
+	require.True(t, m.cache["cluster-1"].lastUsed.After(old))
 }
 
 func TestManagerSweepExpiredRemovesStaleEntry(t *testing.T) {
@@ -42,7 +39,7 @@ func TestManagerSweepExpiredRemovesStaleEntry(t *testing.T) {
 	m := NewManager(nil, config.Config{NATSClientCacheTTL: time.Millisecond})
 	m.cache["cluster-1"] = &cachedClient{
 		client:    &Client{},
-		createdAt: time.Now().Add(-time.Second),
+		lastUsed: time.Now().Add(-time.Second),
 	}
 
 	m.sweepExpired()
@@ -59,7 +56,7 @@ func TestManagerSweepExpiredRemovesDeadConnection(t *testing.T) {
 	m := NewManager(nil, config.Config{NATSClientCacheTTL: time.Minute})
 	m.cache["cluster-1"] = &cachedClient{
 		client:    &Client{},
-		createdAt: time.Now(),
+		lastUsed: time.Now(),
 	}
 
 	m.sweepExpired()

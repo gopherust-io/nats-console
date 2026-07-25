@@ -228,18 +228,11 @@ func (h *Handler) GetMessage(ctx *fasthttp.RequestCtx) {
 	direction := string(ctx.QueryArgs().Peek("direction"))
 
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
-		if direction != "" {
-			result, err := client.GetMessageNav(c, stream, seq, direction)
-			if err != nil {
-				return nil, fasthttp.StatusNotFound, err
-			}
-			return result, fasthttp.StatusOK, nil
-		}
-		msg, err := client.GetMessage(c, stream, seq)
+		result, err := client.GetMessageNav(c, stream, seq, direction)
 		if err != nil {
 			return nil, fasthttp.StatusNotFound, err
 		}
-		return domain.MessageResult{Message: domain.StreamMessageFromRaw(msg)}, fasthttp.StatusOK, nil
+		return result, fasthttp.StatusOK, nil
 	})
 }
 
