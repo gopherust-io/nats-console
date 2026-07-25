@@ -9,6 +9,7 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/app"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/port"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 
@@ -570,10 +571,7 @@ func routeParam(ctx *fasthttp.RequestCtx, key string) string {
 }
 
 func requestContext(ctx *fasthttp.RequestCtx) context.Context {
-	if c, ok := ctx.UserValue("context").(context.Context); ok {
-		return c
-	}
-	return context.Background()
+	return httpctx.FromRequest(ctx)
 }
 
 type missingFieldError string

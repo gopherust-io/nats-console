@@ -38,7 +38,7 @@ func TestManagerSweepExpiredRemovesStaleEntry(t *testing.T) {
 
 	m := NewManager(nil, config.Config{NATSClientCacheTTL: time.Millisecond})
 	m.cache["cluster-1"] = &cachedClient{
-		client:    &Client{},
+		client:   &Client{},
 		lastUsed: time.Now().Add(-time.Second),
 	}
 
@@ -55,7 +55,7 @@ func TestManagerSweepExpiredRemovesDeadConnection(t *testing.T) {
 
 	m := NewManager(nil, config.Config{NATSClientCacheTTL: time.Minute})
 	m.cache["cluster-1"] = &cachedClient{
-		client:    &Client{},
+		client:   &Client{},
 		lastUsed: time.Now(),
 	}
 

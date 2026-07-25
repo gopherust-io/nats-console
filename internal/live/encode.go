@@ -1,11 +1,11 @@
 package live
 
 import (
-	"encoding/base64"
 	"time"
 
 	"github.com/bytedance/sonic"
 
+	"github.com/gopherust-io/nats-consol/pkg/common/b64util"
 	"github.com/gopherust-io/nats-consol/pkg/common/bufpool"
 )
 
@@ -32,7 +32,7 @@ func messageLiveFrame(seq uint64, subject string, payload []byte, now time.Time)
 		Seq:     seq,
 		Subject: subject,
 		Time:    formatTimeUTC(now),
-		Data:    encodePayloadBase64(payload),
+		Data:    b64util.EncodeToString(payload),
 	}
 }
 
@@ -41,22 +41,4 @@ func formatTimeUTC(t time.Time) string {
 	defer bufpool.PutBytes(buf)
 	buf = t.UTC().AppendFormat(buf, time.RFC3339Nano)
 	return string(buf)
-}
-
-func encodePayloadBase64(payload []byte) string {
-	if len(payload) == 0 {
-		return ""
-	}
-	n := base64.StdEncoding.EncodedLen(len(payload))
-	buf := bufpool.GetBytes()
-	if cap(buf) < n {
-		bufpool.PutBytes(buf)
-		buf = make([]byte, n)
-	} else {
-		buf = buf[:n]
-	}
-	base64.StdEncoding.Encode(buf, payload)
-	out := string(buf)
-	bufpool.PutBytes(buf)
-	return out
 }

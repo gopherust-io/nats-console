@@ -76,10 +76,3 @@ func CanCreateCluster(user store.User) bool {
 	}
 	return store.HighestRole(user.Roles) == store.RoleAdmin && user.AccessRules == nil
 }
-
-func CanViewMetrics(user store.User) bool {
-	if user.IsRoot {
-		return true
-	}
-	return store.HighestRole(user.Roles) == store.RoleAdmin
-}

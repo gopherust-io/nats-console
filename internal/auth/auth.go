@@ -25,7 +25,6 @@ const (
 
 var (
 	ErrUnauthorized    = errors.New("unauthorized")
-	ErrForbidden       = errors.New("forbidden")
 	ErrUnknownProvider = errors.New("unknown sso provider")
 )
 
