@@ -57,7 +57,6 @@ type ConsumerInfo struct {
 }
 
 type ConsumerConfigDTO struct {
-	FilterSubjects []string `json:"filterSubjects,omitempty"`
 	DurableName    string   `json:"durableName,omitempty"`
 	Name           string   `json:"name,omitempty"`
 	DeliverPolicy  string   `json:"deliverPolicy"`
@@ -65,6 +64,7 @@ type ConsumerConfigDTO struct {
 	FilterSubject  string   `json:"filterSubject,omitempty"`
 	OptStartTime   string   `json:"optStartTime,omitempty"`
 	ReplayPolicy   string   `json:"replayPolicy,omitempty"`
+	FilterSubjects []string `json:"filterSubjects,omitempty"`
 	OptStartSeq    uint64   `json:"optStartSeq,omitempty"`
 }
 
