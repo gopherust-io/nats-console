@@ -1,6 +1,6 @@
 import { FormEvent, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import Pager, { DEFAULT_PAGE_SIZE, pageQuery } from "../components/Pager";
 import VirtualTable from "../components/VirtualTable";
 import Alert from "../components/ui/Alert";

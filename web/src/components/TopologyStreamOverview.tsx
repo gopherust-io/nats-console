@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import type { StreamOverviewSort, TopologyNode } from "../lib/topology";
 import { splitStreamChildren, streamMessageCount } from "../lib/topology";
 import VirtualTable, { type VirtualTableColumn } from "./VirtualTable";

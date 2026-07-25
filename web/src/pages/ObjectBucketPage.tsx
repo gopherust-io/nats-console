@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router";
 import Pager, { DEFAULT_PAGE_SIZE, pageQuery } from "../components/Pager";
 import VirtualTable from "../components/VirtualTable";
 import Alert from "../components/ui/Alert";

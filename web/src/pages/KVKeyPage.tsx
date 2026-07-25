@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router";
 import { api, clusterPath, decodeBase64, KVEntry, tryParseJSON } from "../lib/api";
 import { useCluster } from "../lib/cluster";
 
