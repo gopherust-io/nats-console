@@ -1,6 +1,10 @@
 package domain
 
-import "github.com/nats-io/nats.go"
+import (
+	"time"
+
+	"github.com/nats-io/nats.go"
+)
 
 func AccountInfoFromNATS(info *nats.AccountInfo) AccountInfo {
 	if info == nil {
@@ -99,14 +103,20 @@ func ConsumerInfosFromNATS(items []*nats.ConsumerInfo) []ConsumerInfo {
 }
 
 func consumerConfigFromNATS(cfg nats.ConsumerConfig) ConsumerConfigDTO {
-	return ConsumerConfigDTO{
+	out := ConsumerConfigDTO{
 		DurableName:    cfg.Durable,
 		Name:           cfg.Name,
 		DeliverPolicy:  enumString(cfg.DeliverPolicy),
 		AckPolicy:      enumString(cfg.AckPolicy),
 		FilterSubject:  cfg.FilterSubject,
 		FilterSubjects: append([]string(nil), cfg.FilterSubjects...),
+		OptStartSeq:    cfg.OptStartSeq,
+		ReplayPolicy:   enumString(cfg.ReplayPolicy),
 	}
+	if cfg.OptStartTime != nil {
+		out.OptStartTime = cfg.OptStartTime.UTC().Format(time.RFC3339Nano)
+	}
+	return out
 }
 
 func sequenceInfoFromNATS(info nats.SequenceInfo) *SequenceInfoDTO {

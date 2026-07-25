@@ -337,15 +337,6 @@ func authenticate(ctx *fasthttp.RequestCtx, authSvc *auth.Service) (store.User, 
 	}
 
 	authHeader := string(ctx.Request.Header.Peek("Authorization"))
-	if strings.Contains(requestPath(ctx), "/live/ws") {
-		qAuth := string(ctx.QueryArgs().Peek("authorization"))
-		if qAuth != "" {
-			if !strings.HasPrefix(qAuth, "Basic ") {
-				qAuth = "Basic " + qAuth
-			}
-			authHeader = qAuth
-		}
-	}
 
 	if strings.HasPrefix(authHeader, "Basic ") {
 		if !authSvc.BasicAuthEnabled() {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -84,6 +85,16 @@ func (r consumerConfigRequest) toNATS() (nats.ConsumerConfig, error) {
 			}
 		}
 		cfg.OptStartTime = &t
+	}
+	switch cfg.DeliverPolicy {
+	case nats.DeliverByStartSequencePolicy:
+		if cfg.OptStartSeq == 0 {
+			return cfg, errors.New("optStartSeq is required when deliverPolicy is by_start_sequence")
+		}
+	case nats.DeliverByStartTimePolicy:
+		if cfg.OptStartTime == nil {
+			return cfg, errors.New("optStartTime is required when deliverPolicy is by_start_time")
+		}
 	}
 	return cfg, nil
 }

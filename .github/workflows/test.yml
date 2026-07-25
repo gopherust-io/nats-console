@@ -31,12 +31,22 @@ jobs:
           version: latest
           args: ./...
 
-      - name: Run goalign
+      - name: Cache goalign
+        id: goalign-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/bin/goalign
+          key: goalign-v1.1.0-${{ runner.os }}
+      - name: Install goalign
+        if: steps.goalign-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           ver=v1.1.0
+          mkdir -p "${HOME}/go/bin"
           curl -fsSL "https://github.com/gopherust-io/goalign/archive/refs/tags/${ver}.tar.gz" | tar -xz -C /tmp
           (cd "/tmp/goalign-${ver#v}" && go build -o "${HOME}/go/bin/goalign" .)
+      - name: Run goalign
+        run: |
           echo "${HOME}/go/bin" >> "${GITHUB_PATH}"
           goalign analyze -r --arch=amd64 --fail-on-findings --min-waste=1 -e web/,bin/,node_modules/ .
       - name: Unit tests
@@ -88,7 +98,6 @@ jobs:
   race-live:
     name: Race (live WebSocket)
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     permissions:
       contents: read
       actions: write
@@ -153,12 +162,6 @@ jobs:
           check "Go" "${{ needs.go.result }}"
           check "Web" "${{ needs.web.result }}"
           check "Regression" "${{ needs.regression.result }}"
-
-          if [ "${{ github.event_name }}" = "push" ]; then
-            check "Race (live WebSocket)" "${{ needs.race-live.result }}"
-          elif [ "${{ needs.race-live.result }}" != "skipped" ]; then
-            echo "Race job should be skipped on pull requests (result: ${{ needs.race-live.result }})"
-            exit 1
-          fi
+          check "Race (live WebSocket)" "${{ needs.race-live.result }}"
 
           echo "All required CI checks passed."

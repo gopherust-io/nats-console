@@ -1185,10 +1185,10 @@ components:
             data:
               type: string
               description: Base64-encoded payload
-            hdrs:
-              type: array
-              items:
-                type: integer
+            headers:
+              type: object
+              additionalProperties:
+                type: string
         navigation:
           type: object
           properties:

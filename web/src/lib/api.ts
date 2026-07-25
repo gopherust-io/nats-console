@@ -199,7 +199,7 @@ export type RawMessage = {
     subject: string;
     time: string;
     data: string;
-    hdrs?: number[];
+    headers?: Record<string, string>;
   };
   navigation?: {
     prevSeq?: number;
@@ -256,7 +256,6 @@ export function getWebSocketURL(clusterId: string, stream: string, subject?: str
   const params = new URLSearchParams({ stream });
   if (subject) params.set("subject", subject);
   if (fromSeq) params.set("fromSeq", String(fromSeq));
-  const auth = getAuthHeader();
-  if (auth) params.set("authorization", auth);
+  // Auth uses the session cookie (credentials included by the browser); never put Basic in the query string.
   return `${proto}//${window.location.host}/api/v1/clusters/${encodeURIComponent(clusterId)}/live/ws?${params}`;
 }
