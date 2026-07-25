@@ -100,10 +100,10 @@ func newTelemetry(cfg config.Config) *tel.Telemetry {
 		telCfg.TelConfig.Enable = v == "1" || strings.EqualFold(v, "true")
 	}
 	if v := os.Getenv("TEL_COLLECTOR_GRPC_ADDR"); v != "" {
-		telCfg.TelConfig.Address = v
+		telCfg.Address = v
 	}
 	if v := os.Getenv("TEL_TRACES_ENABLE"); v != "" {
-		telCfg.TelConfig.Traces.Enable = v == "1" || strings.EqualFold(v, "true")
+		telCfg.Traces.Enable = v == "1" || strings.EqualFold(v, "true")
 	}
 
 	return tel.NewWithConfig(telCfg)
