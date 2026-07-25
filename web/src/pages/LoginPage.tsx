@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router";
 import SSOProviders from "../components/SSOProviders";
 import Alert from "../components/ui/Alert";
 import { useAuth } from "../lib/auth";

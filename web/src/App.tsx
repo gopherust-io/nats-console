@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router";
 import Layout from "./components/Layout";
 import PageLoader from "./components/ui/PageLoader";
 import { AuthProvider, useAuth } from "./lib/auth";

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router";
 import ThemeSwitcher from "./ThemeSwitcher";
 import NavIcon from "./ui/NavIcon";
 import { useAuth } from "../lib/auth";

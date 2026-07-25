@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router";
 import { decodeBase64, getAuthHeader, getWebSocketURL, tryParseJSON } from "../lib/api";
 import { useCluster } from "../lib/cluster";
 import { LIVE_STREAM_MAX_MESSAGES, LIVE_SUBJECT_FILTER_DEBOUNCE_MS } from "../lib/constants";

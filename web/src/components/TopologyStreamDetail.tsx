@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import TopologyFlowDiagram from "./TopologyFlowDiagram";
 import type { TopologyNode } from "../lib/topology";
 import { splitStreamChildren } from "../lib/topology";

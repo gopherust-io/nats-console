@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import type { TopologyNode } from "../lib/topology";
 
 type TopologyFlowDiagramProps = {

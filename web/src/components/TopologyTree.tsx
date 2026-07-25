@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import type { TopologyNode, TopologyNodeKind } from "../lib/topology";
 import { splitStreamChildren } from "../lib/topology";
 
