@@ -5,7 +5,16 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist"] },
+  {
+    ignores: [
+      "dist",
+      "playwright-report",
+      "test-results",
+      "e2e",
+      "playwright.config.ts",
+      "vitest.config.ts",
+    ],
+  },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
@@ -23,9 +32,30 @@ export default tseslint.config(
         "warn",
         {
           allowConstantExport: true,
-          allowExportNames: ["useAuth", "useCluster", "useTheme", "applyTheme"],
+          allowExportNames: [
+            "useAuth",
+            "useCluster",
+            "useAccount",
+            "useTheme",
+            "useToast",
+            "applyTheme",
+            "THEMES",
+            "THEME_IDS",
+            "DEFAULT_THEME",
+            "clusterQueryKey",
+            "QueryProvider",
+            "pageSizeOptions",
+            "DEFAULT_PAGE_SIZE",
+            "pageQuery",
+          ],
         },
       ],
+    },
+  },
+  {
+    files: ["src/test/**/*.{ts,tsx}", "src/**/*.{test,spec}.{ts,tsx}"],
+    rules: {
+      "react-refresh/only-export-components": "off",
     },
   },
 );

@@ -1,6 +1,8 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
-import { Link } from "react-router";
-import { api, clusterPath, KVBucketInfo } from "../lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { Link, useParams } from "react-router";
+import { useTranslation } from "react-i18next";
+import CreateKVBucketPanel, { KVBucketConfigPayload } from "../components/CreateKVBucketPanel";
+import { api, clusterPath, jetStreamUIBase, KVBucketInfo } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
 
@@ -10,12 +12,16 @@ type BucketListResponse = {
 };
 
 export default function KVBucketsPage() {
+  const { t } = useTranslation();
+  const { accountName } = useParams();
   const { clusterId } = useCluster();
-  const { canWrite } = useAuth();
+  const { canManageJetStream } = useAuth();
+  const jsBase = clusterId ? jetStreamUIBase(clusterId, accountName) : "";
   const [buckets, setBuckets] = useState<KVBucketInfo[]>([]);
   const [error, setError] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [bucket, setBucket] = useState("");
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelError, setPanelError] = useState("");
+  const [panelBusy, setPanelBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!clusterId) return;
@@ -32,19 +38,22 @@ export default function KVBucketsPage() {
     void load();
   }, [load]);
 
-  async function createBucket(event: FormEvent) {
-    event.preventDefault();
+  async function onCreate(body: KVBucketConfigPayload) {
     if (!clusterId) return;
+    setPanelBusy(true);
+    setPanelError("");
     try {
       await api(clusterPath(clusterId, "/kv/buckets"), {
         method: "POST",
-        body: JSON.stringify({ bucket }),
+        body: JSON.stringify(body),
       });
-      setShowForm(false);
-      setBucket("");
+      setPanelOpen(false);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create bucket");
+      setPanelError(err instanceof Error ? err.message : "Failed to create bucket");
+      throw err;
+    } finally {
+      setPanelBusy(false);
     }
   }
 
@@ -62,26 +71,33 @@ export default function KVBucketsPage() {
     <div>
       <div className="page-header">
         <h1>KV Stores</h1>
-        {canWrite && (
-          <button className="btn" onClick={() => setShowForm((v) => !v)}>
-            {showForm ? "Cancel" : "Create Bucket"}
+        {canManageJetStream && (
+          <button
+            className="btn"
+            type="button"
+            onClick={() => {
+              setPanelError("");
+              setPanelOpen(true);
+            }}
+          >
+            {t("jetstream.createKvTitle")}
           </button>
         )}
       </div>
 
       {error && <div className="error">{error}</div>}
 
-      {canWrite && showForm && (
-        <form className="form-grid card mb-24" onSubmit={createBucket}>
-          <label>
-            Bucket Name
-            <input value={bucket} onChange={(e) => setBucket(e.target.value)} required />
-          </label>
-          <button className="btn" type="submit">
-            Create
-          </button>
-        </form>
-      )}
+      <CreateKVBucketPanel
+        mode="create"
+        open={panelOpen}
+        busy={panelBusy}
+        error={panelError}
+        onClose={() => {
+          setPanelOpen(false);
+          setPanelError("");
+        }}
+        onSubmit={onCreate}
+      />
 
       <div className="table-wrap">
         <table>
@@ -97,13 +113,13 @@ export default function KVBucketsPage() {
             {buckets.map((b) => (
               <tr key={b.bucket}>
                 <td>
-                  <Link to={`/kv/${b.bucket}`}>{b.bucket}</Link>
+                  <Link to={`${jsBase}/kv/${encodeURIComponent(b.bucket)}`}>{b.bucket}</Link>
                 </td>
                 <td>{b.values}</td>
                 <td>{b.history}</td>
                 <td>
-                  {canWrite && (
-                    <button className="btn danger" onClick={() => deleteBucket(b.bucket)}>
+                  {canManageJetStream && (
+                    <button className="btn danger" type="button" onClick={() => deleteBucket(b.bucket)}>
                       Delete
                     </button>
                   )}

@@ -32,9 +32,12 @@ func TestExtractVarzMetrics(t *testing.T) {
 func TestExtractJSZMetrics(t *testing.T) {
 	t.Parallel()
 
-	raw := []byte(`{"total":{"streams":3,"consumers":4,"messages":99}}`)
+	// Shape matches nats-server JSInfo monitor JSON (top-level counts; total is an int).
+	raw := []byte(`{"streams":3,"consumers":4,"messages":99,"total":1}`)
 	samples, err := ExtractJSZMetrics(raw)
 	require.NoError(t, err)
+	assert.Equal(t, float64(3), sampleValue(samples, domain.MetricJSZStreams))
+	assert.Equal(t, float64(4), sampleValue(samples, domain.MetricJSZConsumers))
 	assert.Equal(t, float64(99), sampleValue(samples, domain.MetricJSZMessages))
 }
 

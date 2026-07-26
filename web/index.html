@@ -12,16 +12,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <script>
-      (function () {
-        var t = localStorage.getItem("nats-consol-theme");
-        var themes = ["aurora","dark","light","nord","dracula","solarized","midnight","catppuccin","latte","gruvbox","tokyo","onedark","rosepine","dawn","forest","ocean","graphite","monokai","github","amber","crimson"];
-        if (!t || themes.indexOf(t) === -1) {
-          t = "aurora";
-        }
-        document.documentElement.setAttribute("data-theme", t);
-      })();
-    </script>
+    <script src="/theme-boot.js"></script>
   </head>
   <body>
     <div id="root"></div>

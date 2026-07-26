@@ -54,9 +54,6 @@ env:
   AUTH_ENABLED: "true"
   LOG_JSON: "true"
   LOG_LEVEL: warn
-  OIDC_ENABLED: "false"
-  BASIC_AUTH_ENABLED: "true"
-  PPROF_CONTINUOUS: "false"
   METRICS_SNAPSHOT_INTERVAL: 120s
   TEL_ENABLE: "true"
   TEL_COLLECTOR_GRPC_ADDR: "otel-collector:4317"
@@ -65,18 +62,20 @@ secrets:
   databaseUrl: ""
   encryptionKey: ""
   sessionSecret: ""
-  adminPassword: admin
-  oidcClientSecret: ""
+  adminPassword: ""
 
 config:
-  natsUrl: nats://nats:4222
-  monitoringUrl: http://nats:8222
+  natsUrl: tls://nats:4222
+  monitoringUrl: https://nats:8222
   adminUsername: admin
   defaultClusterName: default
   corsAllowedOrigins: ""
-  oidcIssuer: ""
-  oidcClientId: ""
-  oidcRedirectUrl: ""
+  natsTlsCaFile: ""
+  natsTlsCertFile: ""
+  natsTlsKeyFile: ""
+  natsTlsServerName: ""
+  natsCredsFile: ""
+  natsToken: ""
 
 probes:
   liveness:

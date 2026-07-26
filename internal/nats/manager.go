@@ -22,15 +22,28 @@ type Manager struct {
 	cache        map[string]*cachedClient
 	credCache    map[string]cachedCredentials
 	status       map[string]*connectionState
+	views        *ViewCache
 	sweepStop    chan struct{}
 	cfg          config.Config
-	mu           sync.Mutex
+	mu           sync.RWMutex
 	sweepRunning atomic.Bool
 }
 
 type cachedClient struct {
-	client   *Client
-	lastUsed time.Time
+	client       *Client
+	lastUsedNano atomic.Int64
+}
+
+func (c *cachedClient) touch() {
+	c.lastUsedNano.Store(time.Now().UnixNano())
+}
+
+func (c *cachedClient) lastUsed() time.Time {
+	return time.Unix(0, c.lastUsedNano.Load())
+}
+
+func (c *cachedClient) setLastUsed(t time.Time) {
+	c.lastUsedNano.Store(t.UnixNano())
 }
 
 type cachedCredentials struct {
@@ -39,15 +52,33 @@ type cachedCredentials struct {
 }
 
 func NewManager(st *store.Store, cfg config.Config) *Manager {
+	viewTTL := cfg.JetStreamViewCacheTTL
+	if viewTTL <= 0 {
+		viewTTL = defaultViewCacheTTL
+	}
 	m := &Manager{
 		store:     st,
 		cfg:       cfg,
 		cache:     make(map[string]*cachedClient),
 		credCache: make(map[string]cachedCredentials),
 		status:    make(map[string]*connectionState),
+		views:     NewViewCache(viewTTL),
 	}
 	m.startSweeper()
 	return m
+}
+
+// ViewCache returns the short-TTL JetStream/monitoring view cache.
+func (m *Manager) ViewCache() *ViewCache {
+	return m.views
+}
+
+// InvalidateViews drops cached JetStream/monitoring views for a cluster.
+func (m *Manager) InvalidateViews(clusterID string) {
+	if m == nil {
+		return
+	}
+	m.views.InvalidateCluster(clusterID)
 }
 
 func (m *Manager) clientCacheTTL() time.Duration {
@@ -96,7 +127,15 @@ func (m *Manager) ping(ctx context.Context, clusterID string) (serverName string
 	}
 
 	if !client.IsAlive() {
-		return "", false, errors.New("not connected")
+		// Drop a stale cached client and dial once more before reporting failure.
+		m.evict(clusterID)
+		client, err = m.Get(ctx, clusterID)
+		if err != nil {
+			return "", false, err
+		}
+		if !client.IsAlive() {
+			return "", false, errors.New("not connected")
+		}
 	}
 	serverName = client.ServerName()
 
@@ -112,12 +151,14 @@ func (m *Manager) Evict(clusterID string) {
 }
 
 // Touch refreshes lastUsed for a cached client so long-lived WS sessions
-// are not swept while still active.
+// are not swept while still active. Uses a read lock + atomic timestamp so
+// the hot path does not contend with dials/sweeps.
 func (m *Manager) Touch(clusterID string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if entry, ok := m.cache[clusterID]; ok {
-		entry.lastUsed = time.Now()
+	m.mu.RLock()
+	entry, ok := m.cache[clusterID]
+	m.mu.RUnlock()
+	if ok {
+		entry.touch()
 	}
 }
 
@@ -136,13 +177,13 @@ func (m *Manager) Close() {
 }
 
 func (m *Manager) clusterCredentials(ctx context.Context, clusterID string) (store.Cluster, error) {
-	m.mu.Lock()
+	m.mu.RLock()
 	if entry, ok := m.credCache[clusterID]; ok && time.Since(entry.fetchedAt) < m.clientCacheTTL() {
 		cluster := entry.cluster
-		m.mu.Unlock()
+		m.mu.RUnlock()
 		return cluster, nil
 	}
-	m.mu.Unlock()
+	m.mu.RUnlock()
 
 	cluster, err := m.store.GetClusterCredentials(ctx, clusterID)
 	if err != nil {
@@ -156,34 +197,37 @@ func (m *Manager) clusterCredentials(ctx context.Context, clusterID string) (sto
 }
 
 func (m *Manager) connect(cluster store.Cluster) (*Client, error) {
-	m.mu.Lock()
-	if entry, ok := m.cache[cluster.ID]; ok && time.Since(entry.lastUsed) < m.clientCacheTTL() {
+	// Fast path: read lock + atomic touch (same pattern as Touch).
+	m.mu.RLock()
+	if entry, ok := m.cache[cluster.ID]; ok && time.Since(entry.lastUsed()) < m.clientCacheTTL() {
 		client := entry.client
-		if client.IsAlive() {
-			entry.lastUsed = time.Now()
-			m.mu.Unlock()
+		alive := client.IsAlive()
+		m.mu.RUnlock()
+		if alive {
+			entry.touch()
 			return client, nil
 		}
-		entry.client.Close()
-		delete(m.cache, cluster.ID)
+		m.evict(cluster.ID)
+	} else {
+		m.mu.RUnlock()
 	}
-	m.mu.Unlock()
 
 	result, err, _ := m.dial.Do(cluster.ID, func() (any, error) {
-		m.mu.Lock()
-		if entry, ok := m.cache[cluster.ID]; ok && time.Since(entry.lastUsed) < m.clientCacheTTL() {
+		m.mu.RLock()
+		if entry, ok := m.cache[cluster.ID]; ok && time.Since(entry.lastUsed()) < m.clientCacheTTL() {
 			client := entry.client
-			if client.IsAlive() {
-				entry.lastUsed = time.Now()
-				m.mu.Unlock()
+			alive := client.IsAlive()
+			m.mu.RUnlock()
+			if alive {
+				entry.touch()
 				return client, nil
 			}
-			entry.client.Close()
-			delete(m.cache, cluster.ID)
+			m.evict(cluster.ID)
+		} else {
+			m.mu.RUnlock()
 		}
-		m.mu.Unlock()
 
-		client, err := ConnectCluster(context.Background(), cluster, m.cfg.RequestTimeout, m.connectionHooks(cluster.ID))
+		client, err := ConnectCluster(context.Background(), m.cfg, cluster, m.connectionHooks(cluster.ID))
 		if err != nil {
 			metrics.IncNATSDialError(cluster.ID)
 			return nil, err
@@ -193,8 +237,9 @@ func (m *Manager) connect(cluster store.Cluster) (*Client, error) {
 		if old, ok := m.cache[cluster.ID]; ok {
 			old.client.Close()
 		}
-		now := time.Now()
-		m.cache[cluster.ID] = &cachedClient{client: client, lastUsed: now}
+		entry := &cachedClient{client: client}
+		entry.touch()
+		m.cache[cluster.ID] = entry
 		m.mu.Unlock()
 
 		m.markConnected(cluster.ID, client)

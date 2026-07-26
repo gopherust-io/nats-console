@@ -6,6 +6,12 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 AUTH="${AUTH:-admin:admin}"
 
+csrf_from_jar() {
+  local jar="$1"
+  # Netscape cookie jar: domain flag path secure expiry name value
+  awk -F'\t' '$6 == "nats_consol_csrf" { print $7; exit }' "$jar"
+}
+
 echo "==> smoke: health"
 curl -sf "${BASE_URL}/api/health" | grep -q '"ok"'
 
@@ -26,6 +32,12 @@ curl -sf -c "$cookie_jar" -X POST "${BASE_URL}/api/v1/auth/login" \
   -d "{\"username\":\"${AUTH%%:*}\",\"password\":\"${AUTH#*:}\"}" \
   | grep -q '"username"'
 
+csrf="$(csrf_from_jar "$cookie_jar")"
+if [[ -z "$csrf" ]]; then
+  echo "csrf cookie missing after login" >&2
+  exit 1
+fi
+
 curl -sf -b "$cookie_jar" "${BASE_URL}/api/v1/clusters" | grep -q '"clusters"'
 
 cluster_id="$(curl -sf -b "$cookie_jar" "${BASE_URL}/api/v1/clusters" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)"
@@ -40,6 +52,7 @@ curl -sf -b "$cookie_jar" "${BASE_URL}/api/v1/clusters/${cluster_id}/streams" | 
 echo "==> smoke: create live stream"
 if ! curl -sf -b "$cookie_jar" -X POST "${BASE_URL}/api/v1/clusters/${cluster_id}/streams" \
   -H 'Content-Type: application/json' \
+  -H "X-CSRF-Token: ${csrf}" \
   -d '{"name":"LIVE_SMOKE","subjects":["live.>"]}'; then
   curl -sf -b "$cookie_jar" "${BASE_URL}/api/v1/clusters/${cluster_id}/streams" | grep -q 'LIVE_SMOKE'
 fi
@@ -48,6 +61,10 @@ echo "==> smoke: live websocket"
 AUTH="${AUTH}" go run ./tests/e2e/ws_check.go "${BASE_URL}" "${cluster_id}" "${cookie_jar}"
 
 echo "==> smoke: openapi spec"
-curl -sf "${BASE_URL}/api/openapi.yaml" | grep -q 'openapi:'
+# Download fully before grepping: pipefail + grep -q would SIGPIPE curl on large YAML.
+openapi_tmp="$(mktemp)"
+curl -sf "${BASE_URL}/api/openapi.yaml" -o "$openapi_tmp"
+grep -q 'openapi:' "$openapi_tmp"
+rm -f "$openapi_tmp"
 
 echo "All smoke checks passed."

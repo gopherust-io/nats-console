@@ -31,7 +31,6 @@ This starts:
 | **NATS** | `nats://localhost:4222` | JetStream server |
 | **NATS monitoring** | http://localhost:8222 | Server metrics (used by console) |
 | **PostgreSQL** | `localhost:5432` | Console database |
-| **Keycloak** (dev IdP) | http://localhost:8180 | Optional SSO demo |
 
 On first boot, a **default cluster** is created automatically from `NATS_URL` and `NATS_MONITORING_URL`.
 
@@ -41,7 +40,7 @@ On first boot, a **default cluster** is created automatically from `NATS_URL` an
 
 Open **http://localhost:8080**.
 
-### Option A — Username & password (easiest)
+### Username & password (default)
 
 | Field | Value |
 |-------|-------|
@@ -50,13 +49,14 @@ Open **http://localhost:8080**.
 
 This is the **root** account (full access). Change the password before any real deployment.
 
-### Option B — SSO (demo Keycloak)
+### Invite a person
 
-1. Click **Continue with SSO**  
-2. Sign in as `sso-user` / `sso-user`  
-3. First login creates a **viewer** account (read-only)
+1. Sign in as admin → **Admin → People**
+2. Use **Invite person** to create a pending user and copy the one-time invite URL
+3. Open `/invite/<token>`, set a password, and sign in
+4. Assign **System** / **Account Access** from the system or account **Access** tab
 
-Keycloak admin console (if you want to poke around): http://localhost:8180 — `admin` / `admin`
+Access remains invite-only — there is no public sign-up.
 
 ---
 

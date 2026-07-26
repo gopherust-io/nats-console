@@ -79,22 +79,21 @@ type ConnectionsListResponse struct {
 
 // goalign:ignore
 type AuthConfigResponse struct {
-	OIDCProviders []auth.ProviderInfo `json:"oidcProviders"`
-	OIDCEnabled   bool                `json:"oidcEnabled"`
-	BasicEnabled  bool                `json:"basicEnabled"`
-	AuthEnabled   bool                `json:"authEnabled"`
-	AIEnabled     bool                `json:"aiEnabled"`
+	BasicEnabled bool `json:"basicEnabled"`
+	AuthEnabled  bool `json:"authEnabled"`
+	AIEnabled    bool `json:"aiEnabled"`
 }
 
 // goalign:ignore
 type UserResponse struct {
-	AccessRules *domain.AccessRules `json:"accessRules,omitempty"`
-	ID          string              `json:"id"`
-	Username    string              `json:"username"`
-	Email       string              `json:"email"`
-	CreatedAt   string              `json:"createdAt,omitempty"`
-	Roles       []string            `json:"roles"`
-	IsRoot      bool                `json:"isRoot"`
+	AccessRules *domain.AccessRules  `json:"accessRules,omitempty"`
+	Grants      []domain.AccessGrant `json:"grants,omitempty"`
+	ID          string               `json:"id"`
+	Username    string               `json:"username"`
+	Email       string               `json:"email"`
+	CreatedAt   string               `json:"createdAt,omitempty"`
+	Roles       []string             `json:"roles"`
+	IsRoot      bool                 `json:"isRoot"`
 }
 
 func toUserResponse(user store.User) UserResponse {
@@ -104,6 +103,7 @@ func toUserResponse(user store.User) UserResponse {
 		Email:    user.Email,
 		Roles:    nonNilSlice(user.Roles),
 		IsRoot:   user.IsRoot,
+		Grants:   nonNilSlice(auth.StoreUserToDomain(user).Grants),
 	}
 	if user.AccessRules != nil {
 		resp.AccessRules = &domain.AccessRules{

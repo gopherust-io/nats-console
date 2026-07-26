@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import TopologyStreamDetail from "../components/TopologyStreamDetail";
-import TopologyStreamOverview from "../components/TopologyStreamOverview";
+import { motion } from "motion/react";
+import TopologyInspector from "../components/TopologyInspector";
 import TopologyTree from "../components/TopologyTree";
-import TopologyFlowDiagram from "../components/TopologyFlowDiagram";
 import Alert from "../components/ui/Alert";
 import EmptyState from "../components/ui/EmptyState";
 import PageHeader from "../components/ui/PageHeader";
@@ -12,34 +12,40 @@ import {
   countTopology,
   fetchTopology,
   filterTopology,
-  findStreamById,
+  findNodeById,
+  findParentStream,
   getStreamNodes,
-  sortStreamNodes,
-  type StreamOverviewSort,
+  withJetStreamHrefs,
+  type TopologyNode,
 } from "../lib/topology";
 import { useCluster } from "../lib/cluster";
-import { clusterQueryKey } from "../lib/query";
+import { useAccount } from "../lib/account";
+import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
+import { useTopologyMotion } from "../lib/topologyMotion";
 
-type TopologyView = "overview" | "explorer";
-
-const FLOW_AUTO_MAX = 3;
 const FILTER_DEBOUNCE_MS = 200;
 
 export default function TopologyPage() {
+  const { t } = useTranslation();
   const { clusterId, cluster } = useCluster();
+  const { accountName } = useAccount();
+  const {
+    explorerInitial,
+    explorerAnimate,
+    transition,
+    softSpring,
+    statsVariants,
+    statItemVariants,
+  } = useTopologyMotion();
   const [filterInput, setFilterInput] = useState("");
   const [filterQuery, setFilterQuery] = useState("");
-  const [treeExpanded, setTreeExpanded] = useState(false);
-  const [selectedStreamId, setSelectedStreamId] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<StreamOverviewSort>("name");
-  const [view, setView] = useState<TopologyView>("overview");
-  const [showTree, setShowTree] = useState(true);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const topologyQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "topology"),
-    queryFn: () => fetchTopology(clusterId!, cluster?.name ?? "Cluster"),
+    queryFn: () => fetchTopology(clusterId!, cluster?.name ?? "Cluster", { fresh: true }),
     enabled: Boolean(clusterId),
-    refetchInterval: 30_000,
+    refetchInterval: visibilityAwareInterval(30_000),
   });
 
   useEffect(() => {
@@ -48,7 +54,10 @@ export default function TopologyPage() {
   }, [filterInput]);
 
   const error = topologyQuery.error instanceof Error ? topologyQuery.error.message : "";
-  const root = topologyQuery.data ?? null;
+  const root = useMemo(() => {
+    if (!topologyQuery.data || !clusterId) return null;
+    return withJetStreamHrefs(topologyQuery.data, clusterId, accountName || "Default");
+  }, [topologyQuery.data, clusterId, accountName]);
 
   const filteredRoot = useMemo(() => {
     if (!root) return null;
@@ -56,56 +65,54 @@ export default function TopologyPage() {
   }, [root, filterQuery]);
 
   const counts = useMemo(() => (root ? countTopology(root) : null), [root]);
-  const streams = useMemo(
-    () => (filteredRoot ? sortStreamNodes(getStreamNodes(filteredRoot), sortBy) : []),
-    [filteredRoot, sortBy],
-  );
+  const streamList = useMemo(() => (filteredRoot ? getStreamNodes(filteredRoot) : []), [filteredRoot]);
 
-  const selectedStream = useMemo(() => {
-    if (!filteredRoot || !selectedStreamId) return null;
-    return findStreamById(filteredRoot, selectedStreamId);
-  }, [filteredRoot, selectedStreamId]);
+  const selectedNode = useMemo(() => {
+    if (!filteredRoot || !selectedNodeId) return null;
+    return findNodeById(filteredRoot, selectedNodeId);
+  }, [filteredRoot, selectedNodeId]);
+
+  const parentStream = useMemo(() => {
+    if (!filteredRoot || !selectedNodeId) return null;
+    return findParentStream(filteredRoot, selectedNodeId);
+  }, [filteredRoot, selectedNodeId]);
 
   useEffect(() => {
     if (!filteredRoot) {
-      setSelectedStreamId(null);
+      setSelectedNodeId(null);
       return;
     }
     const available = getStreamNodes(filteredRoot);
     if (available.length === 0) {
-      setSelectedStreamId(null);
+      setSelectedNodeId(null);
       return;
     }
-    if (selectedStreamId && !available.some((stream) => stream.id === selectedStreamId)) {
-      setSelectedStreamId(available.length === 1 ? available[0].id : null);
+    if (selectedNodeId && !findNodeById(filteredRoot, selectedNodeId)) {
+      setSelectedNodeId(available.length === 1 ? available[0].id : null);
     }
-    if (filterQuery && available.length === 1 && !selectedStreamId) {
-      setSelectedStreamId(available[0].id);
+    if (filterQuery && available.length === 1 && !selectedNodeId) {
+      setSelectedNodeId(available[0].id);
     }
-  }, [filteredRoot, filterQuery, selectedStreamId]);
+  }, [filteredRoot, filterQuery, selectedNodeId]);
 
-  useEffect(() => {
-    if (!counts) return;
-    setTreeExpanded(counts.streams <= 4);
-    setShowTree(counts.streams <= 12);
-    if (counts.streams > 12) {
-      setView("overview");
-    }
-  }, [counts]);
+  const handleSelectNode = (node: TopologyNode) => {
+    if (node.kind === "cluster") return;
+    setSelectedNodeId(node.id);
+  };
 
-  const showGlobalFlow = streams.length > 0 && streams.length <= FLOW_AUTO_MAX && !selectedStream;
+  const hasStreams = streamList.length > 0;
 
   return (
-    <div className="page">
+    <div className="page topology-page">
       <PageHeader
-        eyebrow="JetStream"
-        title="Topology"
-        subtitle="Explore how subjects, streams, and consumers relate."
+        eyebrow={t("topology.eyebrow")}
+        title={t("topology.title")}
+        subtitle={t("topology.subtitle")}
         badge={
           cluster ? (
             <span className="badge badge--live">
               {cluster.name}
-              {topologyQuery.isFetching && <span className="badge__pulse" aria-label="Refreshing" />}
+              {topologyQuery.isFetching && <span className="badge__pulse" aria-label={t("topology.refreshing")} />}
             </span>
           ) : undefined
         }
@@ -114,44 +121,18 @@ export default function TopologyPage() {
             <input
               className="topology-toolbar__search"
               type="search"
-              placeholder="Filter streams, subjects, consumers…"
+              placeholder={t("topology.filterPlaceholder")}
               value={filterInput}
               onChange={(event) => setFilterInput(event.target.value)}
-              aria-label="Filter topology"
+              aria-label={t("topology.filterAria")}
             />
-            <div className="topology-toolbar__views" role="tablist" aria-label="Topology view">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={view === "overview"}
-                className={`topology-toolbar__tab${view === "overview" ? " topology-toolbar__tab--active" : ""}`}
-                onClick={() => setView("overview")}
-              >
-                Overview
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={view === "explorer"}
-                className={`topology-toolbar__tab${view === "explorer" ? " topology-toolbar__tab--active" : ""}`}
-                onClick={() => setView("explorer")}
-              >
-                Explorer
-              </button>
-            </div>
-            <button className="btn btn--secondary" type="button" onClick={() => setTreeExpanded(true)}>
-              Expand all
-            </button>
-            <button className="btn btn--secondary" type="button" onClick={() => setTreeExpanded(false)}>
-              Collapse all
-            </button>
             <button
               className="btn btn--secondary"
               type="button"
               onClick={() => topologyQuery.refetch()}
               disabled={topologyQuery.isFetching}
             >
-              Refresh
+              {t("common.refresh")}
             </button>
           </div>
         }
@@ -162,53 +143,61 @@ export default function TopologyPage() {
       {topologyQuery.isLoading && <div className="skeleton skeleton--panel" />}
 
       {counts && (
-        <div className="stat-grid stat-grid--3 mb-24">
-          <StatCard label="Streams" value={counts.streams} accent="sky" icon="▤" />
-          <StatCard label="Subjects" value={counts.subjects} accent="emerald" icon="◎" />
-          <StatCard label="Consumers" value={counts.consumers} accent="violet" icon="◉" />
-        </div>
+        <motion.div
+          className="stat-grid stat-grid--3 mb-24"
+          variants={statsVariants}
+          initial="hidden"
+          animate="visible"
+        >
+          <motion.div variants={statItemVariants} transition={softSpring}>
+            <StatCard label={t("systems.streams")} value={counts.streams} accent="sky" icon="▤" />
+          </motion.div>
+          <motion.div variants={statItemVariants} transition={softSpring}>
+            <StatCard label={t("topology.subjects")} value={counts.subjects} accent="emerald" icon="◎" />
+          </motion.div>
+          <motion.div variants={statItemVariants} transition={softSpring}>
+            <StatCard label={t("systems.consumers")} value={counts.consumers} accent="violet" icon="◉" />
+          </motion.div>
+        </motion.div>
       )}
 
       {filteredRoot && filteredRoot.children.length === 0 && !filterQuery && (
-        <EmptyState
-          title="No JetStream topology yet"
-          description='Run `make seed-demo` to load sample streams and consumers, or create a stream from the Streams page.'
-        />
+        <EmptyState title={t("topology.emptyTitle")} description={t("topology.emptyDescription")} />
       )}
 
-      {filteredRoot && streams.length > 0 && (
-        <TopologyStreamOverview
-          streams={streams}
-          selectedStreamId={selectedStreamId}
-          sortBy={sortBy}
-          onSortChange={setSortBy}
-          onSelectStream={setSelectedStreamId}
-        />
-      )}
-
-      {filteredRoot && streams.length > 0 && selectedStream && (
-        <TopologyStreamDetail stream={selectedStream} onClose={() => setSelectedStreamId(null)} />
-      )}
-
-      {filteredRoot && streams.length > 0 && showGlobalFlow && (
-        <TopologyFlowDiagram streams={streams} maxStreams={FLOW_AUTO_MAX} />
-      )}
-
-      {filteredRoot && streams.length > 0 && (view === "explorer" || showTree) && (
-        <TopologyTree
-          root={filteredRoot}
-          defaultExpanded={treeExpanded}
-          expandAll={treeExpanded}
-          selectedStreamId={selectedStreamId}
-        />
+      {filteredRoot && hasStreams && (
+        <div className="topology-stage">
+          <motion.div
+            className="topology-explorer"
+            initial={explorerInitial}
+            animate={explorerAnimate}
+            transition={transition}
+          >
+            <div className="topology-explorer__hierarchy">
+              <TopologyTree
+                root={filteredRoot}
+                selectedNodeId={selectedNodeId}
+                onSelectNode={handleSelectNode}
+              />
+            </div>
+            <TopologyInspector
+              selected={selectedNode}
+              stream={parentStream}
+              streams={streamList}
+              root={filteredRoot}
+              onClose={() => setSelectedNodeId(null)}
+              onSelectStream={handleSelectNode}
+            />
+          </motion.div>
+        </div>
       )}
 
       {filteredRoot && filteredRoot.children.length === 0 && filterQuery && (
-        <EmptyState title="No matches" description={`Nothing matched "${filterQuery}". Try another filter.`} />
+        <EmptyState title={t("topology.noMatchesTitle")} description={t("topology.noMatchesDescription", { query: filterQuery })} />
       )}
 
       {root && filterQuery && !filteredRoot && (
-        <EmptyState title="No matches" description={`Nothing matched "${filterQuery}". Try another filter.`} />
+        <EmptyState title={t("topology.noMatchesTitle")} description={t("topology.noMatchesDescription", { query: filterQuery })} />
       )}
     </div>
   );

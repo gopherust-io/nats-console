@@ -25,9 +25,9 @@ nats-consol/
 │   ├── api/             # HTTP routes, handlers, middleware
 │   ├── app/             # Application services
 │   ├── domain/          # DTOs & business types
-│   ├── nats/            # NATS client, supercluster, connections
+│   ├── nats/            # NATS client & connections
 │   ├── store/           # Postgres access
-│   └── auth/            # Sessions, RBAC, OIDC
+│   └── auth/            # Sessions, RBAC
 ├── web/                 # React + Vite frontend
 ├── migrations/          # SQL migrations
 ├── tests/               # integration, contract, security, e2e
@@ -42,18 +42,22 @@ nats-consol/
 ### 1. Dependencies
 
 ```bash
+cp .env.example .env
+# Edit .env — set POSTGRES_PASSWORD, ADMIN_PASSWORD, ENCRYPTION_KEY, SESSION_SECRET
 docker compose up postgres nats -d
 ```
 
-### 2. Backend (auth off for speed)
+### 2. Backend
 
 ```bash
-cp .env.example .env
-# Edit .env — or export:
-export DATABASE_URL=postgres://natsconsol:natsconsol@localhost:5432/natsconsol?sslmode=disable
+# .env already loaded by the server; for a host-run process use localhost DSN:
+export DATABASE_URL=postgres://natsconsol:${POSTGRES_PASSWORD}@localhost:5432/natsconsol?sslmode=disable
 export NATS_URL=nats://localhost:4222
 export NATS_MONITORING_URL=http://localhost:8222
-export AUTH_ENABLED=false
+export ADMIN_PASSWORD=change-me-local-admin
+export ENCRYPTION_KEY=dev-encryption-key-min-16-chars
+export SESSION_SECRET=dev-session-secret-min-16-chars
+# Optional: AUTH_ENABLED=false for a faster local loop (not for production)
 
 go run ./cmd/server
 ```
@@ -82,10 +86,21 @@ Vite proxies:
 ## Full stack with Docker (matches production closer)
 
 ```bash
+cp .env.example .env   # required — fill secrets
 docker compose up --build
 ```
 
-Includes Keycloak SSO demo. UI at http://localhost:8080, login `admin`/`admin`.
+Includes Postgres + NATS + console. UI at http://localhost:8080. Login with the `ADMIN_USERNAME` / `ADMIN_PASSWORD` from your `.env`.
+
+> The stock compose stack is a **local plaintext lab**. Production must use `ENV=production`, Postgres `sslmode=require|verify-full`, `tls://` NATS, and HTTPS monitoring (see [devops-setup.md](devops-setup.md)).
+
+### Test alert emails locally
+
+```bash
+docker compose --profile mail up --build
+```
+
+Uncomment the Mailpit SMTP block in `.env` (see `.env.example`). Captured mail UI: http://localhost:8025. For Gmail App Password setup, see [devops-setup.md](devops-setup.md#alert-email-optional).
 
 ---
 
@@ -124,7 +139,7 @@ Commit both `config.go` and `config_env_gen.go` when adding env vars.
 - REST under `/api/v1/…`  
 - **camelCase** JSON on all frontend-facing responses  
 - Typed DTOs in `internal/domain/` and `internal/api/responses.go` — avoid `map[string]any` for API output  
-- NATS monitoring passthrough uses server-native snake_case; aggregated endpoints (supercluster) use camelCase DTOs  
+- NATS monitoring passthrough uses server-native snake_case; console API DTOs use camelCase  
 
 OpenAPI: [`api/openapi.yaml`](../api/openapi.yaml)
 
@@ -147,8 +162,10 @@ OpenAPI: [`api/openapi.yaml`](../api/openapi.yaml)
 ```bash
 make test-unit          # fast, no Docker
 make test-regression    # integration + contract + security (Docker)
+make test-web           # vitest + Playwright e2e (mocked API)
 make test-smoke         # shell script against running compose stack
 make test-performance   # vegeta load test
+make test-stress        # vegeta higher-rate stress test
 ```
 
 Skip testcontainers:
@@ -163,8 +180,12 @@ SKIP_TESTCONTAINERS=1 go test ./...
 | Integration | `tests/integration` | API + real Postgres + NATS |
 | Contract | `tests/contract` | JSON camelCase vs frontend |
 | Security | `tests/security` | CSRF, headers, RBAC, secrets |
+| Web e2e | `web/e2e` | Playwright against preview (mocked `/api`) |
+| Smoke | `tests/e2e/smoke.sh` | Health, login, streams, live WS on compose |
+| Performance | `tests/performance/load.sh` | vegeta baseline (main CI) |
+| Stress | `tests/performance/stress.sh` | vegeta higher RPS (main CI) |
 
-All Go tests use **testify** (`require` / `assert`).
+All Go tests use **testify** (`require` / `assert`). Manual UI checks after deploy: [manual-test-checklist.md](manual-test-checklist.md).
 
 ---
 
@@ -175,7 +196,7 @@ make lint          # Go + web
 make lint-go-fix   # auto-fix struct alignment, modernize, etc.
 ```
 
-CI runs on every pull request to `main` (`.github/workflows/test.yml`): Go lint/tests/build, web lint/typecheck/build, and parallel regression suites, plus an **All checks passed** gate. Race detector and performance baseline run on pushes to `main` only.
+CI runs on every pull request to `main` (`.github/workflows/test.yml`): Go lint/tests/build, web lint/typecheck/build/Playwright e2e, parallel regression suites, race detector (live WebSocket), and compose smoke, plus an **All checks passed** gate. Performance and stress baselines run on pushes to `main` only (advisory).
 
 ---
 
@@ -199,7 +220,7 @@ CI runs on every pull request to `main` (`.github/workflows/test.yml`): Go lint/
 PPROF_ENABLED=true go run ./cmd/server
 ```
 
-UI: **Administration → Profiling** (admin role when auth is on).
+On-demand profiles: `GET /api/v1/pprof/profile/{heap|cpu|goroutine|...}` (admin auth when enabled). Non-prod also exposes `/debug/pprof`.
 
 ### Structured logs
 
@@ -228,4 +249,4 @@ LOG_JSON=true LOG_LEVEL=debug go run ./cmd/server
 
 - [User guide](./user-guide.md) — feature behavior from an operator's view  
 - [DevOps setup](./devops-setup.md) — production deployment  
-- [Main README](../README.md) — env reference, SSO, RBAC details
+- [Main README](../README.md) — env reference, RBAC details

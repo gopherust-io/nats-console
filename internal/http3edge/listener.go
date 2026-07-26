@@ -10,8 +10,9 @@ import (
 
 	"github.com/quic-go/quic-go/http3"
 
-	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/tel"
+
+	"github.com/gopherust-io/nats-consol/internal/config"
 )
 
 type Listener struct {

@@ -3,7 +3,9 @@ package metrics
 import (
 	"context"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gopherust-io/tel"
@@ -21,7 +23,31 @@ var (
 	snapSuccess    *tel.FastCounter
 	snapErrors     *tel.FastCounter
 	wsFramesDrop   *tel.FastCounter
+	snapHubHit     *tel.FastCounter
+	snapHubMiss    *tel.FastCounter
+	viewCacheHit   *tel.FastCounter
+	viewCacheMiss  *tel.FastCounter
+	liveMuxFanout  *tel.FastCounter
 )
+
+// Common HTTP status codes as static strings to avoid strconv on the hot path.
+var httpStatusStrings = [600]string{
+	200: "200",
+	201: "201",
+	204: "204",
+	301: "301",
+	302: "302",
+	304: "304",
+	400: "400",
+	401: "401",
+	403: "403",
+	404: "404",
+	409: "409",
+	429: "429",
+	500: "500",
+	502: "502",
+	503: "503",
+}
 
 func ensure() {
 	initOnce.Do(func() {
@@ -35,38 +61,77 @@ func ensure() {
 		snapSuccess, _ = r.Counter("nats_consol_metrics_snapshot_success_total")
 		snapErrors, _ = r.Counter("nats_consol_metrics_snapshot_errors_total")
 		wsFramesDrop, _ = r.Counter("nats_consol_live_ws_frames_dropped_total")
+		snapHubHit, _ = r.Counter("nats_consol_snapshot_hub_hit_total")
+		snapHubMiss, _ = r.Counter("nats_consol_snapshot_hub_miss_total")
+		viewCacheHit, _ = r.Counter("nats_consol_view_cache_hit_total")
+		viewCacheMiss, _ = r.Counter("nats_consol_view_cache_miss_total")
+		liveMuxFanout, _ = r.Counter("nats_consol_live_mux_fanout_total")
 	})
 }
 
 func ObserveHTTP(method, path string, status int, duration time.Duration) {
 	ensure()
 	ctx := context.Background()
-	subject := method + "|" + path + "|" + strconv.Itoa(status)
+	statusLabel := statusLabel(status)
 	if httpRequests != nil {
-		httpRequests.AddWith(ctx, 1, subject)
+		httpRequests.AddWith(ctx, 1, joinSubject(method, path, statusLabel))
 	}
 	if httpDuration != nil {
-		httpDuration.RecordWith(ctx, duration.Seconds(), method+"|"+path)
+		httpDuration.RecordWith(ctx, duration.Seconds(), joinSubject(method, path))
 	}
 }
 
-var wsCount int64
+func statusLabel(status int) string {
+	if status >= 0 && status < len(httpStatusStrings) {
+		if s := httpStatusStrings[status]; s != "" {
+			return s
+		}
+	}
+	return strconv.Itoa(status)
+}
+
+func joinSubject(parts ...string) string {
+	n := len(parts) - 1
+	for _, p := range parts {
+		n += len(p)
+	}
+	var b strings.Builder
+	b.Grow(n)
+	for i, p := range parts {
+		if i > 0 {
+			b.WriteByte('|')
+		}
+		b.WriteString(p)
+	}
+	return b.String()
+}
+
+var wsCount atomic.Int64
 
 func IncWS() {
 	ensure()
-	wsCount++
+	n := wsCount.Add(1)
 	if wsActive != nil {
-		wsActive.Record(context.Background(), wsCount)
+		wsActive.Record(context.Background(), n)
 	}
 }
 
 func DecWS() {
 	ensure()
-	if wsCount > 0 {
-		wsCount--
-	}
-	if wsActive != nil {
-		wsActive.Record(context.Background(), wsCount)
+	for {
+		cur := wsCount.Load()
+		if cur <= 0 {
+			if wsActive != nil {
+				wsActive.Record(context.Background(), 0)
+			}
+			return
+		}
+		if wsCount.CompareAndSwap(cur, cur-1) {
+			if wsActive != nil {
+				wsActive.Record(context.Background(), cur-1)
+			}
+			return
+		}
 	}
 }
 
@@ -109,5 +174,40 @@ func IncLiveWSFramesDropped() {
 	ensure()
 	if wsFramesDrop != nil {
 		wsFramesDrop.Add(context.Background(), 1)
+	}
+}
+
+func IncSnapshotHubHit(kind string) {
+	ensure()
+	if snapHubHit != nil {
+		snapHubHit.AddWith(context.Background(), 1, kind)
+	}
+}
+
+func IncSnapshotHubMiss(path string) {
+	ensure()
+	if snapHubMiss != nil {
+		snapHubMiss.AddWith(context.Background(), 1, path)
+	}
+}
+
+func IncViewCacheHit() {
+	ensure()
+	if viewCacheHit != nil {
+		viewCacheHit.Add(context.Background(), 1)
+	}
+}
+
+func IncViewCacheMiss() {
+	ensure()
+	if viewCacheMiss != nil {
+		viewCacheMiss.Add(context.Background(), 1)
+	}
+}
+
+func IncLiveMuxFanout(n int) {
+	ensure()
+	if liveMuxFanout != nil && n > 0 {
+		liveMuxFanout.Add(context.Background(), int64(n))
 	}
 }

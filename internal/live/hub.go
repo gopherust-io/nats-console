@@ -5,11 +5,11 @@ import (
 	"errors"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/fasthttp/websocket"
-	"github.com/nats-io/nats.go"
 	"github.com/valyala/fasthttp"
 
 	"github.com/gopherust-io/nats-consol/internal/config"
@@ -25,15 +25,17 @@ const (
 	defaultLiveWSIdleTimeout = 5 * time.Minute
 	defaultLiveWSRateLimit   = 100 * time.Millisecond
 	connPollInterval         = 2 * time.Second
+	defaultGatewayTouchMax   = 30 * time.Second
 )
 
 type Hub struct {
 	gateway port.ClusterGateway
+	mux     *subMux
 	cfg     config.Config
 }
 
 func NewHub(gateway port.ClusterGateway, cfg config.Config) *Hub {
-	return &Hub{gateway: gateway, cfg: cfg}
+	return &Hub{gateway: gateway, cfg: cfg, mux: newSubMux()}
 }
 
 func (h *Hub) liveWSMaxMessages() int {
@@ -55,6 +57,15 @@ func (h *Hub) liveWSRateLimit() time.Duration {
 		return h.cfg.LiveWSRateLimit
 	}
 	return defaultLiveWSRateLimit
+}
+
+func (h *Hub) gatewayTouchInterval() time.Duration {
+	ttl := h.cfg.NATSClientCacheTTL
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	interval := min(ttl/3, defaultGatewayTouchMax)
+	return max(interval, time.Second)
 }
 
 func (h *Hub) checkOrigin(ctx *fasthttp.RequestCtx) bool {
@@ -153,20 +164,38 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 	defer cancel()
 
 	var (
-		mu         sync.Mutex
-		writeMu    sync.Mutex
-		idleMu     sync.Mutex
-		paused     bool
-		msgCount   int
-		lastSent   time.Time
-		maxReached bool
-		closed     bool
+		mu               sync.Mutex
+		writeMu          sync.Mutex
+		idleMu           sync.Mutex
+		lastGatewayTouch atomic.Int64
+		lastActivityNano atomic.Int64
+		paused           atomic.Bool
+		closed           atomic.Bool
+		msgCount         int
+		lastSent         time.Time
 	)
 
 	idleTimer := time.NewTimer(h.liveWSIdleTimeout())
 	defer idleTimer.Stop()
+	lastActivityNano.Store(time.Now().UnixNano())
+	touchInterval := h.gatewayTouchInterval()
+	idleTimeout := h.liveWSIdleTimeout()
+
+	touchGateway := func() {
+		now := time.Now().UnixNano()
+		prev := lastGatewayTouch.Load()
+		if now-prev < int64(touchInterval) {
+			return
+		}
+		if !lastGatewayTouch.CompareAndSwap(prev, now) {
+			return
+		}
+		h.gateway.Touch(clusterID)
+	}
 
 	resetIdle := func() {
+		now := time.Now()
+		lastActivityNano.Store(now.UnixNano())
 		idleMu.Lock()
 		defer idleMu.Unlock()
 		if !idleTimer.Stop() {
@@ -175,7 +204,7 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 			default:
 			}
 		}
-		idleTimer.Reset(h.liveWSIdleTimeout())
+		idleTimer.Reset(idleTimeout)
 	}
 
 	writeFrameOnce := func(frame liveFrame) error {
@@ -184,14 +213,16 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 		return h.writeFrame(conn, frame)
 	}
 
+	writeBytesOnce := func(data []byte) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		return conn.WriteMessage(websocket.TextMessage, data)
+	}
+
 	closeSession := func(message string) {
-		mu.Lock()
-		if closed {
-			mu.Unlock()
+		if !closed.CompareAndSwap(false, true) {
 			return
 		}
-		closed = true
-		mu.Unlock()
 		cancel()
 		if message != "" {
 			_ = writeFrameOnce(liveFrame{Type: "error", Error: message})
@@ -200,18 +231,50 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 	}
 
 	send := func(frame liveFrame) bool {
-		mu.Lock()
-		if closed {
-			mu.Unlock()
+		if closed.Load() {
 			return false
 		}
-		mu.Unlock()
 		if err := writeFrameOnce(frame); err != nil {
 			closeSession("")
 			return false
 		}
 		resetIdle()
-		h.gateway.Touch(clusterID)
+		touchGateway()
+		return true
+	}
+
+	sendMessage := func(seq uint64, subject string, payload []byte, now time.Time) bool {
+		mu.Lock()
+		if closed.Load() {
+			mu.Unlock()
+			return false
+		}
+		if msgCount >= h.liveWSMaxMessages() {
+			mu.Unlock()
+			send(liveFrame{Type: "error", Error: "max messages reached"})
+			closeSession("")
+			return false
+		}
+		if !lastSent.IsZero() && time.Since(lastSent) < h.liveWSRateLimit() {
+			metrics.IncLiveWSFramesDropped()
+			mu.Unlock()
+			return false
+		}
+		msgCount++
+		lastSent = time.Now()
+		mu.Unlock()
+
+		data, err := encodeMessageFrame(seq, subject, payload, now)
+		if err != nil {
+			closeSession("")
+			return false
+		}
+		if err := writeBytesOnce(data); err != nil {
+			closeSession("")
+			return false
+		}
+		resetIdle()
+		touchGateway()
 		return true
 	}
 
@@ -219,52 +282,18 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 		return
 	}
 
-	subject := ">"
-	subOpts := []nats.SubOpt{nats.BindStream(stream)}
-	if subjectFilter != "" {
-		subject = subjectFilter
+	viewer := &muxViewer{
+		send:     sendMessage,
+		paused:   &paused,
+		closed:   &closed,
+		truncate: h.cfg.LivePayloadTruncate(),
 	}
-	if fromSeq > 0 {
-		subOpts = append(subOpts, nats.StartSequence(fromSeq))
-	} else {
-		subOpts = append(subOpts, nats.DeliverNew())
-	}
-
-	sub, err := client.JetStream().Subscribe(subject, func(msg *nats.Msg) {
-		mu.Lock()
-		if closed || paused || maxReached {
-			mu.Unlock()
-			return
-		}
-		if msgCount >= h.liveWSMaxMessages() {
-			maxReached = true
-			mu.Unlock()
-			send(liveFrame{Type: "error", Error: "max messages reached"})
-			closeSession("")
-			return
-		}
-		if !lastSent.IsZero() && time.Since(lastSent) < h.liveWSRateLimit() {
-			metrics.IncLiveWSFramesDropped()
-			mu.Unlock()
-			return
-		}
-		msgCount++
-		lastSent = time.Now()
-		mu.Unlock()
-
-		seq := uint64(0)
-		if meta, metaErr := msg.Metadata(); metaErr == nil && meta != nil {
-			seq = meta.Sequence.Stream
-		}
-		if !send(messageLiveFrame(seq, msg.Subject, msg.Data, time.Now())) {
-			return
-		}
-	}, subOpts...)
+	unsub, err := h.mux.attach(client, muxKey{cluster: clusterID, stream: stream, filter: subjectFilter}, fromSeq, viewer)
 	if err != nil {
 		closeSession(err.Error())
 		return
 	}
-	defer func() { _ = sub.Unsubscribe() }()
+	defer unsub()
 
 	connPoll := time.NewTicker(connPollInterval)
 	defer connPoll.Stop()
@@ -278,7 +307,6 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 				return
 			default:
 			}
-			// Idle is enforced by idleTimer (reset on send/recv), not read deadline.
 			_ = conn.SetReadDeadline(time.Time{})
 			_, data, readErr := conn.ReadMessage()
 			if readErr != nil {
@@ -287,7 +315,7 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 			}
 
 			resetIdle()
-			h.gateway.Touch(clusterID)
+			touchGateway()
 
 			var ctrl controlFrame
 			if err := sonic.Unmarshal(data, &ctrl); err != nil {
@@ -295,19 +323,14 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 			}
 			switch ctrl.Action {
 			case "pause":
-				mu.Lock()
-				paused = true
-				mu.Unlock()
+				paused.Store(true)
 				send(liveFrame{Type: "paused"})
 			case "resume":
-				mu.Lock()
-				paused = false
-				mu.Unlock()
+				paused.Store(false)
 				send(liveFrame{Type: "resumed"})
 			case "clear":
 				mu.Lock()
 				msgCount = 0
-				maxReached = false
 				mu.Unlock()
 				send(liveFrame{Type: "cleared"})
 			}
@@ -319,12 +342,18 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 		case <-sessionCtx.Done():
 			return
 		case <-idleTimer.C:
+			if time.Since(time.Unix(0, lastActivityNano.Load())) < idleTimeout {
+				idleMu.Lock()
+				idleTimer.Reset(idleTimeout)
+				idleMu.Unlock()
+				continue
+			}
 			closeSession("idle timeout")
 			return
 		case <-readDone:
 			return
 		case <-connPoll.C:
-			h.gateway.Touch(clusterID)
+			touchGateway()
 			nc := client.Conn()
 			if nc == nil || !nc.IsConnected() {
 				closeSession("nats disconnected")

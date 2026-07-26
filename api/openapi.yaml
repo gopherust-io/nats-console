@@ -75,23 +75,118 @@ paths:
         "200":
           description: User profile
 
-  /api/v1/auth/oidc/login:
+  /api/v1/alerts:
     get:
-      tags: [Auth]
-      summary: Start OIDC login
-      security: []
+      tags: [Alerts]
+      summary: List alerts in the feed
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, closed] }
+        - name: clusterId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: severity
+          in: query
+          schema: { type: string, enum: [info, warning, critical] }
+        - name: limit
+          in: query
+          schema: { type: integer }
       responses:
-        "302":
-          description: Redirect to IdP
+        "200":
+          description: Alert list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertListResponse"
 
-  /api/v1/auth/oidc/callback:
+  /api/v1/alerts/open-summary:
     get:
-      tags: [Auth]
-      summary: OIDC callback
-      security: []
+      tags: [Alerts]
+      summary: Unacknowledged open alerts for the notification bell
       responses:
-        "302":
-          description: Redirect to UI
+        "200":
+          description: Open summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertOpenSummary"
+
+  /api/v1/alerts/{alertId}:
+    get:
+      tags: [Alerts]
+      summary: Get alert detail
+      parameters:
+        - $ref: "#/components/parameters/AlertId"
+      responses:
+        "200":
+          description: Alert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alert"
+
+  /api/v1/alerts/{alertId}/acknowledge:
+    post:
+      tags: [Alerts]
+      summary: Acknowledge an open alert (hides from badge)
+      parameters:
+        - $ref: "#/components/parameters/AlertId"
+      responses:
+        "200":
+          description: Acknowledged alert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alert"
+
+  /api/v1/alert-rules:
+    get:
+      tags: [Alerts]
+      summary: List alert rules
+      responses:
+        "200":
+          description: Rules list
+    post:
+      tags: [Alerts]
+      summary: Create alert rule
+      responses:
+        "201":
+          description: Created rule
+
+  /api/v1/alert-rules/metrics:
+    get:
+      tags: [Alerts]
+      summary: Allowed metrics, comparators, and severities for the rule form
+      responses:
+        "200":
+          description: Metric picker options
+
+  /api/v1/alert-rules/{ruleId}:
+    get:
+      tags: [Alerts]
+      summary: Get alert rule
+      parameters:
+        - $ref: "#/components/parameters/RuleId"
+      responses:
+        "200":
+          description: Rule
+    patch:
+      tags: [Alerts]
+      summary: Update alert rule
+      parameters:
+        - $ref: "#/components/parameters/RuleId"
+      responses:
+        "200":
+          description: Updated rule
+    delete:
+      tags: [Alerts]
+      summary: Delete alert rule
+      parameters:
+        - $ref: "#/components/parameters/RuleId"
+      responses:
+        "204":
+          description: Deleted
 
   /api/v1/audit:
     get:
@@ -147,22 +242,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ClusterListResponse"
-    post:
-      tags: [Clusters]
-      summary: Create cluster
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ClusterCreateRequest"
-      responses:
-        "201":
-          description: Created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Cluster"
 
   /api/v1/clusters/{clusterId}:
     parameters:
@@ -177,32 +256,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Cluster"
-        "404":
-          $ref: "#/components/responses/NotFound"
-    put:
-      tags: [Clusters]
-      summary: Update cluster
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ClusterUpdateRequest"
-      responses:
-        "200":
-          description: Updated
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Cluster"
-        "404":
-          $ref: "#/components/responses/NotFound"
-    delete:
-      tags: [Clusters]
-      summary: Delete cluster
-      responses:
-        "204":
-          description: Deleted
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -315,26 +368,6 @@ paths:
             application/json:
               schema:
                 type: object
-
-  /api/v1/clusters/{clusterId}/supercluster:
-    parameters:
-      - $ref: "#/components/parameters/clusterId"
-    get:
-      tags: [Monitoring]
-      summary: Supercluster overview (gateways, routes, leafnodes, replication)
-      description: |
-        Aggregates NATS monitoring endpoints (varz, gatewayz, routez, leafz, jsz).
-        Returns 200 with partial data and `warnings` / `sourceErrors` when some sources fail.
-        Returns 502 when all monitoring sources are unavailable.
-      responses:
-        "200":
-          description: Supercluster overview
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SuperclusterOverview"
-        "502":
-          $ref: "#/components/responses/BadGateway"
 
   /api/v1/clusters/{clusterId}/streams:
     parameters:
@@ -464,6 +497,24 @@ paths:
                 type: object
         "404":
           $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Consumers]
+      summary: Update consumer config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsumerConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          $ref: "#/components/responses/NotFound"
     delete:
       tags: [Consumers]
       summary: Delete consumer
@@ -568,73 +619,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RotateEncryptionKeyResult"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-
-  /api/v1/clusters/{clusterId}/resolver/accounts:
-    parameters:
-      - $ref: "#/components/parameters/clusterId"
-    get:
-      tags: [JWT Resolver]
-      summary: List imported account JWTs (metadata only)
-      responses:
-        "200":
-          description: Account JWT list
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/JWTAccount"
-    post:
-      tags: [JWT Resolver]
-      summary: Import an account JWT
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/JWTAccountImport"
-      responses:
-        "201":
-          description: Imported account
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/JWTAccount"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-
-  /api/v1/clusters/{clusterId}/resolver/accounts/{name}:
-    parameters:
-      - $ref: "#/components/parameters/clusterId"
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-    delete:
-      tags: [JWT Resolver]
-      summary: Delete an imported account JWT
-      responses:
-        "204":
-          description: Deleted
-        "404":
-          $ref: "#/components/responses/NotFound"
-
-  /api/v1/clusters/{clusterId}/resolver/export:
-    parameters:
-      - $ref: "#/components/parameters/clusterId"
-    get:
-      tags: [JWT Resolver]
-      summary: Export resolver bundle for file resolver (admin)
-      responses:
-        "200":
-          description: JWT export bundle
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/JWTResolverExport"
         "403":
           $ref: "#/components/responses/Forbidden"
 
@@ -832,6 +816,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ObjectBucketInfo"
+    put:
+      tags: [ObjectStore]
+      summary: Update object store bucket config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ObjectBucketConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectBucketInfo"
     delete:
       tags: [ObjectStore]
       summary: Delete object store bucket
@@ -936,6 +936,20 @@ components:
       required: true
       schema:
         type: string
+    AlertId:
+      name: alertId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RuleId:
+      name: ruleId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
 
   responses:
     BadRequest:
@@ -964,6 +978,39 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    Alert:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        ruleId: { type: string, format: uuid }
+        clusterId: { type: string, format: uuid }
+        status: { type: string, enum: [open, closed] }
+        severity: { type: string, enum: [info, warning, critical] }
+        metric: { type: string }
+        message: { type: string }
+        firingValue: { type: number }
+        threshold: { type: number }
+        firstSeenAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+        acknowledgedAt: { type: string, format: date-time }
+        ruleName: { type: string }
+
+    AlertListResponse:
+      type: object
+      properties:
+        alerts:
+          type: array
+          items: { $ref: "#/components/schemas/Alert" }
+        total: { type: integer }
+
+    AlertOpenSummary:
+      type: object
+      properties:
+        count: { type: integer }
+        alerts:
+          type: array
+          items: { $ref: "#/components/schemas/Alert" }
+
     HealthResponse:
       type: object
       properties:
@@ -1008,39 +1055,6 @@ components:
           type: string
           format: date-time
 
-    ClusterCreateRequest:
-      type: object
-      required: [name, nats_url]
-      properties:
-        name:
-          type: string
-        nats_url:
-          type: string
-        monitoring_url:
-          type: string
-        creds_file_path:
-          type: string
-        token:
-          type: string
-        is_default:
-          type: boolean
-
-    ClusterUpdateRequest:
-      type: object
-      properties:
-        name:
-          type: string
-        nats_url:
-          type: string
-        monitoring_url:
-          type: string
-        creds_file_path:
-          type: string
-        token:
-          type: string
-        is_default:
-          type: boolean
-
     ClusterListResponse:
       type: object
       properties:
@@ -1068,6 +1082,8 @@ components:
       properties:
         name:
           type: string
+        description:
+          type: string
         subjects:
           type: array
           items:
@@ -1076,16 +1092,124 @@ components:
           type: string
         storage:
           type: string
-        max_msgs:
+        discard:
+          type: string
+          description: Discard policy (old or new)
+        maxMsgs:
           type: integer
           format: int64
-        max_bytes:
+        maxBytes:
           type: integer
           format: int64
-        max_age:
+        maxAge:
           type: integer
           format: int64
           description: Nanoseconds
+        maxConsumers:
+          type: integer
+        maxMsgSize:
+          type: integer
+          format: int32
+        maxMsgsPerSubject:
+          type: integer
+          format: int64
+        replicas:
+          type: integer
+        allowRollup:
+          type: boolean
+        denyDelete:
+          type: boolean
+        denyPurge:
+          type: boolean
+        discardNewPerSubject:
+          type: boolean
+        noAck:
+          type: boolean
+        sealed:
+          type: boolean
+        allowDirect:
+          type: boolean
+        mirrorDirect:
+          type: boolean
+        allowMsgTTL:
+          type: boolean
+        compression:
+          type: string
+          description: none or s2
+        duplicates:
+          type: integer
+          format: int64
+          description: Duplicate window in nanoseconds
+        firstSeq:
+          type: integer
+          format: int64
+        subjectDeleteMarkerTTL:
+          type: integer
+          format: int64
+          description: Nanoseconds
+        placement:
+          type: object
+          properties:
+            cluster:
+              type: string
+            tags:
+              type: array
+              items:
+                type: string
+        mirror:
+          $ref: "#/components/schemas/StreamSource"
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/StreamSource"
+        subjectTransform:
+          type: object
+          properties:
+            src:
+              type: string
+            dest:
+              type: string
+        republish:
+          type: object
+          properties:
+            src:
+              type: string
+            dest:
+              type: string
+            headersOnly:
+              type: boolean
+        consumerLimits:
+          type: object
+          properties:
+            inactiveThreshold:
+              type: integer
+              format: int64
+            maxAckPending:
+              type: integer
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+
+    StreamSource:
+      type: object
+      properties:
+        name:
+          type: string
+        filterSubject:
+          type: string
+        optStartSeq:
+          type: integer
+          format: int64
+        optStartTime:
+          type: string
+        external:
+          type: object
+          properties:
+            api:
+              type: string
+            deliver:
+              type: string
 
     StreamListResponse:
       type: object
@@ -1100,14 +1224,22 @@ components:
     ConsumerConfig:
       type: object
       properties:
-        durable_name:
+        durableName:
           type: string
-        deliver_policy:
+        name:
           type: string
-        ack_policy:
+        description:
           type: string
-        filter_subject:
+        deliverPolicy:
           type: string
+        ackPolicy:
+          type: string
+        filterSubject:
+          type: string
+        filterSubjects:
+          type: array
+          items:
+            type: string
         optStartSeq:
           type: integer
           format: int64
@@ -1117,11 +1249,54 @@ components:
         replayPolicy:
           type: string
           enum: [instant, original]
-        max_deliver:
-          type: integer
-        ack_wait:
+        ackWaitNs:
           type: integer
           format: int64
+        maxDeliver:
+          type: integer
+        backoffNs:
+          type: array
+          items:
+            type: integer
+            format: int64
+        maxAckPending:
+          type: integer
+        rateLimitBps:
+          type: integer
+          format: int64
+        sampleFreq:
+          type: string
+        maxWaiting:
+          type: integer
+        inactiveThresholdNs:
+          type: integer
+          format: int64
+        maxRequestBatch:
+          type: integer
+        maxRequestExpiresNs:
+          type: integer
+          format: int64
+        maxRequestMaxBytes:
+          type: integer
+        deliverSubject:
+          type: string
+        deliverGroup:
+          type: string
+        flowControl:
+          type: boolean
+        heartbeatNs:
+          type: integer
+          format: int64
+        headersOnly:
+          type: boolean
+        replicas:
+          type: integer
+        memoryStorage:
+          type: boolean
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
 
     ReplayConsumerRequest:
       type: object
@@ -1222,49 +1397,6 @@ components:
           type: integer
           format: int64
 
-    JWTAccount:
-      type: object
-      properties:
-        id:
-          type: string
-        clusterId:
-          type: string
-        name:
-          type: string
-        hasJwt:
-          type: boolean
-        expiresAt:
-          type: string
-          format: date-time
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-
-    JWTAccountImport:
-      type: object
-      required: [jwt]
-      properties:
-        jwt:
-          type: string
-        name:
-          type: string
-
-    JWTResolverExport:
-      type: object
-      properties:
-        accounts:
-          type: array
-          items:
-            type: object
-            properties:
-              name:
-                type: string
-              jwt:
-                type: string
-
     RotateEncryptionKeyRequest:
       type: object
       required: [currentKey, newKey]
@@ -1278,8 +1410,6 @@ components:
       type: object
       properties:
         clustersUpdated:
-          type: integer
-        jwtUpdated:
           type: integer
         dryRun:
           type: boolean
@@ -1409,9 +1539,31 @@ components:
           type: string
         description:
           type: string
-        max_bytes:
+        storage:
+          type: string
+        ttlNs:
           type: integer
           format: int64
+        maxBytes:
+          type: integer
+          format: int64
+        replicas:
+          type: integer
+        compression:
+          type: boolean
+        placement:
+          type: object
+          properties:
+            cluster:
+              type: string
+            tags:
+              type: array
+              items:
+                type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
 
     ObjectBucketInfo:
       type: object
@@ -1420,9 +1572,36 @@ components:
           type: string
         description:
           type: string
+        storage:
+          type: string
+        placement:
+          type: object
+          properties:
+            cluster:
+              type: string
+            tags:
+              type: array
+              items:
+                type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
         size:
           type: integer
           format: int64
+        ttlNs:
+          type: integer
+          format: int64
+        maxBytes:
+          type: integer
+          format: int64
+        replicas:
+          type: integer
+        compressed:
+          type: boolean
+        sealed:
+          type: boolean
 
     ObjectBucketListResponse:
       type: object
@@ -1468,145 +1647,3 @@ components:
         data:
           type: string
           description: Base64-encoded object data
-
-    SuperclusterOverview:
-      type: object
-      required: [fetchedAt, serverName, gateways, routes, leafnodes, streamReplication, routeCount, leafCount, gatewayEnabled]
-      properties:
-        fetchedAt:
-          type: string
-          format: date-time
-        serverName:
-          type: string
-        clusterName:
-          type: string
-        jetstreamDomain:
-          type: string
-        gatewayEnabled:
-          type: boolean
-        routeCount:
-          type: integer
-        leafCount:
-          type: integer
-        metaCluster:
-          $ref: "#/components/schemas/SuperclusterMeta"
-        gateways:
-          type: array
-          items:
-            $ref: "#/components/schemas/SuperclusterGateway"
-        routes:
-          type: array
-          items:
-            $ref: "#/components/schemas/SuperclusterRoute"
-        leafnodes:
-          type: array
-          items:
-            $ref: "#/components/schemas/SuperclusterLeafnode"
-        streamReplication:
-          type: array
-          items:
-            $ref: "#/components/schemas/StreamReplication"
-        sourceErrors:
-          type: object
-          additionalProperties:
-            type: string
-          description: Per-endpoint monitoring errors (varz, gatewayz, routez, leafz, jsz)
-        warnings:
-          type: array
-          items:
-            type: string
-          description: Human-readable partial-failure warnings
-
-    SuperclusterGateway:
-      type: object
-      properties:
-        name:
-          type: string
-        direction:
-          type: string
-        host:
-          type: string
-        port:
-          type: integer
-        connections:
-          type: integer
-        subscriptions:
-          type: integer
-
-    SuperclusterRoute:
-      type: object
-      properties:
-        remoteId:
-          type: string
-        url:
-          type: string
-        connected:
-          type: boolean
-        inMsgs:
-          type: integer
-          format: int64
-        outMsgs:
-          type: integer
-          format: int64
-
-    SuperclusterLeafnode:
-      type: object
-      properties:
-        name:
-          type: string
-        remote:
-          type: string
-        rtt:
-          type: string
-        connected:
-          type: boolean
-
-    SuperclusterMeta:
-      type: object
-      properties:
-        leader:
-          type: string
-        clusterSize:
-          type: integer
-        replicas:
-          type: array
-          items:
-            $ref: "#/components/schemas/SuperclusterReplica"
-
-    SuperclusterReplica:
-      type: object
-      properties:
-        name:
-          type: string
-        id:
-          type: string
-        active:
-          type: string
-        lag:
-          type: integer
-          format: int64
-        leader:
-          type: boolean
-        current:
-          type: boolean
-        online:
-          type: boolean
-
-    StreamReplication:
-      type: object
-      properties:
-        streamName:
-          type: string
-        kind:
-          type: string
-        targetName:
-          type: string
-        targetDomain:
-          type: string
-        error:
-          type: string
-        lag:
-          type: integer
-          format: int64
-        active:
-          type: boolean

@@ -1,11 +1,13 @@
-import { FormEvent, useState } from "react";
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router";
+import { Link, useParams } from "react-router";
+import { useTranslation } from "react-i18next";
+import CreateObjectBucketPanel, { ObjectBucketConfigPayload } from "../components/CreateObjectBucketPanel";
 import VirtualTable from "../components/VirtualTable";
 import Alert from "../components/ui/Alert";
 import EmptyState from "../components/ui/EmptyState";
 import PageHeader from "../components/ui/PageHeader";
-import { api, clusterPath, ObjectBucketInfo } from "../lib/api";
+import { api, clusterPath, jetStreamUIBase, ObjectBucketInfo } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
 import { clusterQueryKey } from "../lib/query";
@@ -23,12 +25,16 @@ function formatBytes(value: number) {
 }
 
 export default function ObjectBucketsPage() {
+  const { t } = useTranslation();
+  const { accountName } = useParams();
   const { clusterId } = useCluster();
-  const { canWrite } = useAuth();
+  const { canManageJetStream } = useAuth();
+  const jsBase = clusterId ? jetStreamUIBase(clusterId, accountName) : "";
   const queryClient = useQueryClient();
   const [actionError, setActionError] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [bucket, setBucket] = useState("");
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelError, setPanelError] = useState("");
+  const [panelBusy, setPanelBusy] = useState(false);
 
   const bucketsQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "object-buckets"),
@@ -42,22 +48,26 @@ export default function ObjectBucketsPage() {
 
   async function invalidateBuckets() {
     await queryClient.invalidateQueries({ queryKey: clusterQueryKey(clusterId, "object-buckets") });
+    await queryClient.invalidateQueries({ queryKey: clusterQueryKey(clusterId, "objects") });
   }
 
-  async function createBucket(event: FormEvent) {
-    event.preventDefault();
+  async function onCreate(body: ObjectBucketConfigPayload) {
     if (!clusterId) return;
+    setPanelBusy(true);
+    setPanelError("");
     try {
       await api(clusterPath(clusterId, "/objects/buckets"), {
         method: "POST",
-        body: JSON.stringify({ bucket }),
+        body: JSON.stringify(body),
       });
-      setShowForm(false);
-      setBucket("");
+      setPanelOpen(false);
       setActionError("");
       await invalidateBuckets();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to create bucket");
+      setPanelError(err instanceof Error ? err.message : "Failed to create bucket");
+      throw err;
+    } finally {
+      setPanelBusy(false);
     }
   }
 
@@ -79,9 +89,16 @@ export default function ObjectBucketsPage() {
         title="Object Stores"
         subtitle="Store and retrieve opaque blobs — ideal for backups, artifacts, and large payloads."
         actions={
-          canWrite ? (
-            <button className="btn" type="button" onClick={() => setShowForm((visible) => !visible)}>
-              {showForm ? "Cancel" : "Create bucket"}
+          canManageJetStream ? (
+            <button
+              className="btn"
+              type="button"
+              onClick={() => {
+                setPanelError("");
+                setPanelOpen(true);
+              }}
+            >
+              {t("jetstream.createObjectTitle")}
             </button>
           ) : undefined
         }
@@ -89,17 +106,17 @@ export default function ObjectBucketsPage() {
 
       <Alert variant="error">{error}</Alert>
 
-      {showForm && canWrite && (
-        <form className="form-grid card mb-24" onSubmit={createBucket}>
-          <label>
-            Bucket name
-            <input value={bucket} onChange={(event) => setBucket(event.target.value)} required />
-          </label>
-          <button className="btn" type="submit">
-            Create bucket
-          </button>
-        </form>
-      )}
+      <CreateObjectBucketPanel
+        mode="create"
+        open={panelOpen}
+        busy={panelBusy}
+        error={panelError}
+        onClose={() => {
+          setPanelOpen(false);
+          setPanelError("");
+        }}
+        onSubmit={onCreate}
+      />
 
       {bucketsQuery.isLoading && <div className="skeleton skeleton--table" />}
 
@@ -108,9 +125,16 @@ export default function ObjectBucketsPage() {
           title="No object buckets yet"
           description="Create a bucket to start storing files and binary payloads in JetStream object storage."
           action={
-            canWrite ? (
-              <button className="btn" type="button" onClick={() => setShowForm(true)}>
-                Create bucket
+            canManageJetStream ? (
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  setPanelError("");
+                  setPanelOpen(true);
+                }}
+              >
+                {t("jetstream.createObjectTitle")}
               </button>
             ) : undefined
           }
@@ -131,13 +155,13 @@ export default function ObjectBucketsPage() {
             renderCell={(item, columnId) => {
               switch (columnId) {
                 case "bucket":
-                  return <Link to={`/objects/${encodeURIComponent(item.bucket)}`}>{item.bucket}</Link>;
+                  return <Link to={`${jsBase}/objects/${encodeURIComponent(item.bucket)}`}>{item.bucket}</Link>;
                 case "description":
                   return item.description || "—";
                 case "size":
                   return formatBytes(item.size);
                 case "actions":
-                  return canWrite ? (
+                  return canManageJetStream ? (
                     <button className="btn danger btn--small" type="button" onClick={() => deleteBucket(item.bucket)}>
                       Delete
                     </button>

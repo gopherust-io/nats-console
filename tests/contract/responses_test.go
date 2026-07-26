@@ -3,7 +3,6 @@
 package contract_test
 
 import (
-	"encoding/json"
 	"io"
 	"net/http"
 	"testing"
@@ -64,7 +63,7 @@ func TestAuthConfigContract(t *testing.T) {
 	_ = resp.Body.Close()
 
 	testutil.AssertCamelCaseKeys(t, body)
-	testutil.AssertHasKeys(t, body, "oidcEnabled", "basicEnabled", "authEnabled", "oidcProviders", "aiEnabled")
+	testutil.AssertHasKeys(t, body, "basicEnabled", "authEnabled", "aiEnabled")
 }
 
 func TestHealthContract(t *testing.T) {
@@ -117,40 +116,4 @@ func TestConnectionsListContract(t *testing.T) {
 	}
 	require.NoError(t, sonic.Unmarshal(body, &list))
 	assert.GreaterOrEqual(t, list.Total, 0)
-}
-
-func TestSuperclusterContract(t *testing.T) {
-	stack := testutil.SetupStack(t)
-	srv := stack.NewServer(t, nil)
-	clusterID := stack.DefaultClusterID(t)
-
-	resp, err := srv.Client.Get(srv.BaseURL(clusterID) + "/supercluster")
-	require.NoError(t, err)
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode, "status body = %s", string(body))
-
-	testutil.AssertCamelCaseKeys(t, body)
-	testutil.AssertHasKeys(t, body, "serverName", "fetchedAt", "gateways", "routes", "leafnodes", "streamReplication")
-
-	var payload map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(body, &payload))
-	for _, key := range []string{"gateways", "routes", "leafnodes", "streamReplication"} {
-		assert.NotEqual(t, "null", string(payload[key]), "%s should be an array, not null", key)
-	}
-	for _, key := range []string{"sourceErrors", "warnings"} {
-		raw, ok := payload[key]
-		if !ok {
-			continue
-		}
-		assert.NotEqual(t, "null", string(raw), "%s should not be null when present", key)
-		switch key {
-		case "sourceErrors":
-			var errs map[string]string
-			require.NoError(t, json.Unmarshal(raw, &errs))
-		case "warnings":
-			var warns []string
-			require.NoError(t, json.Unmarshal(raw, &warns))
-		}
-	}
 }

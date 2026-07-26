@@ -1,0 +1,2 @@
+ALTER TABLE alerts
+  ADD COLUMN IF NOT EXISTS email_notified_at TIMESTAMPTZ;

@@ -11,10 +11,19 @@ import (
 func TestStreamInfoFromNATSUsesCamelCaseFields(t *testing.T) {
 	info := StreamInfoFromNATS(&nats.StreamInfo{
 		Config: nats.StreamConfig{
-			Name:      "ORDERS",
-			Retention: nats.LimitsPolicy,
-			Storage:   nats.FileStorage,
-			MaxMsgs:   100,
+			Name:        "ORDERS",
+			Description: "orders",
+			Retention:   nats.LimitsPolicy,
+			Storage:     nats.FileStorage,
+			Discard:     nats.DiscardNew,
+			MaxMsgs:     100,
+			Replicas:    3,
+			AllowRollup: true,
+			DenyDelete:  true,
+			Placement: &nats.Placement{
+				Cluster: "east",
+				Tags:    []string{"ssd"},
+			},
 		},
 		State: nats.StreamState{
 			Msgs:      5,
@@ -24,7 +33,14 @@ func TestStreamInfoFromNATSUsesCamelCaseFields(t *testing.T) {
 		},
 	})
 	assert.Equal(t, "ORDERS", info.Config.Name)
+	assert.Equal(t, "orders", info.Config.Description)
 	assert.Equal(t, "limits", info.Config.Retention)
+	assert.Equal(t, "new", info.Config.Discard)
+	assert.Equal(t, 3, info.Config.Replicas)
+	assert.True(t, info.Config.AllowRollup)
+	assert.True(t, info.Config.DenyDelete)
+	require.NotNil(t, info.Config.Placement)
+	assert.Equal(t, "east", info.Config.Placement.Cluster)
 	assert.Equal(t, uint64(1), info.State.FirstSeq)
 	assert.Equal(t, 2, info.State.ConsumerCount)
 }

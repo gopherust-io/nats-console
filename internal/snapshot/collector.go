@@ -6,38 +6,59 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/gopherust-io/nats-consol/internal/alerter"
 	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/mail"
 	"github.com/gopherust-io/nats-consol/internal/metrics"
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
 	"github.com/gopherust-io/nats-consol/internal/store"
 	"github.com/gopherust-io/tel"
 )
 
-// Collector scrapes NATS monitoring endpoints and stores normalized samples.
+// Collector scrapes NATS monitoring endpoints, stores normalized samples, and
+// publishes raw payloads to the in-process Hub for UI/API reuse.
 //
 //nolint:govet // fieldalignment: config.Config is intentionally embedded by value
 type Collector struct {
-	cfg     config.Config
+	mailer  mail.Sender
 	store   *store.Store
 	manager *natsclient.Manager
+	hub     *Hub
 	stop    chan struct{}
 	done    chan struct{}
+	cfg     config.Config
 }
 
-func Start(st *store.Store, manager *natsclient.Manager, cfg config.Config) *Collector {
+func Start(st *store.Store, manager *natsclient.Manager, cfg config.Config, mailer mail.Sender, hub *Hub) *Collector {
 	if !cfg.MetricsSnapshotActive() {
 		return nil
+	}
+	if mailer == nil {
+		mailer = mail.NopSender{}
+	}
+	if hub == nil {
+		hub = NewHub()
 	}
 	c := &Collector{
 		store:   st,
 		manager: manager,
+		hub:     hub,
 		cfg:     cfg,
+		mailer:  mailer,
 		stop:    make(chan struct{}),
 		done:    make(chan struct{}),
 	}
 	go c.loop()
 	go c.cleanupLoop()
 	return c
+}
+
+func (c *Collector) Hub() *Hub {
+	if c == nil {
+		return nil
+	}
+	return c.hub
 }
 
 func (c *Collector) Stop() {
@@ -110,21 +131,35 @@ func (c *Collector) sampleCluster(ctx context.Context, clusterID string, capture
 		return
 	}
 
-	samples, err := natsclient.CollectClusterMetrics(client, ctx)
+	result, err := natsclient.CollectClusterSnapshot(client, ctx)
 	if err != nil {
 		metrics.IncSnapshotErrors(clusterID)
 		tel.Warn().Err(err).Str("component", "metrics_snapshot").Str("cluster_id", clusterID).Msg("collect metrics failed")
 		return
 	}
-	if len(samples) == 0 {
+	c.hub.Publish(clusterID, ClusterSnapshot{
+		CapturedAt:  capturedAt,
+		Varz:        result.Varz,
+		Jsz:         result.Jsz,
+		JszTopology: result.JszTopology,
+	})
+	if len(result.Samples) == 0 {
 		return
 	}
-	if err := c.store.InsertMetricSamples(ctx, clusterID, capturedAt, samples); err != nil {
+	if err := c.store.InsertMetricSamples(ctx, clusterID, capturedAt, result.Samples); err != nil {
 		metrics.IncSnapshotErrors(clusterID)
 		tel.Warn().Err(err).Str("component", "metrics_snapshot").Str("cluster_id", clusterID).Msg("insert samples failed")
 		return
 	}
 	metrics.IncSnapshotSuccess(clusterID)
+	domainSamples := make([]domain.MetricSample, len(result.Samples))
+	for i, sample := range result.Samples {
+		domainSamples[i] = domain.MetricSample{Metric: sample.Metric, Value: sample.Value}
+	}
+	alerter.Evaluate(ctx, c.store, clusterID, domainSamples, alerter.Options{
+		Mailer:        c.mailer,
+		PublicBaseURL: c.cfg.PublicBaseURL,
+	})
 }
 
 func (c *Collector) cleanup() {

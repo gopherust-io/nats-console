@@ -75,6 +75,14 @@ jobs:
         run: npm ci
       - name: Lint, typecheck, and build
         run: npm run lint && npm run typecheck && npm run build
+      - name: Unit / UI tests
+        run: npm test
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: E2E tests
+        run: npm run test:e2e
+        env:
+          CI: true
 
   regression:
     name: Regression (${{ matrix.suite }})
@@ -110,6 +118,39 @@ jobs:
       - name: Race detector (live WebSocket)
         run: go test -race -count=1 -tags=integration ./internal/live/... ./tests/integration/... -run TestLiveWS
 
+  smoke:
+    name: Smoke (compose stack)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Prepare compose env
+        run: |
+          cp .env.example .env
+          # Match smoke/load AUTH=admin:admin used by CI scripts.
+          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env
+      - name: Start stack
+        run: docker compose up --build -d
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8080/api/health && exit 0
+            sleep 5
+          done
+          docker compose logs console
+          exit 1
+      - name: Smoke / acceptance
+        run: make test-smoke
+        env:
+          BASE_URL: http://localhost:8080
+          AUTH: admin:admin
+
   performance:
     name: Performance baseline
     runs-on: ubuntu-latest
@@ -124,10 +165,13 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Install vegeta
-
         run: go install github.com/tsenart/vegeta/v12@v12.13.0
       - name: Add Go bin to PATH
         run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
+      - name: Prepare compose env
+        run: |
+          cp .env.example .env
+          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env
       - name: Start stack
         run: docker compose up --build -d
       - name: Wait for health
@@ -141,10 +185,44 @@ jobs:
       - name: Performance baseline
         run: bash ./tests/performance/load.sh
 
+  stress:
+    name: Stress baseline
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install vegeta
+        run: go install github.com/tsenart/vegeta/v12@v12.13.0
+      - name: Add Go bin to PATH
+        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
+      - name: Prepare compose env
+        run: |
+          cp .env.example .env
+          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env
+      - name: Start stack
+        run: docker compose up --build -d
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8080/api/health && exit 0
+            sleep 5
+          done
+          docker compose logs console
+          exit 1
+      - name: Stress baseline
+        run: make test-stress
+
   ci-success:
     name: All checks passed
     runs-on: ubuntu-latest
-    needs: [go, web, regression, race-live]
+    needs: [go, web, regression, race-live, smoke]
     if: always()
     permissions: {}
     steps:
@@ -163,5 +241,6 @@ jobs:
           check "Web" "${{ needs.web.result }}"
           check "Regression" "${{ needs.regression.result }}"
           check "Race (live WebSocket)" "${{ needs.race-live.result }}"
+          check "Smoke (compose stack)" "${{ needs.smoke.result }}"
 
           echo "All required CI checks passed."

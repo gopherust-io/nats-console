@@ -1,20 +1,32 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
+import CreateConsumerPanel, { ConsumerConfigPayload } from "../components/CreateConsumerPanel";
+import CreateStreamPanel, { StreamConfigPayload } from "../components/CreateStreamPanel";
+import MessagePayloadViewer from "../components/MessagePayloadViewer";
+import { payloadByteLength } from "../lib/payloadBytes";
 import Pager, { DEFAULT_PAGE_SIZE, pageQuery } from "../components/Pager";
 import VirtualTable from "../components/VirtualTable";
+import Alert from "../components/ui/Alert";
+import EmptyState from "../components/ui/EmptyState";
+import PageHeader from "../components/ui/PageHeader";
+import PageLoader from "../components/ui/PageLoader";
+import StatCard from "../components/ui/StatCard";
 import {
   api,
   clusterPath,
   ConsumerInfo,
-  decodeBase64,
+  jetStreamUIBase,
   RawMessage,
   StreamInfo,
   tryParseJSON,
 } from "../lib/api";
-import { useCluster } from "../lib/cluster";
 import { useAuth } from "../lib/auth";
-import { clusterQueryKey } from "../lib/query";
+import { useCluster } from "../lib/cluster";
+import { formatDateTime } from "../lib/datetime";
+import { clusterQueryKey, invalidateJetStreamTopology } from "../lib/query";
+import { isFromTopology } from "../lib/topology";
 
 type ConsumerListResponse = {
   consumers: ConsumerInfo[];
@@ -23,32 +35,96 @@ type ConsumerListResponse = {
   limit: number;
 };
 
+type StreamTab = "overview" | "consumers" | "messages";
+
+function parseTab(raw: string | null): StreamTab {
+  if (raw === "consumers" || raw === "messages" || raw === "overview") return raw;
+  return "overview";
+}
+
 export default function StreamDetailPage() {
-  const { name = "" } = useParams();
+  const { t } = useTranslation();
+  const { name = "", clusterId: routeCluster, accountName } = useParams();
   const { clusterId } = useCluster();
-  const { canWrite } = useAuth();
+  const id = routeCluster ?? clusterId;
+  const jsBase = id ? jetStreamUIBase(id, accountName) : "";
+  const hubHref = jsBase || "/systems";
+  const streamHref = jsBase ? `${jsBase}/streams/${encodeURIComponent(name)}` : "/systems";
+  const location = useLocation();
+  const fromTopology = isFromTopology(location.state);
+  const backHref = fromTopology ? "/admin/topology" : hubHref;
+  const { canManageJetStream } = useAuth();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = parseTab(searchParams.get("tab"));
+
   const [stream, setStream] = useState<StreamInfo | null>(null);
   const [consumerOffset, setConsumerOffset] = useState(0);
   const [seq, setSeq] = useState("");
   const [message, setMessage] = useState<RawMessage | null>(null);
-  const [rawMode, setRawMode] = useState(false);
+  const [messageLoading, setMessageLoading] = useState(false);
   const [publishSubject, setPublishSubject] = useState("");
   const [publishPayload, setPublishPayload] = useState('{"hello":"world"}');
   const [publishRawMode, setPublishRawMode] = useState(false);
   const [error, setError] = useState("");
-  const [showConsumerForm, setShowConsumerForm] = useState(false);
-  const [consumerName, setConsumerName] = useState("");
-  const [deliverPolicy, setDeliverPolicy] = useState("all");
-  const [ackPolicy, setAckPolicy] = useState("explicit");
-  const [optStartSeq, setOptStartSeq] = useState("");
-  const [optStartTime, setOptStartTime] = useState("");
-  const [replayPolicy, setReplayPolicy] = useState("instant");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+  const [consumerPanelOpen, setConsumerPanelOpen] = useState(false);
+  const [consumerPanelError, setConsumerPanelError] = useState("");
+  const [consumerPanelBusy, setConsumerPanelBusy] = useState(false);
+  const autoLoadedRef = useRef(false);
   const limit = DEFAULT_PAGE_SIZE;
 
+  const setTab = useCallback(
+    (next: StreamTab) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next === "overview") params.delete("tab");
+          else params.set("tab", next);
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const loadMessage = useCallback(
+    async (targetSeq?: string, direction?: "next" | "prev") => {
+      if (!id) return;
+      const currentSeq = targetSeq ?? seq;
+      if (!currentSeq) return;
+      setMessageLoading(true);
+      try {
+        let url = clusterPath(
+          id,
+          `/streams/${encodeURIComponent(name)}/messages?seq=${encodeURIComponent(currentSeq)}`,
+        );
+        if (direction) url += `&direction=${direction}`;
+        const data = await api<RawMessage>(url);
+        setMessage(data);
+        setSeq(String(data.message.seq));
+        setError("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t("streams.loadMessageFailed"));
+      } finally {
+        setMessageLoading(false);
+      }
+    },
+    [id, name, seq, t],
+  );
+
+  const loadMessageRef = useRef(loadMessage);
+  loadMessageRef.current = loadMessage;
+
   useEffect(() => {
-    if (!clusterId || !name) return;
-    api<StreamInfo>(clusterPath(clusterId, `/streams/${encodeURIComponent(name)}`))
+    if (!id || !name) return;
+    autoLoadedRef.current = false;
+    setMessage(null);
+    api<StreamInfo>(clusterPath(id, `/streams/${encodeURIComponent(name)}`))
       .then((streamInfo) => {
         setStream(streamInfo);
         setPublishSubject(
@@ -56,20 +132,30 @@ export default function StreamDetailPage() {
             streamInfo.config.subjects?.[0] ??
             "",
         );
-        setSeq((current) =>
-          current || (streamInfo.state.lastSeq > 0 ? String(streamInfo.state.lastSeq) : ""),
-        );
+        const last = streamInfo.state.lastSeq;
+        if (last > 0) {
+          setSeq(String(last));
+        } else {
+          setSeq("");
+        }
       })
       .catch((err: Error) => setError(err.message));
-  }, [clusterId, name]);
+  }, [id, name]);
+
+  useEffect(() => {
+    if (!stream || autoLoadedRef.current) return;
+    if (stream.state.lastSeq <= 0) return;
+    autoLoadedRef.current = true;
+    void loadMessageRef.current(String(stream.state.lastSeq));
+  }, [stream]);
 
   const consumersQuery = useQuery({
-    queryKey: [...clusterQueryKey(clusterId, `consumers:${name}`), consumerOffset],
+    queryKey: [...clusterQueryKey(id, `consumers:${name}`), consumerOffset],
     queryFn: () =>
       api<ConsumerListResponse>(
-        clusterPath(clusterId!, `/streams/${encodeURIComponent(name)}/consumers${pageQuery(consumerOffset, limit)}`),
+        clusterPath(id!, `/streams/${encodeURIComponent(name)}/consumers${pageQuery(consumerOffset, limit)}`),
       ),
-    enabled: Boolean(clusterId && name),
+    enabled: Boolean(id && name),
   });
 
   const consumers = consumersQuery.data?.consumers ?? [];
@@ -77,333 +163,444 @@ export default function StreamDetailPage() {
   const consumersError =
     consumersQuery.error instanceof Error ? consumersQuery.error.message : "";
 
-  async function loadMessage(targetSeq?: string, direction?: "next" | "prev") {
-    if (!clusterId) return;
-    const currentSeq = targetSeq ?? seq;
-    if (!currentSeq) return;
-    try {
-      let url = clusterPath(clusterId, `/streams/${encodeURIComponent(name)}/messages?seq=${encodeURIComponent(currentSeq)}`);
-      if (direction) url += `&direction=${direction}`;
-      const data = await api<RawMessage>(url);
-      setMessage(data);
-      setSeq(String(data.message.seq));
-      setError("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load message");
-    }
-  }
-
   async function purgeStream() {
-    if (!clusterId || !confirm(`Purge all messages in "${name}"?`)) return;
+    if (!id || !confirm(t("streams.confirmPurge", { name }))) return;
     try {
-      await api(clusterPath(clusterId, `/streams/${encodeURIComponent(name)}/purge`), { method: "POST" });
-      const updated = await api<StreamInfo>(clusterPath(clusterId, `/streams/${encodeURIComponent(name)}`));
+      await api(clusterPath(id, `/streams/${encodeURIComponent(name)}/purge`), { method: "POST" });
+      const updated = await api<StreamInfo>(clusterPath(id, `/streams/${encodeURIComponent(name)}`));
       setStream(updated);
+      setMessage(null);
+      autoLoadedRef.current = false;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to purge stream");
+      setError(err instanceof Error ? err.message : t("streams.purgeFailed"));
     }
   }
 
-  async function createConsumer(event: FormEvent) {
-    event.preventDefault();
-    if (!clusterId) return;
+  async function deleteStream() {
+    if (!id || !confirm(t("streams.confirmDelete", { name }))) return;
     try {
-      const body: Record<string, unknown> = {
-        durableName: consumerName,
-        deliverPolicy,
-        ackPolicy,
-        replayPolicy,
-      };
-      if (deliverPolicy === "by_start_sequence") {
-        const seq = Number(optStartSeq);
-        if (!Number.isFinite(seq) || seq < 1) {
-          setError("optStartSeq is required for by_start_sequence");
-          return;
-        }
-        body.optStartSeq = seq;
-      }
-      if (deliverPolicy === "by_start_time") {
-        if (!optStartTime.trim()) {
-          setError("optStartTime is required for by_start_time");
-          return;
-        }
-        body.optStartTime = new Date(optStartTime).toISOString();
-      }
-      await api(clusterPath(clusterId, `/streams/${encodeURIComponent(name)}/consumers`), {
+      await api(clusterPath(id, `/streams/${encodeURIComponent(name)}`), { method: "DELETE" });
+      await invalidateJetStreamTopology(id);
+      navigate(fromTopology ? "/admin/topology" : hubHref);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("streams.deleteFailed"));
+    }
+  }
+
+  async function saveStreamConfig(body: StreamConfigPayload) {
+    if (!id) return;
+    setEditBusy(true);
+    setEditError("");
+    try {
+      const updated = await api<StreamInfo>(clusterPath(id, `/streams/${encodeURIComponent(name)}`), {
+        method: "PUT",
+        body: JSON.stringify({ ...body, name }),
+      });
+      setStream(updated);
+      setEditOpen(false);
+      await invalidateJetStreamTopology(id);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Failed to update stream");
+      throw err;
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
+  async function createConsumer(body: ConsumerConfigPayload) {
+    if (!id) return;
+    setConsumerPanelBusy(true);
+    setConsumerPanelError("");
+    try {
+      await api(clusterPath(id, `/streams/${encodeURIComponent(name)}/consumers`), {
         method: "POST",
         body: JSON.stringify(body),
       });
-      setShowConsumerForm(false);
-      setConsumerName("");
-      setOptStartSeq("");
-      setOptStartTime("");
-      setDeliverPolicy("all");
-      setReplayPolicy("instant");
-      await queryClient.invalidateQueries({ queryKey: clusterQueryKey(clusterId, `consumers:${name}`) });
+      setConsumerPanelOpen(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: clusterQueryKey(id, `consumers:${name}`) }),
+        invalidateJetStreamTopology(id),
+      ]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create consumer");
+      setConsumerPanelError(err instanceof Error ? err.message : "Failed to create consumer");
+      throw err;
+    } finally {
+      setConsumerPanelBusy(false);
     }
   }
 
-  if (!clusterId) {
-    return <p className="text-muted">Select a cluster to view this stream.</p>;
+  async function publishMessage(event: FormEvent) {
+    event.preventDefault();
+    if (!id) return;
+    try {
+      const body =
+        publishRawMode || !tryParseJSON(publishPayload).isJSON
+          ? publishPayload
+          : JSON.stringify(tryParseJSON(publishPayload).parsed);
+      const data = btoa(unescape(encodeURIComponent(body)));
+      const result = await api<{ seq: number }>(
+        clusterPath(id, `/streams/${encodeURIComponent(name)}/messages`),
+        {
+          method: "POST",
+          body: JSON.stringify({
+            subject: publishSubject,
+            data,
+          }),
+        },
+      );
+      const updated = await api<StreamInfo>(clusterPath(id, `/streams/${encodeURIComponent(name)}`));
+      setStream(updated);
+      setSeq(String(result.seq));
+      await loadMessage(String(result.seq));
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("streams.publishFailed"));
+    }
+  }
+
+  if (!id) {
+    return <p className="text-muted">{t("streams.selectCluster")}</p>;
   }
 
   if (!stream) {
-    return <div>{error || "Loading..."}</div>;
+    if (error) return <Alert variant="error">{error}</Alert>;
+    return <PageLoader />;
   }
 
-  const payload = message ? decodeBase64(message.message.data) : "";
-  const parsed = tryParseJSON(payload);
+  const firstSeq = stream.state.firstSeq;
+  const lastSeq = stream.state.lastSeq;
+  const hasMessages = lastSeq > 0 && stream.state.messages > 0;
+  const sizeBytes = message ? payloadByteLength(message.message.data) : 0;
 
   return (
-    <div>
-      <div className="page-header">
-        <div>
-          <Link to="/streams" className="link-back">
-            ← Back to streams
-          </Link>
-          <h1>{stream.config.name}</h1>
-        </div>
-        <div className="actions">
-          <Link className="btn secondary" to={`/streams/${name}/live`}>
-            Live Tail
-          </Link>
-          {canWrite && (
-            <button className="btn secondary" onClick={purgeStream}>
-              Purge Stream
-            </button>
-          )}
-        </div>
-      </div>
-
-      {(error || consumersError) && <div className="error">{error || consumersError}</div>}
-
-      <div className="card-grid">
-        <div className="card">
-          <div className="card-label">Messages</div>
-          <div className="card-value">{stream.state.messages}</div>
-        </div>
-        <div className="card">
-          <div className="card-label">First / Last Seq</div>
-          <div className="card-value card-value--sm">
-            {stream.state.firstSeq} / {stream.state.lastSeq}
+    <div className="page">
+      <PageHeader
+        eyebrow={t("streams.detailEyebrow")}
+        title={stream.config.name}
+        subtitle={stream.config.description || stream.config.subjects?.join(", ")}
+        actions={
+          <div className="actions">
+            <Link className="btn secondary" to={`${streamHref}/live`}>
+              {t("streams.liveTail")}
+            </Link>
+            {canManageJetStream && (
+              <>
+                <button
+                  className="btn secondary"
+                  type="button"
+                  onClick={() => {
+                    setEditError("");
+                    setEditOpen(true);
+                  }}
+                >
+                  {t("jetstream.editConfig")}
+                </button>
+                <button className="btn secondary" type="button" onClick={purgeStream}>
+                  {t("streams.purgeStream")}
+                </button>
+                <button className="btn danger" type="button" onClick={deleteStream}>
+                  {t("streams.deleteStream")}
+                </button>
+              </>
+            )}
           </div>
-        </div>
-        <div className="card">
-          <div className="card-label">Retention</div>
-          <div className="card-value card-value--sm">
-            {stream.config.retention}
-          </div>
-        </div>
-      </div>
+        }
+      />
 
-      <div className="section-header">
-        <h2>Consumers</h2>
-        {canWrite && (
-          <button className="btn" onClick={() => setShowConsumerForm((v) => !v)}>
-            {showConsumerForm ? "Cancel" : "Create Consumer"}
+      <p className="mb-12">
+        <Link to={backHref} className="link-back" state={fromTopology ? { from: "topology" } : undefined}>
+          {fromTopology ? t("topology.backToTopology") : t("streams.backToStreams")}
+        </Link>
+      </p>
+
+      <Alert variant="error">{error || consumersError}</Alert>
+
+      <CreateStreamPanel
+        mode="edit"
+        open={editOpen}
+        initial={stream.config}
+        busy={editBusy}
+        error={editError}
+        onClose={() => {
+          setEditOpen(false);
+          setEditError("");
+        }}
+        onSubmit={saveStreamConfig}
+      />
+
+      <nav className="nc-tabs stream-tabs" aria-label="Stream sections">
+        {(
+          [
+            ["overview", t("streams.tabOverview")],
+            ["consumers", t("streams.tabConsumers")],
+            ["messages", t("streams.tabMessages")],
+          ] as const
+        ).map(([idTab, label]) => (
+          <button
+            key={idTab}
+            type="button"
+            className={`nc-tab${tab === idTab ? " active" : ""}`}
+            aria-current={tab === idTab ? "page" : undefined}
+            onClick={() => setTab(idTab)}
+          >
+            {label}
           </button>
-        )}
-      </div>
+        ))}
+      </nav>
 
-      {showConsumerForm && (
-        <form className="form-grid card mb-16" onSubmit={createConsumer}>
-          <label>
-            Durable Name
-            <input value={consumerName} onChange={(e) => setConsumerName(e.target.value)} required />
-          </label>
-          <label>
-            Deliver Policy
-            <select value={deliverPolicy} onChange={(e) => setDeliverPolicy(e.target.value)}>
-              <option value="all">all</option>
-              <option value="last">last</option>
-              <option value="new">new</option>
-              <option value="by_start_sequence">by_start_sequence</option>
-              <option value="by_start_time">by_start_time</option>
-            </select>
-          </label>
-          {deliverPolicy === "by_start_sequence" && (
-            <label>
-              Start Sequence
-              <input
-                type="number"
-                min={1}
-                value={optStartSeq}
-                onChange={(e) => setOptStartSeq(e.target.value)}
-                required
-              />
-            </label>
-          )}
-          {deliverPolicy === "by_start_time" && (
-            <label>
-              Start Time
-              <input
-                type="datetime-local"
-                value={optStartTime}
-                onChange={(e) => setOptStartTime(e.target.value)}
-                required
-              />
-            </label>
-          )}
-          <label>
-            Ack Policy
-            <select value={ackPolicy} onChange={(e) => setAckPolicy(e.target.value)}>
-              <option value="explicit">explicit</option>
-              <option value="none">none</option>
-              <option value="all">all</option>
-            </select>
-          </label>
-          <label>
-            Replay Policy
-            <select value={replayPolicy} onChange={(e) => setReplayPolicy(e.target.value)}>
-              <option value="instant">instant</option>
-              <option value="original">original</option>
-            </select>
-          </label>
-          <button className="btn" type="submit">
-            Create
-          </button>
-        </form>
-      )}
-
-      <div className="table-wrap">
-        <VirtualTable
-          columns={[
-            { id: "name", header: "Name", width: "minmax(140px, 1.3fr)" },
-            { id: "deliver", header: "Deliver Policy", width: "minmax(120px, 1fr)" },
-            { id: "ack", header: "Ack Policy", width: "minmax(120px, 1fr)" },
-            { id: "pending", header: "Pending", width: "96px", align: "right" },
-            { id: "ackPending", header: "Ack Pending", width: "112px", align: "right" },
-          ]}
-          items={consumers}
-          empty="No consumers"
-          getKey={(consumer) => consumer.name}
-          renderCell={(consumer, columnId) => {
-            switch (columnId) {
-              case "name":
-                return <Link to={`/streams/${name}/consumers/${consumer.name}`}>{consumer.name}</Link>;
-              case "deliver":
-                return consumer.config.deliverPolicy;
-              case "ack":
-                return consumer.config.ackPolicy;
-              case "pending":
-                return consumer.numPending;
-              case "ackPending":
-                return consumer.numAckPending;
-              default:
-                return null;
-            }
-          }}
-        />
-      </div>
-
-      <Pager total={consumerTotal} offset={consumerOffset} limit={limit} onPageChange={setConsumerOffset} />
-
-      <h2 className="mt-32">Message Browser</h2>
-
-      {canWrite && (
-        <form
-          className="form-grid card mb-16"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            if (!clusterId) return;
-            try {
-              const body =
-                publishRawMode || !tryParseJSON(publishPayload).isJSON
-                  ? publishPayload
-                  : JSON.stringify(tryParseJSON(publishPayload).parsed);
-              const data = btoa(unescape(encodeURIComponent(body)));
-              const result = await api<{ seq: number }>(
-                clusterPath(clusterId, `/streams/${encodeURIComponent(name)}/messages`),
-                {
-                  method: "POST",
-                  body: JSON.stringify({
-                    subject: publishSubject,
-                    data,
-                  }),
-                },
-              );
-              setSeq(String(result.seq));
-              await loadMessage(String(result.seq));
-              setError("");
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "Failed to publish message");
-            }
-          }}
-        >
-          <h3 className="section-title">Publish Message</h3>
-          <label>
-            Subject
-            <input
-              value={publishSubject}
-              onChange={(e) => setPublishSubject(e.target.value)}
-              placeholder={stream.config.subjects?.join(", ")}
-              required
+      {tab === "overview" && (
+        <>
+          <div className="card-grid">
+            <StatCard label={t("streams.messagesCount")} value={stream.state.messages} accent="emerald" />
+            <StatCard
+              label={t("streams.firstLastSeq")}
+              value={`${firstSeq} / ${lastSeq}`}
+              accent="sky"
             />
-          </label>
-          <label className="form-grid__full">
-            Payload
-            <textarea
-              rows={6}
-              value={publishPayload}
-              onChange={(e) => setPublishPayload(e.target.value)}
-              placeholder='{"hello":"world"}'
-              required
-            />
-          </label>
-          <div className="form-grid__full">
-            <button className="btn secondary" type="button" onClick={() => setPublishRawMode((v) => !v)}>
-              {publishRawMode ? "JSON mode" : "Raw mode"}
-            </button>
-            <button className="btn" type="submit">
-              Publish
-            </button>
+            <StatCard label={t("streams.retention")} value={stream.config.retention} accent="violet" />
+            <StatCard label={t("streams.storage")} value={stream.config.storage} accent="amber" />
           </div>
-        </form>
-      )}
-
-      <div className="form-grid form-grid--inline">
-        <label>
-          Sequence
-          <input value={seq} onChange={(e) => setSeq(e.target.value)} placeholder="1" />
-        </label>
-        <button className="btn" onClick={() => loadMessage()}>
-          Load
-        </button>
-        <button className="btn secondary" disabled={!message?.navigation?.prevSeq} onClick={() => loadMessage(String(message?.message.seq), "prev")}>
-          ← Prev
-        </button>
-        <button className="btn secondary" disabled={!message?.navigation?.nextSeq} onClick={() => loadMessage(String(message?.message.seq), "next")}>
-          Next →
-        </button>
-      </div>
-
-      {message && (
-        <div className="card mt-16">
-          <div className="card-label">
-            #{message.message.seq} · {message.message.subject} · {message.message.time}
-          </div>
-          <div className="mb-8">
-            <button className="btn secondary" onClick={() => setRawMode((v) => !v)}>
-              {rawMode ? "Show JSON" : "Show Raw"}
-            </button>
-          </div>
-          {message.message.headers && Object.keys(message.message.headers).length > 0 && (
-            <div className="mono text-muted mb-8">
-              {Object.entries(message.message.headers).map(([key, value]) => (
-                <div key={key}>
-                  {key}: {value}
-                </div>
-              ))}
+          <dl className="stream-meta-list card">
+            <div className="stream-meta-list__row">
+              <dt>{t("streams.subjects")}</dt>
+              <dd className="mono">{stream.config.subjects?.join(", ") || "—"}</dd>
             </div>
-          )}
-          <div className="mono">
-            {rawMode || !parsed.isJSON
-              ? payload
-              : JSON.stringify(parsed.parsed, null, 2)}
+            <div className="stream-meta-list__row">
+              <dt>{t("streams.bytes")}</dt>
+              <dd>{stream.state.bytes.toLocaleString()}</dd>
+            </div>
+            <div className="stream-meta-list__row">
+              <dt>{t("streams.consumerCount")}</dt>
+              <dd>{stream.state.consumerCount}</dd>
+            </div>
+          </dl>
+        </>
+      )}
+
+      {tab === "consumers" && (
+        <>
+          <div className="section-header" style={{ marginTop: 0 }}>
+            <h2>{t("streams.tabConsumers")}</h2>
+            {canManageJetStream && (
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  setConsumerPanelError("");
+                  setConsumerPanelOpen(true);
+                }}
+              >
+                {t("streams.createConsumer")}
+              </button>
+            )}
           </div>
-        </div>
+          <p className="text-muted mb-12">{t("consumer.clientRecommend")}</p>
+
+          <CreateConsumerPanel
+            mode="create"
+            open={consumerPanelOpen}
+            stream={stream.config}
+            busy={consumerPanelBusy}
+            error={consumerPanelError}
+            onClose={() => {
+              setConsumerPanelOpen(false);
+              setConsumerPanelError("");
+            }}
+            onSubmit={createConsumer}
+          />
+
+          <div className="table-wrap">
+            <VirtualTable
+              columns={[
+                { id: "name", header: "Name", width: "minmax(140px, 1.3fr)" },
+                { id: "deliver", header: t("streams.deliverPolicy"), width: "minmax(120px, 1fr)" },
+                { id: "ack", header: t("streams.ackPolicy"), width: "minmax(120px, 1fr)" },
+                { id: "pending", header: t("streams.pending"), width: "96px", align: "right" },
+                { id: "ackPending", header: t("streams.ackPending"), width: "112px", align: "right" },
+              ]}
+              items={consumers}
+              empty={t("streams.noConsumers")}
+              getKey={(consumer) => consumer.name}
+              renderCell={(consumer, columnId) => {
+                switch (columnId) {
+                  case "name":
+                    return (
+                      <Link to={`${streamHref}/consumers/${encodeURIComponent(consumer.name)}`}>
+                        {consumer.name}
+                      </Link>
+                    );
+                  case "deliver":
+                    return consumer.config.deliverPolicy;
+                  case "ack":
+                    return consumer.config.ackPolicy;
+                  case "pending":
+                    return consumer.numPending;
+                  case "ackPending":
+                    return consumer.numAckPending;
+                  default:
+                    return null;
+                }
+              }}
+            />
+          </div>
+
+          <Pager total={consumerTotal} offset={consumerOffset} limit={limit} onPageChange={setConsumerOffset} />
+        </>
+      )}
+
+      {tab === "messages" && (
+        <>
+          {canManageJetStream && (
+            <form className="form-grid card mb-16" onSubmit={publishMessage}>
+              <h3 className="section-title form-grid__full">{t("streams.publishMessage")}</h3>
+              <label>
+                {t("streams.subject")}
+                <input
+                  value={publishSubject}
+                  onChange={(e) => setPublishSubject(e.target.value)}
+                  placeholder={stream.config.subjects?.join(", ")}
+                  required
+                />
+              </label>
+              <label className="form-grid__full">
+                {t("streams.payload")}
+                <textarea
+                  rows={6}
+                  value={publishPayload}
+                  onChange={(e) => setPublishPayload(e.target.value)}
+                  placeholder='{"hello":"world"}'
+                  required
+                />
+              </label>
+              <div className="form-grid__full">
+                <button
+                  className="btn secondary"
+                  type="button"
+                  aria-pressed={publishRawMode}
+                  onClick={() => setPublishRawMode((v) => !v)}
+                >
+                  {publishRawMode ? t("streams.jsonMode") : t("streams.rawMode")}
+                </button>
+                <button className="btn" type="submit">
+                  {t("streams.publish")}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {!hasMessages ? (
+            <EmptyState title={t("streams.noMessagesTitle")} description={t("streams.noMessagesDescription")} />
+          ) : (
+            <>
+              <form
+                className="message-nav"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void loadMessage();
+                }}
+              >
+                <div className="message-nav__group" role="group" aria-label={t("streams.sequence")}>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={messageLoading || firstSeq <= 0}
+                    onClick={() => void loadMessage(String(firstSeq))}
+                  >
+                    {t("streams.first")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={messageLoading || !message?.navigation?.prevSeq}
+                    onClick={() => void loadMessage(String(message?.message.seq), "prev")}
+                  >
+                    ← {t("streams.prev")}
+                  </button>
+                </div>
+
+                <div className="message-nav__seq">
+                  <label htmlFor="stream-message-seq">{t("streams.sequence")}</label>
+                  <div className="message-nav__seq-row">
+                    <input
+                      id="stream-message-seq"
+                      type="number"
+                      min={1}
+                      value={seq}
+                      onChange={(e) => setSeq(e.target.value)}
+                      placeholder="1"
+                    />
+                    <button className="btn" type="submit" disabled={messageLoading || !seq}>
+                      {t("streams.load")}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="message-nav__group" role="group" aria-label={t("streams.next")}>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={messageLoading || !message?.navigation?.nextSeq}
+                    onClick={() => void loadMessage(String(message?.message.seq), "next")}
+                  >
+                    {t("streams.next")} →
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={messageLoading || lastSeq <= 0}
+                    onClick={() => void loadMessage(String(lastSeq))}
+                  >
+                    {t("streams.last")}
+                  </button>
+                </div>
+
+                <span className="message-nav__range">
+                  {t("streams.seqRange", { first: firstSeq, last: lastSeq })}
+                </span>
+              </form>
+
+              {messageLoading && !message && <p className="text-muted">{t("streams.messageLoading")}</p>}
+
+              {!message && !messageLoading && (
+                <EmptyState title={t("streams.loadMessageHint")} />
+              )}
+
+              {message && (
+                <article className="card message-viewer">
+                  <header className="message-meta">
+                    <div className="message-meta__item">
+                      <span className="message-meta__label">{t("streams.seq")}</span>
+                      <span className="message-meta__value">
+                        <span className="message-meta__chip mono">#{message.message.seq}</span>
+                      </span>
+                    </div>
+                    <div className="message-meta__item message-meta__item--grow">
+                      <span className="message-meta__label">{t("streams.subject")}</span>
+                      <span className="message-meta__value mono" title={message.message.subject}>
+                        {message.message.subject}
+                      </span>
+                    </div>
+                    <div className="message-meta__item">
+                      <span className="message-meta__label">{t("streams.time")}</span>
+                      <span className="message-meta__value">
+                        <time dateTime={message.message.time} title={message.message.time}>
+                          {formatDateTime(message.message.time)}
+                        </time>
+                      </span>
+                    </div>
+                    <div className="message-meta__item">
+                      <span className="message-meta__label">{t("streams.size")}</span>
+                      <span className="message-meta__value">
+                        {t("streams.sizeBytes", { count: sizeBytes })}
+                      </span>
+                    </div>
+                  </header>
+                  <MessagePayloadViewer data={message.message.data} headers={message.message.headers} />
+                </article>
+              )}
+            </>
+          )}
+        </>
       )}
     </div>
   );

@@ -1,8 +1,13 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
-import { decodeBase64, getWebSocketURL, tryParseJSON } from "../lib/api";
+import MessagePayloadViewer from "../components/MessagePayloadViewer";
+import Alert from "../components/ui/Alert";
+import PageHeader from "../components/ui/PageHeader";
+import { getWebSocketURL, jetStreamUIBase } from "../lib/api";
 import { useCluster } from "../lib/cluster";
+import { formatDateTime } from "../lib/datetime";
 import { LIVE_STREAM_MAX_MESSAGES, LIVE_SUBJECT_FILTER_DEBOUNCE_MS } from "../lib/constants";
 
 type LiveMessage = {
@@ -14,9 +19,12 @@ type LiveMessage = {
   error?: string;
 };
 
+type ConnStatus = "disconnected" | "connecting" | "connected" | "error";
+
 const MAX_MESSAGES = LIVE_STREAM_MAX_MESSAGES;
 const WS_BATCH_MS = 100;
-const ESTIMATED_ROW_HEIGHT = 120;
+const ESTIMATED_ROW_HEIGHT = 140;
+const FOLLOW_BOTTOM_PX = 80;
 
 const LiveMessageRow = memo(function LiveMessageRow({
   msg,
@@ -25,37 +33,52 @@ const LiveMessageRow = memo(function LiveMessageRow({
   msg: LiveMessage;
   rawMode: boolean;
 }) {
-  const display = useMemo(() => {
-    if (!msg.data) return "";
-    const payload = decodeBase64(msg.data);
-    if (rawMode) return payload;
-    const parsed = tryParseJSON(payload);
-    return parsed.isJSON ? JSON.stringify(parsed.parsed, null, 2) : payload;
-  }, [msg.data, rawMode]);
+  const timeLabel = formatDateTime(msg.time, "—");
 
   return (
     <div className="live-entry">
-      <span className="live-meta">
-        #{msg.seq} · {msg.subject} · {msg.time}
-      </span>
-      <pre className="mono">{display}</pre>
+      <div className="live-meta">
+        <span className="mono">#{msg.seq ?? "—"}</span>
+        <span className="mono" title={msg.subject}>
+          {msg.subject ?? "—"}
+        </span>
+        {msg.time ? (
+          <time dateTime={msg.time} title={msg.time}>
+            {timeLabel}
+          </time>
+        ) : (
+          <span>{timeLabel}</span>
+        )}
+      </div>
+      {msg.data && (
+        <MessagePayloadViewer data={msg.data} rawMode={rawMode} compact showHeaders={false} />
+      )}
     </div>
   );
 });
 
 export default function LiveStreamPage() {
-  const { name = "" } = useParams();
+  const { t } = useTranslation();
+  const { name = "", clusterId: routeCluster, accountName } = useParams();
   const { clusterId } = useCluster();
+  const id = routeCluster ?? clusterId;
+  const streamHref = id
+    ? `${jetStreamUIBase(id, accountName)}/streams/${encodeURIComponent(name)}`
+    : "/systems";
   const [messages, setMessages] = useState<LiveMessage[]>([]);
-  const [status, setStatus] = useState("disconnected");
+  const [status, setStatus] = useState<ConnStatus>("disconnected");
+  const [statusDetail, setStatusDetail] = useState("");
   const [subjectInput, setSubjectInput] = useState("");
   const [subjectFilter, setSubjectFilter] = useState("");
   const [fromSeqInput, setFromSeqInput] = useState("");
   const [fromSeq, setFromSeq] = useState<number | undefined>(undefined);
   const [paused, setPaused] = useState(false);
   const [rawMode, setRawMode] = useState(false);
+  const [follow, setFollow] = useState(true);
+  const [showJump, setShowJump] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const pausedRef = useRef(false);
+  const followRef = useRef(true);
   const pendingRef = useRef<LiveMessage[]>([]);
   const flushTimerRef = useRef<number | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
@@ -63,6 +86,10 @@ export default function LiveStreamPage() {
   useEffect(() => {
     pausedRef.current = paused;
   }, [paused]);
+
+  useEffect(() => {
+    followRef.current = follow;
+  }, [follow]);
 
   const flushPending = useCallback(() => {
     const batch = pendingRef.current;
@@ -96,13 +123,15 @@ export default function LiveStreamPage() {
   }, [fromSeqInput]);
 
   useEffect(() => {
-    if (!clusterId || !name) return;
+    if (!id || !name) return;
 
-    const url = getWebSocketURL(clusterId, name, subjectFilter || undefined, fromSeq);
+    const url = getWebSocketURL(id, name, subjectFilter || undefined, fromSeq);
     const ws = new WebSocket(url);
     wsRef.current = ws;
     setStatus("connecting");
+    setStatusDetail("");
     pendingRef.current = [];
+    setMessages([]);
     if (flushTimerRef.current !== null) {
       window.clearTimeout(flushTimerRef.current);
       flushTimerRef.current = null;
@@ -116,7 +145,8 @@ export default function LiveStreamPage() {
       try {
         frame = JSON.parse(event.data) as LiveMessage;
       } catch {
-        setStatus("parse error");
+        setStatus("error");
+        setStatusDetail("parse error");
         return;
       }
       if (frame.type === "message") {
@@ -129,7 +159,8 @@ export default function LiveStreamPage() {
           }, WS_BATCH_MS);
         }
       } else if (frame.type === "error") {
-        setStatus(frame.error ?? "error");
+        setStatus("error");
+        setStatusDetail(frame.error ?? "error");
       }
     };
 
@@ -140,7 +171,7 @@ export default function LiveStreamPage() {
       }
       ws.close();
     };
-  }, [clusterId, name, subjectFilter, fromSeq, flushPending]);
+  }, [id, name, subjectFilter, fromSeq, flushPending]);
 
   const virtualizer = useVirtualizer({
     count: messages.length,
@@ -151,8 +182,36 @@ export default function LiveStreamPage() {
 
   useEffect(() => {
     if (messages.length === 0) return;
+    if (!followRef.current) {
+      setShowJump(true);
+      return;
+    }
     virtualizer.scrollToIndex(messages.length - 1, { align: "end" });
+    setShowJump(false);
   }, [messages.length, virtualizer]);
+
+  function onLogScroll() {
+    const el = logRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= FOLLOW_BOTTOM_PX;
+    if (nearBottom) {
+      if (!followRef.current) {
+        setFollow(true);
+      }
+      setShowJump(false);
+    } else if (followRef.current) {
+      setFollow(false);
+      setShowJump(true);
+    }
+  }
+
+  function jumpToLatest() {
+    setFollow(true);
+    setShowJump(false);
+    if (messages.length > 0) {
+      virtualizer.scrollToIndex(messages.length - 1, { align: "end" });
+    }
+  }
 
   function sendAction(action: string) {
     wsRef.current?.send(JSON.stringify({ action }));
@@ -165,24 +224,45 @@ export default function LiveStreamPage() {
         flushTimerRef.current = null;
       }
       setMessages([]);
+      setShowJump(false);
     }
   }
 
+  const statusLabel =
+    status === "connected"
+      ? t("liveStream.connected")
+      : status === "connecting"
+        ? t("liveStream.connecting")
+        : status === "error"
+          ? t("liveStream.error")
+          : t("liveStream.disconnected");
+
   return (
-    <div>
-      <div className="page-header">
-        <div>
-          <Link to={`/streams/${name}`} className="link-back">
-            ← Back to {name}
-          </Link>
-          <h1>Live: {name}</h1>
-        </div>
-        <span className={`status-badge status-${status}`}>{status}</span>
-      </div>
+    <div className="page">
+      <PageHeader
+        eyebrow={t("liveStream.eyebrow")}
+        title={t("liveStream.title", { name })}
+        badge={
+          <span className={`status-badge status-${status}`} aria-live="polite">
+            {statusLabel}
+            {statusDetail ? `: ${statusDetail}` : ""}
+          </span>
+        }
+      />
+
+      <p className="mb-12">
+        <Link to={streamHref} className="link-back">
+          {t("liveStream.backToStream", { name })}
+        </Link>
+      </p>
+
+      <p className="text-muted mb-12">{t("liveStream.clientHint")}</p>
+
+      {status === "error" && statusDetail && <Alert variant="error">{statusDetail}</Alert>}
 
       <div className="live-controls">
         <label>
-          Subject filter
+          {t("liveStream.subjectFilter")}
           <input
             value={subjectInput}
             onChange={(e) => setSubjectInput(e.target.value)}
@@ -190,28 +270,62 @@ export default function LiveStreamPage() {
           />
         </label>
         <label>
-          From sequence
+          {t("liveStream.fromSequence")}
           <input
             type="number"
             min={1}
             value={fromSeqInput}
             onChange={(e) => setFromSeqInput(e.target.value)}
-            placeholder="live (new)"
+            placeholder={t("liveStream.fromSeqPlaceholder")}
           />
         </label>
-        <button className="btn secondary" onClick={() => sendAction(paused ? "resume" : "pause")}>
-          {paused ? "Resume" : "Pause"}
+        <button
+          type="button"
+          className="btn secondary"
+          onClick={() => sendAction(paused ? "resume" : "pause")}
+        >
+          {paused ? t("liveStream.resume") : t("liveStream.pause")}
         </button>
-        <button className="btn secondary" onClick={() => sendAction("clear")}>
-          Clear
+        <button type="button" className="btn secondary" onClick={() => sendAction("clear")}>
+          {t("liveStream.clear")}
         </button>
-        <button className="btn secondary" onClick={() => setRawMode((v) => !v)}>
-          {rawMode ? "JSON" : "Raw"}
+        <button
+          type="button"
+          className="btn secondary"
+          aria-pressed={rawMode}
+          onClick={() => setRawMode((v) => !v)}
+        >
+          {rawMode ? t("liveStream.json") : t("liveStream.raw")}
+        </button>
+        <button
+          type="button"
+          className="btn secondary"
+          aria-pressed={follow}
+          onClick={() => {
+            const next = !follow;
+            setFollow(next);
+            if (next) jumpToLatest();
+            else setShowJump(true);
+          }}
+        >
+          {follow ? t("liveStream.unfollow") : t("liveStream.follow")}
         </button>
       </div>
 
-      <div className="live-log" ref={logRef}>
-        {messages.length === 0 && <div className="text-muted">Waiting for messages...</div>}
+      <div className="live-toolbar-meta">
+        <span className="text-muted">
+          {t("liveStream.bufferCount", { count: messages.length, max: MAX_MESSAGES })}
+        </span>
+      </div>
+
+      <div
+        className="live-log"
+        ref={logRef}
+        role="log"
+        aria-label={t("liveStream.eyebrow")}
+        onScroll={onLogScroll}
+      >
+        {messages.length === 0 && <div className="text-muted">{t("liveStream.waiting")}</div>}
         {messages.length > 0 && (
           <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
             {virtualizer.getVirtualItems().map((item) => {
@@ -233,6 +347,13 @@ export default function LiveStreamPage() {
                 </div>
               );
             })}
+          </div>
+        )}
+        {showJump && messages.length > 0 && (
+          <div className="live-jump">
+            <button type="button" className="btn" onClick={jumpToLatest}>
+              {t("liveStream.jumpToLatest")}
+            </button>
           </div>
         )}
       </div>

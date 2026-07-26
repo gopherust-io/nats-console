@@ -12,15 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBasicAuthEnabledWithoutOIDC(t *testing.T) {
+func TestBasicAuthEnabledWhenAuthOn(t *testing.T) {
 	svc, err := auth.NewService(config.Config{
 		AuthEnabled:   true,
-		OIDCEnabled:   false,
 		AdminPassword: "test-admin-password",
 	}, nil)
 	require.NoError(t, err)
-	assert.False(t, svc.OIDCEnabled(), "expected OIDC disabled")
-	assert.True(t, svc.BasicAuthEnabled(), "expected basic auth enabled when OIDC is off")
+	assert.True(t, svc.BasicAuthEnabled(), "expected password login when auth is on")
 }
 
 func TestBasicAuthDisabledWhenAuthOff(t *testing.T) {

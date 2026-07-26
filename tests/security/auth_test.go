@@ -99,6 +99,72 @@ func TestViewerCannotMutateStreams(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, resp.StatusCode, "viewer POST status")
 }
 
+func TestOperatorCannotMutateJetStream(t *testing.T) {
+	stack := testutil.SetupStack(t)
+	ctx := context.Background()
+
+	_, err := stack.Store.CreateUser(ctx, store.UserCreate{
+		Username:    "op-js",
+		Email:       "op-js@example.com",
+		Password:    "op-pass",
+		Roles:       []string{store.RoleOperator},
+		AccessRules: stack.ClusterAccessRules(t),
+	})
+	require.NoError(t, err)
+
+	srv := stack.NewServer(t, func(cfg *config.Config) {
+		cfg.AuthEnabled = true
+	})
+	clusterID := stack.DefaultClusterID(t)
+	authz := basicAuth("op-js", "op-pass")
+
+	cases := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{method: http.MethodPost, path: "/streams", body: `{"name":"OPBLOCK","subjects":["x.>"]}`},
+		{method: http.MethodPost, path: "/kv/buckets", body: `{"bucket":"opkv"}`},
+		{method: http.MethodPost, path: "/objects/buckets", body: `{"bucket":"opobj"}`},
+		{method: http.MethodDelete, path: "/streams/NOSUCH", body: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			var body io.Reader
+			if tc.body != "" {
+				body = strings.NewReader(tc.body)
+			}
+			req, _ := http.NewRequest(tc.method, srv.BaseURL(clusterID)+tc.path, body)
+			req.Header.Set("Authorization", authz)
+			if tc.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			resp, err := srv.Client.Do(req)
+			require.NoError(t, err)
+			_ = resp.Body.Close()
+			require.Equal(t, http.StatusForbidden, resp.StatusCode)
+		})
+	}
+}
+
+func TestAdminCanCreateStream(t *testing.T) {
+	stack := testutil.SetupStack(t)
+	srv := stack.NewServer(t, func(cfg *config.Config) {
+		cfg.AuthEnabled = true
+	})
+	clusterID := stack.DefaultClusterID(t)
+
+	req, _ := http.NewRequest(http.MethodPost, srv.BaseURL(clusterID)+"/streams",
+		strings.NewReader(`{"name":"ADMINOK","subjects":["admin.>"]}`))
+	req.Header.Set("Authorization", basicAuth("admin", "admin"))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := srv.Client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated,
+		"admin POST stream status=%d", resp.StatusCode)
+}
+
 func TestOperatorCannotManageUsers(t *testing.T) {
 	stack := testutil.SetupStack(t)
 	ctx := context.Background()

@@ -6,6 +6,23 @@
   --duration-fast: 0.18s;
   --duration-normal: 0.35s;
   --duration-slow: 0.55s;
+
+  /* Console shell motion (tailwindcss-animate / Radix) */
+  --nc-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --nc-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --nc-ease-pulse: cubic-bezier(0.4, 0, 0.6, 1);
+  --nc-duration: 150ms;
+  --nc-duration-accordion: 200ms;
+  --nc-enter-opacity: 1;
+  --nc-enter-scale: 1;
+  --nc-enter-rotate: 0deg;
+  --nc-enter-translate-x: 0;
+  --nc-enter-translate-y: 0;
+  --nc-exit-opacity: 1;
+  --nc-exit-scale: 1;
+  --nc-exit-rotate: 0deg;
+  --nc-exit-translate-x: 0;
+  --nc-exit-translate-y: 0;
 }
 
 @keyframes rise-in {
@@ -84,6 +101,200 @@
   }
 }
 
+/* Console enter / exit (mirrors @keyframes enter / exit) */
+
+@keyframes nc-enter {
+  from {
+    opacity: var(--nc-enter-opacity, 1);
+    transform: translate3d(var(--nc-enter-translate-x, 0), var(--nc-enter-translate-y, 0), 0)
+      scale3d(var(--nc-enter-scale, 1), var(--nc-enter-scale, 1), var(--nc-enter-scale, 1))
+      rotate(var(--nc-enter-rotate, 0));
+  }
+}
+
+@keyframes nc-exit {
+  to {
+    opacity: var(--nc-exit-opacity, 1);
+    transform: translate3d(var(--nc-exit-translate-x, 0), var(--nc-exit-translate-y, 0), 0)
+      scale3d(var(--nc-exit-scale, 1), var(--nc-exit-scale, 1), var(--nc-exit-scale, 1))
+      rotate(var(--nc-exit-rotate, 0));
+  }
+}
+
+@keyframes nc-fade-only {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes nc-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes nc-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.nc-animate-in {
+  animation-name: nc-enter;
+  animation-duration: var(--nc-duration);
+  animation-timing-function: var(--nc-ease-out);
+  animation-fill-mode: both;
+}
+
+.cluster-availability-msg {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-left: 0.55rem;
+  vertical-align: middle;
+  font-weight: 500;
+  animation-duration: 220ms;
+  will-change: opacity, transform;
+}
+
+.cluster-availability-msg--checking {
+  color: var(--text-muted);
+}
+
+.cluster-availability-heartbeat {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  transform-origin: center;
+  animation: cluster-availability-heartbeat 1.7s ease-in-out infinite;
+  will-change: transform, filter;
+  filter: drop-shadow(0 0 0 transparent);
+}
+
+.cluster-availability-msg--ok .cluster-availability-heartbeat {
+  color: var(--success);
+}
+
+.cluster-availability-msg--err .cluster-availability-heartbeat {
+  color: var(--error);
+}
+
+.cluster-availability-heartbeat--still {
+  animation: none;
+  filter: none;
+}
+
+.cluster-availability-msg--beat {
+  animation:
+    nc-enter 220ms var(--nc-ease-out) both,
+    cluster-availability-msg-beat 1.7s ease-in-out 220ms 3;
+}
+
+@keyframes cluster-availability-heartbeat {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 transparent);
+  }
+  12% {
+    transform: scale(1.35);
+    filter: drop-shadow(0 0 6px color-mix(in srgb, currentColor 55%, transparent));
+  }
+  24% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 transparent);
+  }
+  36% {
+    transform: scale(1.28);
+    filter: drop-shadow(0 0 8px color-mix(in srgb, currentColor 45%, transparent));
+  }
+  55% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 transparent);
+  }
+}
+
+@keyframes cluster-availability-msg-beat {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  12% {
+    transform: scale(1.04);
+  }
+  24% {
+    transform: scale(1);
+  }
+  36% {
+    transform: scale(1.03);
+  }
+  55% {
+    transform: scale(1);
+  }
+}
+
+.nc-animate-out {
+  animation-name: nc-exit;
+  animation-duration: var(--nc-duration);
+  animation-timing-function: var(--nc-ease);
+  animation-fill-mode: both;
+}
+
+.nc-fade-in {
+  --nc-enter-opacity: 0;
+}
+
+.nc-fade-out {
+  --nc-exit-opacity: 0;
+}
+
+.nc-zoom-in-95 {
+  --nc-enter-scale: 0.95;
+}
+
+.nc-zoom-out-95 {
+  --nc-exit-scale: 0.95;
+}
+
+.nc-slide-from-top-2 {
+  --nc-enter-translate-y: -0.5rem;
+}
+
+.nc-slide-from-bottom-2 {
+  --nc-enter-translate-y: 0.5rem;
+}
+
+.nc-slide-to-top-2 {
+  --nc-exit-translate-y: -0.5rem;
+}
+
+.nc-page-enter {
+  animation: nc-fade-only var(--nc-duration) var(--nc-ease-out) both;
+}
+
+.nc-popover-in {
+  --nc-enter-opacity: 0;
+  --nc-enter-scale: 0.95;
+  --nc-enter-translate-y: -0.5rem;
+  animation-name: nc-enter;
+  animation-duration: var(--nc-duration);
+  animation-timing-function: var(--nc-ease-out);
+  animation-fill-mode: both;
+}
+
+.nc-popover-out {
+  --nc-exit-opacity: 0;
+  --nc-exit-scale: 0.95;
+  --nc-exit-translate-y: -0.5rem;
+  animation-name: nc-exit;
+  animation-duration: var(--nc-duration);
+  animation-timing-function: var(--nc-ease);
+  animation-fill-mode: both;
+}
+
 /* Route & page shell */
 
 .page-enter {
@@ -122,6 +333,8 @@
 .page .card,
 .page .table-wrap,
 .page .topology-tree,
+.page .topology-explorer,
+.page .topology-stage,
 .page .topo-flow-section,
 .page .empty-state,
 .page .form-grid {
@@ -172,27 +385,36 @@
 
 /* Login */
 
-.login-hero {
+.login-page--auth .login-center,
+.login-page--split .login-pane {
   animation: rise-in var(--duration-slow) var(--ease-out) both;
 }
 
-.login-card {
-  animation: scale-in var(--duration-slow) var(--ease-out) both;
-  animation-delay: 0.1s;
+.login-page--split .login-promo {
+  animation: rise-in var(--duration-slow) var(--ease-out) both;
+  animation-delay: 0.08s;
 }
 
-.login-hero__features li {
+.login-page--auth .login-stack > *,
+.login-page--split .login-stack > * {
   animation: rise-in var(--duration-normal) var(--ease-out) both;
 }
 
-.login-hero__features li:nth-child(1) {
-  animation-delay: 0.16s;
+.login-page--auth .login-stack > *:nth-child(1),
+.login-page--split .login-stack > *:nth-child(1) {
+  animation-delay: 0.06s;
 }
-.login-hero__features li:nth-child(2) {
-  animation-delay: 0.22s;
+.login-page--auth .login-stack > *:nth-child(2),
+.login-page--split .login-stack > *:nth-child(2) {
+  animation-delay: 0.1s;
 }
-.login-hero__features li:nth-child(3) {
-  animation-delay: 0.28s;
+.login-page--auth .login-stack > *:nth-child(3),
+.login-page--split .login-stack > *:nth-child(3) {
+  animation-delay: 0.14s;
+}
+.login-page--auth .login-stack > *:nth-child(4),
+.login-page--split .login-stack > *:nth-child(4) {
+  animation-delay: 0.18s;
 }
 
 /* Sidebar entrance */
@@ -225,10 +447,6 @@
 
 /* Topology tree */
 
-.topology-tree__legend {
-  animation: fade-in var(--duration-normal) var(--ease-out) both;
-}
-
 .topology-tree__canvas {
   animation: scale-in var(--duration-slow) var(--ease-out) both;
   animation-delay: 0.06s;
@@ -237,23 +455,6 @@
 .topology-branch {
   animation: branch-in var(--duration-normal) var(--ease-out) both;
   animation-delay: calc(var(--branch-index, 0) * 45ms + 80ms);
-}
-
-.topology-branch__children {
-  overflow: hidden;
-  max-height: 0;
-  opacity: 0;
-  transform: translateY(-4px);
-  transition:
-    max-height 0.42s var(--ease-out),
-    opacity 0.28s var(--ease-out),
-    transform 0.32s var(--ease-out);
-}
-
-.topology-branch__children.is-open {
-  max-height: 5000px;
-  opacity: 1;
-  transform: translateY(0);
 }
 
 .topology-node__toggle {
@@ -329,13 +530,15 @@
     scroll-behavior: auto !important;
   }
 
-  .topology-branch__children {
-    max-height: none;
-    opacity: 1;
-    transform: none;
-  }
-
-  .topology-branch__children:not(.is-open) {
-    display: none;
+  .nc-shell *,
+  .nc-shell *::before,
+  .nc-shell *::after,
+  .nc-animate-in,
+  .nc-animate-out,
+  .nc-page-enter,
+  .nc-popover-in,
+  .nc-popover-out {
+    animation: none !important;
+    transition: none !important;
   }
 }

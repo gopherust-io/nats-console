@@ -47,7 +47,7 @@ The backend follows **Domain-Driven Design (DDD)** with a **hexagonal (ports & a
 
 - **Cluster management** — register NATS clusters, credentials, default cluster bootstrap, connectivity tests.
 - **JetStream operations** — streams, consumers, messages, KV, object store (via `port.JetStreamExecutor`).
-- **Identity & access** — auth sessions, OIDC, RBAC (`internal/auth`; still uses raw store during migration).
+- **Identity & access** — auth sessions, RBAC, invite links (`internal/auth`; still uses raw store during migration).
 - **Audit** — request audit trail (`app.AuditService` + middleware writer).
 - **Assistant** — Gemini-powered chat (`internal/assistant`).
 

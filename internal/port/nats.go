@@ -21,6 +21,7 @@ type JetStreamExecutor interface {
 	ListConsumers(ctx context.Context, stream string, offset, limit int) ([]*nats.ConsumerInfo, int, error)
 	ConsumerInfo(ctx context.Context, stream, consumer string) (*nats.ConsumerInfo, error)
 	AddConsumer(ctx context.Context, stream string, cfg *nats.ConsumerConfig) (*nats.ConsumerInfo, error)
+	UpdateConsumer(ctx context.Context, stream string, cfg *nats.ConsumerConfig) (*nats.ConsumerInfo, error)
 	DeleteConsumer(ctx context.Context, stream, consumer string) error
 	ReplayConsumer(ctx context.Context, stream, consumer string, req domain.ReplayConsumerRequest) (domain.ReplayConsumerResult, error)
 	GetMessage(ctx context.Context, stream string, seq uint64) (*nats.RawStreamMsg, error)
@@ -28,7 +29,8 @@ type JetStreamExecutor interface {
 	PublishStreamMessage(ctx context.Context, stream string, in domain.PublishMessageRequest) (domain.PublishMessageResult, error)
 	Monitoring(ctx context.Context, path string) ([]byte, error)
 	ListKVBuckets(ctx context.Context) ([]domain.KVBucketInfo, error)
-	CreateKVBucket(ctx context.Context, cfg *nats.KeyValueConfig) (*domain.KVBucketInfo, error)
+	CreateKVBucket(ctx context.Context, cfg *nats.KeyValueConfig, opts domain.KVBucketWriteOpts) (*domain.KVBucketInfo, error)
+	UpdateKVBucket(ctx context.Context, cfg *nats.KeyValueConfig, opts domain.KVBucketWriteOpts) (*domain.KVBucketInfo, error)
 	GetKVBucket(ctx context.Context, bucket string) (*domain.KVBucketInfo, error)
 	DeleteKVBucket(ctx context.Context, bucket string) error
 	ListKVKeys(ctx context.Context, bucket string, offset, limit int) ([]string, int, error)
@@ -38,6 +40,7 @@ type JetStreamExecutor interface {
 	KVHistory(ctx context.Context, bucket, key string) ([]domain.KVEntry, error)
 	ListObjectBuckets(ctx context.Context) ([]domain.ObjectBucketInfo, error)
 	CreateObjectBucket(ctx context.Context, cfg *nats.ObjectStoreConfig) (*domain.ObjectBucketInfo, error)
+	UpdateObjectBucket(ctx context.Context, cfg *nats.ObjectStoreConfig) (*domain.ObjectBucketInfo, error)
 	GetObjectBucket(ctx context.Context, bucket string) (*domain.ObjectBucketInfo, error)
 	DeleteObjectBucket(ctx context.Context, bucket string) error
 	ListObjects(ctx context.Context, bucket string, offset, limit int) ([]string, int, error)

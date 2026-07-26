@@ -46,9 +46,9 @@ func buildCSP(cfg config.Config) string {
 	return strings.Join([]string{
 		"default-src 'self'",
 		"script-src 'self'",
-		"style-src 'self' 'unsafe-inline'",
+		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
 		"img-src 'self' data: blob:",
-		"font-src 'self'",
+		"font-src 'self' https://fonts.gstatic.com",
 		"connect-src " + connect,
 		"frame-ancestors 'none'",
 		"base-uri 'self'",
@@ -105,9 +105,6 @@ func requiresCSRF(ctx *fasthttp.RequestCtx) bool {
 		return false
 	}
 	if len(ctx.Request.Header.Cookie(auth.SessionCookie)) == 0 {
-		return false
-	}
-	if strings.HasPrefix(string(ctx.Request.Header.Peek("Authorization")), "Basic ") {
 		return false
 	}
 	return true
@@ -195,11 +192,5 @@ func authRateLimitMiddleware(cfg config.Config) middleware {
 }
 
 func isAuthRateLimitPath(path string) bool {
-	switch path {
-	case "/api/v1/auth/login":
-		return true
-	default:
-		return strings.HasPrefix(path, "/api/v1/auth/oidc/") &&
-			(strings.HasSuffix(path, "/login") || strings.HasSuffix(path, "/callback"))
-	}
+	return path == "/api/v1/auth/login"
 }

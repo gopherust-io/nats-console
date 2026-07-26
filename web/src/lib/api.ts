@@ -77,6 +77,11 @@ export function clusterPath(clusterId: string, suffix: string): string {
   return `/api/v1/clusters/${encodeURIComponent(clusterId)}${suffix}`;
 }
 
+/** Account-scoped JetStream UI base path (not the API). */
+export function jetStreamUIBase(clusterId: string, accountName = "Default"): string {
+  return `/systems/${clusterId}/accounts/${encodeURIComponent(accountName || "Default")}/jetstream`;
+}
+
 export type Cluster = {
   id: string;
   name: string;
@@ -122,6 +127,13 @@ export type UserRecord = {
   roles: string[];
   isRoot?: boolean;
   accessRules?: AccessRules;
+  grants?: Array<{
+    id: string;
+    userId: string;
+    resourceType: string;
+    resourceKey: string;
+    role: string;
+  }>;
   createdAt: string;
 };
 
@@ -138,16 +150,57 @@ export type AccountInfo = {
   };
 };
 
+export type StreamPlacement = {
+  cluster?: string;
+  tags?: string[];
+};
+
+export type StreamSource = {
+  name: string;
+  filterSubject?: string;
+  optStartSeq?: number;
+  optStartTime?: string;
+  external?: { api?: string; deliver?: string };
+};
+
+export type StreamConfig = {
+  name: string;
+  description?: string;
+  subjects?: string[];
+  retention: string;
+  storage: string;
+  discard?: string;
+  compression?: string;
+  maxMsgs?: number;
+  maxBytes?: number;
+  maxAge?: number;
+  maxConsumers?: number;
+  maxMsgSize?: number;
+  maxMsgsPerSubject?: number;
+  replicas?: number;
+  duplicates?: number;
+  firstSeq?: number;
+  subjectDeleteMarkerTTL?: number;
+  allowRollup?: boolean;
+  denyDelete?: boolean;
+  denyPurge?: boolean;
+  discardNewPerSubject?: boolean;
+  noAck?: boolean;
+  sealed?: boolean;
+  allowDirect?: boolean;
+  mirrorDirect?: boolean;
+  allowMsgTTL?: boolean;
+  placement?: StreamPlacement;
+  mirror?: StreamSource;
+  sources?: StreamSource[];
+  subjectTransform?: { src?: string; dest: string };
+  republish?: { src?: string; dest: string; headersOnly?: boolean };
+  consumerLimits?: { inactiveThreshold?: number; maxAckPending?: number };
+  metadata?: Record<string, string>;
+};
+
 export type StreamInfo = {
-  config: {
-    name: string;
-    subjects?: string[];
-    retention: string;
-    storage: string;
-    maxMsgs?: number;
-    maxBytes?: number;
-    maxAge?: number;
-  };
+  config: StreamConfig;
   state: {
     messages: number;
     bytes: number;
@@ -157,17 +210,47 @@ export type StreamInfo = {
   };
 };
 
+export type ConsumerConfig = {
+  durableName?: string;
+  name?: string;
+  description?: string;
+  deliverPolicy: string;
+  ackPolicy: string;
+  replayPolicy?: string;
+  filterSubject?: string;
+  filterSubjects?: string[];
+  optStartSeq?: number;
+  optStartTime?: string;
+  ackWaitNs?: number;
+  maxDeliver?: number;
+  backoffNs?: number[];
+  maxAckPending?: number;
+  rateLimitBps?: number;
+  sampleFreq?: string;
+  maxWaiting?: number;
+  inactiveThresholdNs?: number;
+  maxRequestBatch?: number;
+  maxRequestExpiresNs?: number;
+  maxRequestMaxBytes?: number;
+  deliverSubject?: string;
+  deliverGroup?: string;
+  flowControl?: boolean;
+  heartbeatNs?: number;
+  headersOnly?: boolean;
+  replicas?: number;
+  memoryStorage?: boolean;
+  metadata?: Record<string, string>;
+};
+
 export type ConsumerInfo = {
   name: string;
   streamName: string;
-  config: {
-    durableName?: string;
-    deliverPolicy: string;
-    ackPolicy: string;
-    filterSubject?: string;
-  };
+  config: ConsumerConfig;
   numPending: number;
   numAckPending: number;
+  numRedelivered?: number;
+  numWaiting?: number;
+  created?: string;
   delivered?: {
     consumerSeq: number;
     streamSeq: number;
@@ -209,8 +292,25 @@ export type RawMessage = {
 
 export type KVBucketInfo = {
   bucket: string;
+  description?: string;
+  storage?: string;
   values: number;
+  bytes?: number;
   history: number;
+  ttlNs?: number;
+  limitMarkerTTLNs?: number;
+  maxValueSize?: number;
+  maxBytes?: number;
+  replicas?: number;
+  compressed?: boolean;
+  placement?: {
+    cluster?: string;
+    tags?: string[];
+  };
+  republish?: { src?: string; dest: string; headersOnly?: boolean };
+  mirror?: { name: string; filterSubject?: string };
+  sources?: { name: string; filterSubject?: string }[];
+  metadata?: Record<string, string>;
 };
 
 export type KVEntry = {
@@ -223,8 +323,19 @@ export type KVEntry = {
 
 export type ObjectBucketInfo = {
   bucket: string;
-  description: string;
+  description?: string;
+  storage?: string;
   size: number;
+  ttlNs?: number;
+  maxBytes?: number;
+  replicas?: number;
+  compressed?: boolean;
+  sealed?: boolean;
+  placement?: {
+    cluster?: string;
+    tags?: string[];
+  };
+  metadata?: Record<string, string>;
 };
 
 export type ObjectInfo = {

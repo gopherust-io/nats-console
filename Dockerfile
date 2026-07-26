@@ -21,11 +21,11 @@ RUN apk add --no-cache ca-certificates
 WORKDIR /app
 COPY --from=build /out/nats-consol /app/nats-consol
 COPY migrations /app/migrations
+COPY api/openapi.yaml /app/api/openapi.yaml
 ENV HTTP_ADDR=:8080 \
     STATIC_DIR=/app/web \
-    AUTH_ENABLED=true \
-    ADMIN_USERNAME=admin \
-    ADMIN_PASSWORD=admin
+    OPENAPI_PATH=/app/api/openapi.yaml \
+    AUTH_ENABLED=true
 COPY --from=web /src/web/dist /app/web
 EXPOSE 8080
 ENTRYPOINT ["/app/nats-consol"]

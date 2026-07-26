@@ -68,14 +68,19 @@ func requestPath(ctx *fasthttp.RequestCtx) string {
 	return string(ctx.Path())
 }
 
-func timeoutMiddleware(timeout time.Duration) middleware {
+func timeoutMiddlewareWithAI(timeout, aiTimeout time.Duration) middleware {
 	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(ctx *fasthttp.RequestCtx) {
-			if isLongRunningProfilePath(requestPath(ctx)) {
+			path := requestPath(ctx)
+			if isLongRunningProfilePath(path) {
 				next(ctx)
 				return
 			}
-			c, cancel := context.WithTimeout(context.Background(), timeout)
+			reqTimeout := timeout
+			if aiTimeout > 0 && strings.HasPrefix(path, "/api/v1/assistant") {
+				reqTimeout = aiTimeout
+			}
+			c, cancel := context.WithTimeout(context.Background(), reqTimeout)
 			defer cancel()
 			ctx.SetUserValue("context", c)
 			next(ctx)
@@ -174,7 +179,7 @@ func authMiddleware(cfg config.Config, authSvc *auth.Service) middleware {
 			}
 
 			if user.ID != "" {
-				loaded, err := authSvc.LoadUser(requestContext(ctx), user.ID)
+				loaded, err := authSvc.LoadUserForSession(requestContext(ctx), user)
 				if err != nil {
 					ctx.SetStatusCode(fasthttp.StatusUnauthorized)
 					ctx.SetContentType("application/json")
@@ -220,17 +225,17 @@ func rbacMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 				ctx.SetBodyString("forbidden")
 				return
 			}
-			if strings.HasPrefix(path, "/api/v1/users") && !auth.CanManageUsers(user) {
+			if (strings.HasPrefix(path, "/api/v1/users") || strings.HasPrefix(path, "/api/v1/people")) && !auth.CanManageUsers(user) {
+				ctx.SetStatusCode(fasthttp.StatusForbidden)
+				ctx.SetBodyString("forbidden")
+				return
+			}
+			if strings.HasPrefix(path, "/api/v1/alert-rules") && !auth.CanManageAlertRules(user) {
 				ctx.SetStatusCode(fasthttp.StatusForbidden)
 				ctx.SetBodyString("forbidden")
 				return
 			}
 			if strings.HasPrefix(path, "/api/v1/pprof") && !auth.CanViewProfiling(user) {
-				ctx.SetStatusCode(fasthttp.StatusForbidden)
-				ctx.SetBodyString("forbidden")
-				return
-			}
-			if strings.Contains(path, "/resolver/export") && !auth.CanViewProfiling(user) {
 				ctx.SetStatusCode(fasthttp.StatusForbidden)
 				ctx.SetBodyString("forbidden")
 				return
@@ -244,9 +249,9 @@ func rbacMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 			return
 		}
 
-		if !auth.CanWrite(user) {
-			ctx.SetStatusCode(fasthttp.StatusForbidden)
-			ctx.SetBodyString("forbidden")
+		// Acknowledge is allowed for any authenticated user with cluster access (checked in handler).
+		if method == fasthttp.MethodPost && strings.HasPrefix(path, "/api/v1/alerts/") && strings.HasSuffix(path, "/acknowledge") {
+			next(ctx)
 			return
 		}
 
@@ -264,7 +269,36 @@ func rbacMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 			}
 		}
 
-		if strings.HasPrefix(path, "/api/v1/users") {
+		if clusterID := clusterIDFromPath(path); clusterID != "" {
+			if !auth.CanAccessCluster(user, clusterID) {
+				ctx.SetStatusCode(fasthttp.StatusForbidden)
+				ctx.SetBodyString("forbidden")
+				return
+			}
+			if isJetStreamResourcePath(path) {
+				if !auth.CanManageJetStream(user, clusterID) {
+					ctx.SetStatusCode(fasthttp.StatusForbidden)
+					ctx.SetBodyString("forbidden")
+					return
+				}
+			} else if !auth.CanWriteCluster(user, clusterID) {
+				ctx.SetStatusCode(fasthttp.StatusForbidden)
+				ctx.SetBodyString("forbidden")
+				return
+			}
+		} else if strings.HasPrefix(path, "/api/v1/alert-rules") {
+			if !auth.CanManageAlertRules(user) {
+				ctx.SetStatusCode(fasthttp.StatusForbidden)
+				ctx.SetBodyString("forbidden")
+				return
+			}
+		} else if !auth.CanWrite(user) {
+			ctx.SetStatusCode(fasthttp.StatusForbidden)
+			ctx.SetBodyString("forbidden")
+			return
+		}
+
+		if strings.HasPrefix(path, "/api/v1/users") || strings.HasPrefix(path, "/api/v1/people") {
 			if !auth.CanManageUsers(user) {
 				ctx.SetStatusCode(fasthttp.StatusForbidden)
 				ctx.SetBodyString("forbidden")
@@ -277,12 +311,6 @@ func rbacMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 				ctx.SetBodyString("forbidden")
 				return
 			}
-		}
-
-		if clusterID := clusterIDFromPath(path); clusterID != "" && !auth.CanAccessCluster(user, clusterID) {
-			ctx.SetStatusCode(fasthttp.StatusForbidden)
-			ctx.SetBodyString("forbidden")
-			return
 		}
 
 		next(ctx)
@@ -356,10 +384,11 @@ func authenticate(ctx *fasthttp.RequestCtx, authSvc *auth.Service) (store.User, 
 func isPublicPath(path string) bool {
 	switch path {
 	case "/api/health", "/api/openapi.yaml",
-		"/api/v1/auth/config", "/api/v1/auth/login", "/api/v1/auth/logout":
+		"/api/v1/auth/config", "/api/v1/auth/login", "/api/v1/auth/logout",
+		"/api/v1/auth/invite/accept":
 		return true
 	default:
-		return strings.HasPrefix(path, "/api/v1/auth/oidc/")
+		return strings.HasPrefix(path, "/api/v1/auth/invite/")
 	}
 }
 

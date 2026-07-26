@@ -15,6 +15,7 @@ The browser talks only to the Consol API. The API talks to PostgreSQL (settings 
 | **New to the project** — just want it running | [Getting started](./getting-started.md) |
 | **App developer / operator** — using the UI day to day | [User guide](./user-guide.md) |
 | **DevOps / SRE** — deploying to staging or production | [DevOps setup guide](./devops-setup.md) |
+| **Platform lead** — one consol for the whole company | [Company-wide scaling](./company-scale.md) |
 | **Contributor** — hacking on the Go/React codebase | [Developer setup guide](./developer-setup.md) |
 
 ---
@@ -22,9 +23,8 @@ The browser talks only to the Consol API. The API talks to PostgreSQL (settings 
 ## What you can do in the UI
 
 - **Dashboard** — JetStream usage and server health at a glance  
-- **Clusters** — register many NATS clusters; switch between them in the sidebar  
+- **Clusters** — view devops-registered NATS clusters; switch between them in the sidebar  
 - **Topology** — visual map of streams and consumers  
-- **Supercluster** — routes, gateways, leaf nodes, and replication (read-only view)  
 - **Streams & consumers** — create, edit, purge, browse messages, live tail  
 - **KV & Object stores** — buckets, keys, and objects  
 - **Audit log** — who changed what (admins)  
@@ -46,7 +46,7 @@ flowchart LR
 
 - **PostgreSQL** stores cluster registrations, users, and audit entries.  
 - **NATS client URL** (`nats://…`) is used for JetStream operations.  
-- **Monitoring URL** (`http://…:8222`) is used for varz/jsz and supercluster views.
+- **Monitoring URL** (`http://…:8222`) is used for varz/jsz and related health views.
 
 ---
 

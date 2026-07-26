@@ -52,20 +52,20 @@ func ExtractVarzMetrics(raw []byte) ([]store.MetricSampleRow, error) {
 }
 
 func ExtractJSZMetrics(raw []byte) ([]store.MetricSampleRow, error) {
+	// NATS /jsz exposes streams/consumers/messages at the top level; `total` is an int
+	// (account count), not a nested object.
 	var payload struct {
-		Total struct {
-			Streams   int   `json:"streams"`
-			Consumers int   `json:"consumers"`
-			Messages  int64 `json:"messages"`
-		} `json:"total"`
+		Streams   int    `json:"streams"`
+		Consumers int    `json:"consumers"`
+		Messages  uint64 `json:"messages"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, err
 	}
 	return []store.MetricSampleRow{
-		{Metric: domain.MetricJSZStreams, Value: float64(payload.Total.Streams)},
-		{Metric: domain.MetricJSZConsumers, Value: float64(payload.Total.Consumers)},
-		{Metric: domain.MetricJSZMessages, Value: float64(payload.Total.Messages)},
+		{Metric: domain.MetricJSZStreams, Value: float64(payload.Streams)},
+		{Metric: domain.MetricJSZConsumers, Value: float64(payload.Consumers)},
+		{Metric: domain.MetricJSZMessages, Value: float64(payload.Messages)},
 	}, nil
 }
 
@@ -73,26 +73,54 @@ func CollectClusterMetrics(client interface {
 	AccountInfo(ctx context.Context) (*nats.AccountInfo, error)
 	Monitoring(ctx context.Context, path string) ([]byte, error)
 }, ctx context.Context) ([]store.MetricSampleRow, error) {
-	var out []store.MetricSampleRow
+	result, err := CollectClusterSnapshot(client, ctx)
+	if err != nil {
+		return nil, err
+	}
+	return result.Samples, nil
+}
+
+// ClusterSnapshotResult holds normalized metrics plus raw monitoring payloads.
+type ClusterSnapshotResult struct {
+	Samples     []store.MetricSampleRow
+	Varz        []byte
+	Jsz         []byte
+	JszTopology []byte
+}
+
+const topologyJSZPath = "/jsz?streams=1&consumers=1&config=1"
+
+// CollectClusterSnapshot scrapes account + monitoring endpoints for metrics and hub reuse.
+func CollectClusterSnapshot(client interface {
+	AccountInfo(ctx context.Context) (*nats.AccountInfo, error)
+	Monitoring(ctx context.Context, path string) ([]byte, error)
+}, ctx context.Context) (ClusterSnapshotResult, error) {
+	var out ClusterSnapshotResult
 
 	if info, err := client.AccountInfo(ctx); err == nil {
-		out = append(out, ExtractAccountMetrics(info)...)
+		out.Samples = append(out.Samples, ExtractAccountMetrics(info)...)
 	}
 
 	if raw, err := client.Monitoring(ctx, "/varz"); err == nil {
+		out.Varz = raw
 		if samples, parseErr := ExtractVarzMetrics(raw); parseErr == nil {
-			out = append(out, samples...)
+			out.Samples = append(out.Samples, samples...)
 		}
 	}
 
-	if raw, err := client.Monitoring(ctx, "/jsz?streams=1&consumers=1"); err == nil {
+	if raw, err := client.Monitoring(ctx, "/jsz"); err == nil {
+		out.Jsz = raw
 		if samples, parseErr := ExtractJSZMetrics(raw); parseErr == nil {
-			out = append(out, samples...)
+			out.Samples = append(out.Samples, samples...)
 		}
 	}
 
-	if len(out) == 0 {
-		return nil, errors.New("no metrics collected")
+	if raw, err := client.Monitoring(ctx, topologyJSZPath); err == nil {
+		out.JszTopology = raw
+	}
+
+	if len(out.Samples) == 0 && len(out.Varz) == 0 && len(out.Jsz) == 0 {
+		return out, errors.New("no metrics collected")
 	}
 	return out, nil
 }

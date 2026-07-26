@@ -8,12 +8,12 @@ import { useClusterMetricsHistory } from "../hooks/useClusterMetricsHistory";
 import { AccountInfo, api, clusterPath } from "../lib/api";
 import { MetricsRangePreset } from "../lib/metricsHistory";
 import { useCluster } from "../lib/cluster";
-import { clusterQueryKey } from "../lib/query";
+import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
 
 const MetricsTimeSeriesChart = lazy(() => import("../components/metrics/MetricsTimeSeriesChart"));
 
 const dashboardPollOptions = {
-  refetchInterval: 30_000,
+  refetchInterval: visibilityAwareInterval(30_000),
   refetchOnWindowFocus: false,
   refetchIntervalInBackground: false,
 } as const;
@@ -124,13 +124,13 @@ export default function DashboardPage() {
       },
       {
         key: "server.in_msgs_total",
-        label: "In msgs / step",
+        label: "In msgs / s",
         color: "#8b5cf6",
         points: seriesPoints(historyQuery.data, "server.in_msgs_total"),
       },
       {
         key: "server.out_msgs_total",
-        label: "Out msgs / step",
+        label: "Out msgs / s",
         color: "#06b6d4",
         points: seriesPoints(historyQuery.data, "server.out_msgs_total"),
       },

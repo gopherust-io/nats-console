@@ -2,12 +2,94 @@ package natsclient
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"maps"
+	"time"
 
 	libnats "github.com/gopherust-io/nats"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/pkg/common/b64util"
 	"github.com/nats-io/nats.go"
 )
+
+func kvBucketInfoFromStatus(st nats.KeyValueStatus) domain.KVBucketInfo {
+	cfg := st.Config()
+	info := domain.KVBucketInfo{
+		Bucket:       st.Bucket(),
+		Description:  cfg.Description,
+		Values:       st.Values(),
+		Bytes:        st.Bytes(),
+		History:      st.History(),
+		TTLNs:        int64(cfg.TTL),
+		MaxValueSize: cfg.MaxValueSize,
+		MaxBytes:     cfg.MaxBytes,
+		Replicas:     cfg.Replicas,
+		Compressed:   st.IsCompressed() || cfg.Compression,
+		Storage:      domain.StorageTypeString(cfg.Storage),
+	}
+	if info.Replicas <= 0 {
+		info.Replicas = 1
+	}
+	if info.History <= 0 {
+		info.History = int64(cfg.History)
+	}
+	if cfg.Placement != nil && (cfg.Placement.Cluster != "" || len(cfg.Placement.Tags) > 0) {
+		info.Placement = &domain.KVPlacement{
+			Cluster: cfg.Placement.Cluster,
+			Tags:    append([]string(nil), cfg.Placement.Tags...),
+		}
+	}
+	if cfg.RePublish != nil && cfg.RePublish.Destination != "" {
+		info.RePublish = &domain.KVRePublish{
+			Source:      cfg.RePublish.Source,
+			Destination: cfg.RePublish.Destination,
+			HeadersOnly: cfg.RePublish.HeadersOnly,
+		}
+	}
+	if cfg.Mirror != nil && cfg.Mirror.Name != "" {
+		info.Mirror = &domain.KVStreamSource{
+			Name:          cfg.Mirror.Name,
+			FilterSubject: cfg.Mirror.FilterSubject,
+		}
+	}
+	if len(cfg.Sources) > 0 {
+		info.Sources = make([]domain.KVStreamSource, 0, len(cfg.Sources))
+		for _, src := range cfg.Sources {
+			if src == nil || src.Name == "" {
+				continue
+			}
+			info.Sources = append(info.Sources, domain.KVStreamSource{
+				Name:          src.Name,
+				FilterSubject: src.FilterSubject,
+			})
+		}
+	}
+	if si, ok := st.(interface{ StreamInfo() *nats.StreamInfo }); ok {
+		if nfo := si.StreamInfo(); nfo != nil {
+			info.LimitMarkerTTL = int64(nfo.Config.SubjectDeleteMarkerTTL)
+			if len(nfo.Config.Metadata) > 0 {
+				info.Metadata = cloneStringMap(nfo.Config.Metadata)
+			}
+			if info.Compressed && nfo.Config.Compression == nats.NoCompression {
+				info.Compressed = false
+			}
+			if nfo.Config.Compression == nats.S2Compression {
+				info.Compressed = true
+			}
+		}
+	}
+	return info
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	maps.Copy(out, in)
+	return out
+}
 
 func (c *Client) ListKVBuckets(ctx context.Context) ([]domain.KVBucketInfo, error) {
 	buckets, err := c.inner.KV().ListBuckets(ctx)
@@ -16,6 +98,7 @@ func (c *Client) ListKVBuckets(ctx context.Context) ([]domain.KVBucketInfo, erro
 	}
 	out := make([]domain.KVBucketInfo, 0, len(buckets))
 	for _, b := range buckets {
+		// List metadata only — avoid N+1 GetKVBucket/Status calls. Detail loads on open.
 		out = append(out, domain.KVBucketInfo{
 			Bucket:  b.Bucket,
 			Values:  b.Values,
@@ -25,28 +108,97 @@ func (c *Client) ListKVBuckets(ctx context.Context) ([]domain.KVBucketInfo, erro
 	return out, nil
 }
 
-func (c *Client) CreateKVBucket(ctx context.Context, cfg *nats.KeyValueConfig) (*domain.KVBucketInfo, error) {
-	status, err := c.inner.KV().CreateRaw(ctx, cfg)
-	if err != nil {
+func (c *Client) CreateKVBucket(ctx context.Context, cfg *nats.KeyValueConfig, opts domain.KVBucketWriteOpts) (*domain.KVBucketInfo, error) {
+	if _, err := c.inner.KV().CreateRaw(ctx, cfg); err != nil {
 		return nil, err
 	}
-	return &domain.KVBucketInfo{
-		Bucket:  status.Bucket,
-		Values:  status.Values,
-		History: status.History,
-	}, nil
+	if err := c.applyKVStreamExtras(ctx, cfg, time.Duration(opts.LimitMarkerTTLNs), opts.Metadata); err != nil {
+		return nil, err
+	}
+	return c.GetKVBucket(ctx, cfg.Bucket)
+}
+
+func (c *Client) UpdateKVBucket(ctx context.Context, cfg *nats.KeyValueConfig, opts domain.KVBucketWriteOpts) (*domain.KVBucketInfo, error) {
+	if cfg == nil || cfg.Bucket == "" {
+		return nil, errors.New("bucket is required")
+	}
+	libCfg := libnats.KeyValueConfig{
+		Bucket:      cfg.Bucket,
+		Description: cfg.Description,
+		History:     cfg.History,
+		TTL:         cfg.TTL,
+		MaxBytes:    cfg.MaxBytes,
+		Replicas:    cfg.Replicas,
+		Compression: cfg.Compression,
+	}
+	if cfg.Storage != 0 {
+		libCfg.Storage = libnats.StorageType(cfg.Storage)
+	}
+	if _, err := c.inner.KV().CreateOrUpdate(ctx, libCfg); err != nil {
+		return nil, err
+	}
+	if err := c.applyKVStreamExtras(ctx, cfg, time.Duration(opts.LimitMarkerTTLNs), opts.Metadata); err != nil {
+		return nil, err
+	}
+	return c.GetKVBucket(ctx, cfg.Bucket)
+}
+
+func (c *Client) applyKVStreamExtras(ctx context.Context, cfg *nats.KeyValueConfig, limitMarkerTTL time.Duration, metadata map[string]string) error {
+	streamName := "KV_" + cfg.Bucket
+	info, err := c.StreamInfo(ctx, streamName)
+	if err != nil {
+		return fmt.Errorf("kv bucket %q backing stream: %w", cfg.Bucket, err)
+	}
+	sc := info.Config
+	sc.Description = cfg.Description
+	sc.MaxAge = cfg.TTL
+	sc.MaxBytes = cfg.MaxBytes
+	if cfg.History > 0 {
+		sc.MaxMsgsPerSubject = int64(cfg.History)
+	}
+	if cfg.Replicas > 0 {
+		sc.Replicas = cfg.Replicas
+	}
+	if cfg.MaxValueSize != 0 {
+		sc.MaxMsgSize = cfg.MaxValueSize
+	} else {
+		sc.MaxMsgSize = -1
+	}
+	if cfg.Compression {
+		sc.Compression = nats.S2Compression
+	} else {
+		sc.Compression = nats.NoCompression
+	}
+	if cfg.Placement != nil && (cfg.Placement.Cluster != "" || len(cfg.Placement.Tags) > 0) {
+		sc.Placement = &nats.Placement{
+			Cluster: cfg.Placement.Cluster,
+			Tags:    append([]string(nil), cfg.Placement.Tags...),
+		}
+	} else {
+		sc.Placement = nil
+	}
+	sc.RePublish = cfg.RePublish
+	sc.Mirror = cfg.Mirror
+	sc.Sources = cfg.Sources
+	sc.SubjectDeleteMarkerTTL = max(limitMarkerTTL, 0)
+	sc.Metadata = cloneStringMap(metadata)
+	if _, err := c.UpdateStream(ctx, &sc); err != nil {
+		return fmt.Errorf("kv bucket %q apply advanced stream options: %w", cfg.Bucket, err)
+	}
+	return nil
 }
 
 func (c *Client) GetKVBucket(ctx context.Context, bucket string) (*domain.KVBucketInfo, error) {
-	status, err := c.inner.KV().BucketInfo(ctx, bucket)
+	kv, err := c.inner.KV().Open(ctx, bucket)
 	if err != nil {
 		return nil, err
 	}
-	return &domain.KVBucketInfo{
-		Bucket:  status.Bucket,
-		Values:  status.Values,
-		History: status.History,
-	}, nil
+	st, err := kv.Status()
+	if err != nil {
+		return nil, err
+	}
+	info := kvBucketInfoFromStatus(st)
+	return &info, nil
 }
 
 func (c *Client) DeleteKVBucket(ctx context.Context, bucket string) error {

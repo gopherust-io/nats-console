@@ -67,7 +67,7 @@ func (h *MetricsHistoryHandler) History(ctx *fasthttp.RequestCtx) {
 	for _, metric := range metrics {
 		points := seriesMap[metric]
 		if domain.IsCounterMetric(metric) {
-			points = counterDeltas(points)
+			points = counterRates(points, step)
 		}
 		if points == nil {
 			points = []domain.MetricPoint{}
@@ -105,12 +105,18 @@ func parseMetricsQuery(raw string) []string {
 	return out
 }
 
-func counterDeltas(points []domain.MetricPoint) []domain.MetricPoint {
+// counterRates converts monotonic counter buckets into per-second rates.
+// Values are (bucket_n - bucket_n-1) / elapsed_seconds so UI labels like "/ s" match the data.
+func counterRates(points []domain.MetricPoint, step time.Duration) []domain.MetricPoint {
 	if len(points) == 0 {
 		return []domain.MetricPoint{}
 	}
 	if len(points) == 1 {
 		return []domain.MetricPoint{{T: points[0].T, V: 0}}
+	}
+	fallbackSecs := step.Seconds()
+	if fallbackSecs <= 0 {
+		fallbackSecs = 60
 	}
 	out := make([]domain.MetricPoint, 0, len(points)-1)
 	for i := 1; i < len(points); i++ {
@@ -118,7 +124,11 @@ func counterDeltas(points []domain.MetricPoint) []domain.MetricPoint {
 		if delta < 0 {
 			delta = 0
 		}
-		out = append(out, domain.MetricPoint{T: points[i].T, V: delta})
+		secs := points[i].T.Sub(points[i-1].T).Seconds()
+		if secs <= 0 {
+			secs = fallbackSecs
+		}
+		out = append(out, domain.MetricPoint{T: points[i].T, V: delta / secs})
 	}
 	return out
 }

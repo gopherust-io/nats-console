@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/port"
@@ -24,32 +25,6 @@ func (s *ClusterService) Get(ctx context.Context, id string) (domain.Cluster, er
 	return s.clusters.GetCluster(ctx, id)
 }
 
-func (s *ClusterService) Create(ctx context.Context, in domain.ClusterCreate) (domain.Cluster, error) {
-	cluster, err := s.clusters.CreateCluster(ctx, in)
-	if err != nil {
-		return domain.Cluster{}, err
-	}
-	s.gateway.Evict(cluster.ID)
-	return cluster, nil
-}
-
-func (s *ClusterService) Update(ctx context.Context, id string, in domain.ClusterUpdate) (domain.Cluster, error) {
-	cluster, err := s.clusters.UpdateCluster(ctx, id, in)
-	if err != nil {
-		return domain.Cluster{}, err
-	}
-	s.gateway.Evict(id)
-	return cluster, nil
-}
-
-func (s *ClusterService) Delete(ctx context.Context, id string) error {
-	if err := s.clusters.DeleteCluster(ctx, id); err != nil {
-		return err
-	}
-	s.gateway.Evict(id)
-	return nil
-}
-
 func (s *ClusterService) Test(ctx context.Context, id string) (domain.ClusterTestResult, error) {
 	return s.gateway.Test(ctx, id)
 }
@@ -64,4 +39,42 @@ func (s *ClusterService) ListConnectionStatuses(ctx context.Context) []domain.NA
 
 func (s *ClusterService) BootstrapDefault(ctx context.Context) error {
 	return s.gateway.BootstrapDefault(ctx)
+}
+
+func (s *ClusterService) Create(ctx context.Context, in domain.ClusterCreate) (domain.Cluster, error) {
+	if in.Name == "" || in.NATSURL == "" {
+		return domain.Cluster{}, errors.New("name and natsUrl required")
+	}
+	return s.clusters.CreateCluster(ctx, in)
+}
+
+func (s *ClusterService) Update(ctx context.Context, id string, in domain.ClusterUpdate) (domain.Cluster, error) {
+	cluster, err := s.clusters.UpdateCluster(ctx, id, in)
+	if err != nil {
+		return domain.Cluster{}, err
+	}
+	s.gateway.Evict(id)
+	return cluster, nil
+}
+
+func (s *ClusterService) Delete(ctx context.Context, id string) error {
+	cluster, err := s.clusters.GetCluster(ctx, id)
+	if err != nil {
+		return err
+	}
+	if cluster.IsDefault {
+		return errors.New("cannot delete the default cluster; set another as default first")
+	}
+	count, err := s.clusters.CountClusters(ctx)
+	if err != nil {
+		return err
+	}
+	if count <= 1 {
+		return errors.New("cannot delete the last cluster")
+	}
+	if err := s.clusters.DeleteCluster(ctx, id); err != nil {
+		return err
+	}
+	s.gateway.Evict(id)
+	return nil
 }

@@ -10,7 +10,7 @@ func TestIsLongRunningProfilePath(t *testing.T) {
 	assert.True(t, isLongRunningProfilePath("/debug/pprof/profile"))
 	assert.True(t, isLongRunningProfilePath("/api/v1/pprof/profile/cpu"))
 	assert.False(t, isLongRunningProfilePath("/api/v1/pprof/runtime"))
-	assert.False(t, isLongRunningProfilePath("/api/v1/pprof/continuous"))
+	assert.False(t, isLongRunningProfilePath("/api/v1/pprof/config"))
 }
 
 func TestIsPprofPath(t *testing.T) {

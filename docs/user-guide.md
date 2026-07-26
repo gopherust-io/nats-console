@@ -6,24 +6,18 @@ A friendly tour of NATS Consol for **developers** and **operators** who use the 
 
 ## Signing in
 
-The login screen adapts to how your admin configured the server:
-
-| Method | When you see it |
-|--------|-----------------|
-| **Username & password** | `BASIC_AUTH_ENABLED=true` (default) |
-| **SSO buttons** (Google, GitHub, etc.) | Provider env vars enabled |
-| **Continue with SSO** | Generic OIDC / Keycloak |
+Sign in with **username and password**. There is no public sign-up and no SSO — an administrator invites you, you set a password at `/invite/:token`, then use that password on the login page.
 
 Your role controls what you can click:
 
 | Role | What you can do |
 |------|-----------------|
 | **Viewer** | Read dashboard, browse streams/messages, live tail, KV/objects |
-| **Operator** | Everything viewers can do + create/edit/delete streams, consumers, KV, objects |
-| **Admin** | Operator powers + users, audit log, cluster management (may be scoped) |
+| **Operator** | Everything viewers can do + manage NATS users/access (not JetStream create/edit/delete) |
+| **Admin** | Create/edit/delete streams, consumers, KV, object stores; users, audit, clusters (may be scoped) |
 | **Root** | Full access; creates other admins with optional limits |
 
-New SSO users usually start as **viewer** until an admin promotes them under **Users & Roles**.
+New invited users start with the roles/grants your admin assigned until promoted under **Users & Roles** or Access.
 
 ---
 
@@ -36,19 +30,33 @@ Sidebar
 │   └── Clusters       ← register / test NATS endpoints
 ├── JetStream
 │   ├── Topology       ← stream/consumer map
-│   ├── Supercluster   ← routes, gateways, leaf nodes
 │   ├── Streams        ← core JetStream work
 │   ├── KV Stores
 │   └── Object Stores
 └── Administration
     ├── Settings
-    ├── JWT Resolver   ← import account JWTs per cluster (operator+)
     ├── Audit Log      ← admins
-    ├── Users & Roles  ← admins
-    └── Profiling      ← admins (if enabled)
+    ├── Alerts         ← open/closed alert feed (bell badge)
+    ├── Alert rules    ← admins: metric thresholds
+    └── Console Users  ← admins
 ```
 
 **Active cluster** — always check the dropdown at the top of the sidebar. All JetStream pages use that cluster.
+
+---
+
+## Alerts
+
+When metrics snapshots are enabled (`METRICS_SNAPSHOT_ENABLED`), the server evaluates **alert rules** after each scrape:
+
+1. Create or enable a rule under **Administration → Alert rules** (pick a metric, comparator, threshold, severity).
+2. When the threshold is met, an **open** alert is written to the feed and the topbar **bell** shows a count.
+3. Open **Administration → Alerts** to see Open / Closed lists. **Acknowledge** hides the alert from the bell for everyone; it stays open until the metric recovers, then auto-closes.
+4. Seeded default rules ship **disabled** (high CPU, connections, JetStream storage) — enable them when you want coverage without creating rules from scratch.
+
+When **SMTP** is enabled (`SMTP_ENABLED=true`), newly opened alerts are also emailed to console users who have a real email address (not `*@local`) and can access that cluster. The topbar bell and alert feed still work without SMTP.
+
+Alerts profile the **console’s view of cluster metrics**, not a separate Prometheus stack.
 
 ---
 
@@ -69,57 +77,91 @@ If numbers look stale, switch cluster away and back, or refresh the page.
 
 ## Clusters
 
-Register every NATS JetStream deployment your team should manage.
+Cluster registrations are configured by **DevOps** (environment variables on first boot, Helm values, or direct Postgres updates)—not from the console UI.
 
-### Add a cluster
+### View & test
 
-1. **Clusters → Add Cluster**  
-2. Fill in:
-   - **Name** — friendly label (`production-us`, `staging`, …)  
-   - **NATS URL** — client connection, e.g. `nats://nats.internal:4222`  
-   - **Monitoring URL** — HTTP monitoring port, e.g. `http://nats.internal:8222`  
-3. Optionally add **token** or **creds file** content for auth (stored encrypted)  
-4. **Test** — verifies the console can reach NATS + JetStream  
+1. Open **Clusters** (or **Systems → Manage Systems**)  
+2. Review name, NATS URL, and monitoring URL for each registered system  
+3. **Test** — verifies the console can reach NATS + JetStream  
 
 ### Tips
 
 - The console server must reach both URLs from **its** network (not from your laptop, unless you're on VPN).  
-- Credentials are encrypted at rest; they are never shown again in the API after save.  
-- Only **admins** (with permission) can delete cluster registrations.
+- The default cluster is seeded from `NATS_URL` / `NATS_MONITORING_URL` (and related creds) when the registry is empty.  
+- Credentials are encrypted at rest; they are never shown again in the API after save.
+
+For company-wide layout (many teams, many systems): see [Company-wide scaling](./company-scale.md).
 
 ---
 
 ## Streams & consumers
 
+### Lifecycle
+
+Operators can **view** JetStream resources. **Admins** (and root) manage the full lifecycle from the console:
+
+| Resource | Create | Update | Delete |
+|----------|--------|--------|--------|
+| **Stream** | JetStream hub → Create → Stream | Stream detail → **Edit config** | Streams list → **Delete** |
+| **Mirror** | JetStream hub → Create → Mirror | Same as stream (mirrors are streams with a mirror source) | Same as stream |
+| **Consumer** | Stream detail → Create consumer | Consumer detail → **Edit config** | Consumer detail → **Delete** |
+| **KV bucket** | JetStream hub → Create → KV | Bucket detail → **Edit config** | KV buckets list → **Delete** |
+| **Object store** | JetStream hub → Create → Object | Bucket detail → **Edit config** | Object buckets list → **Delete** |
+
+Streams also support **Purge** (clear messages, keep the stream). Consumers support **Replay** (reposition delivery) from the consumer detail page.
+
 ### Streams list
 
 Create, edit, delete, and purge streams. Lists respect pagination — use search/filters where available.
+
+### Mirrors
+
+A mirror is a stream that continuously copies another stream. Create one from the JetStream hub (**Create → Mirror**), set the source stream (and optional filter / start options), then manage it like any other stream: edit config on stream detail, delete from the streams list.
 
 ### Stream detail
 
 | Tab / action | Purpose |
 |--------------|---------|
-| **Overview** | Config, state, subjects |
-| **Consumers** | Create and inspect pull/push consumers |
-| **Messages** | Fetch by sequence; prev/next navigation; **publish** test messages (operator+) |
+| **Overview** | Config, state, subjects; **Edit config** for streams and mirrors |
+| **Consumers** | Create, inspect, then open a consumer to edit or delete |
+| **Messages** | Fetch by sequence; prev/next navigation; **publish** test messages (admin+) |
 | **Live** | WebSocket tail — watch messages as they arrive |
-| **Purge** | Delete all messages (operator+) |
+| **Purge** | Delete all messages (admin+) |
 
 ### Publish messages
 
-On the **Messages** tab, operators can publish directly to the stream:
+On the **Messages** tab, admins can publish directly to the stream:
 
 1. Choose a **subject** (dropdown lists stream subjects; required when the stream uses wildcards)
 2. Enter payload as **JSON** or **raw text** (sent as base64 to the API)
 3. Click **Publish** — the ack shows the new sequence number
 
-Useful for smoke tests without leaving the console. Viewers do not see the publish form.
+Useful for smoke tests without leaving the console. Operators and viewers do not see the publish form.
+
+### Choosing a consumer type (for NATS clients)
+
+Use the console to create the consumer your **application** will bind to. Recommendation:
+
+| Client goal | Use |
+|-------------|-----|
+| Most app workers / services | **Durable pull** — leave **Deliver subject** empty; set **Filter subjects** to the stream subjects you need; pull or consume from the client |
+| Server push to an inbox / shared workers | **Durable push** — set **Deliver subject**; optional **Deliver group** for queue sharing |
+| Watch traffic in the console | **Live** tab — ephemeral viewer only; not for production clients |
+
+Typical client flow:
+
+1. Create a durable pull consumer on the stream (filter subjects matching what you want).  
+2. In your NATS client, bind that durable name and pull/consume messages (ack as required by the ack policy).  
+3. Do **not** treat the console **Live** WebSocket session as an application subscription.
 
 ### Live mode
 
 1. Open a stream → **Live**  
 2. Keep the tab open — messages stream in via WebSocket  
 3. Publish from your app or `nats pub` to see traffic  
+
+Live is for operators watching a stream. Application clients should use a durable pull (or push) consumer — see [Choosing a consumer type](#choosing-a-consumer-type-for-nats-clients).
 
 Live sessions are rate-limited server-side to protect NATS.
 
@@ -131,10 +173,10 @@ When the console is served over HTTP/3 (via Caddy or Ingress), live tail still u
 
 Key-Value buckets backed by JetStream.
 
-- **List buckets** — see all KV stores on the cluster  
-- **Open a bucket** — browse keys  
+- **List buckets** — see all KV stores on the cluster; **delete** a bucket from the list (admin+)  
+- **Open a bucket** — browse keys; **Edit config** to update the bucket (admin+)  
 - **Key detail** — value, revision, history  
-- **Put / delete** — operator+  
+- **Put / delete keys** — admin+  
 
 Great for feature flags, small config, leader election metadata.
 
@@ -145,7 +187,8 @@ Great for feature flags, small config, leader election metadata.
 Large blob storage on JetStream.
 
 - Browse buckets and objects  
-- Upload / download / delete objects (operator+)  
+- **Edit bucket config** on bucket detail; **delete** a bucket from the object buckets list (admin+)  
+- Upload / download / delete objects (admin+)  
 
 Use for files, artifacts, or anything too big for KV.
 
@@ -158,33 +201,6 @@ A visual tree of streams and their consumers — helpful when onboarding or debu
 - Stream nodes show name and basic stats  
 - Consumer nodes hang under their stream  
 - Refresh to pick up changes  
-
----
-
-## Supercluster
-
-**Read-only** view of NATS server mesh features:
-
-- **Routes** — cluster routing mesh  
-- **Gateways** — supercluster gateways  
-- **Leaf nodes** — edge connections  
-- **JetStream meta / replication** — when present  
-
-If you see "Standalone cluster", your NATS server simply isn't configured with routes/gateways yet — that's normal for single-node dev setups. Supercluster **configuration** still happens in NATS server config files, not in this UI.
-
----
-
-## JWT Resolver
-
-Manage **account JWTs** for NATS JWT authentication per cluster (operator+).
-
-1. **JWT Resolver** in the sidebar — select cluster if needed  
-2. **Import** — paste an account JWT; Consol validates structure and stores it encrypted  
-3. **List** — see account name, expiry, and metadata (JWT body is never shown in list)  
-4. **Delete** — remove an imported JWT  
-5. **Export** (admin) — download a bundle for NATS file resolver setups  
-
-Consol stores JWTs in PostgreSQL; configure your NATS server resolver separately (HTTP/file). Full operator key generation remains a future enhancement — use `nsc` for complex hierarchies.
 
 ---
 
@@ -215,17 +231,6 @@ Useful for compliance and "who purged that stream?" moments.
 
 **Upgrading to v0.5:** Assign `clusterIds` to existing operator/viewer accounts; empty scope no longer grants access to all clusters.
 
-### Profiling (admin, optional)
-
-When ops enables `PPROF_ENABLED=true`:
-
-- Live goroutine and memory stats  
-- Collect heap / CPU / goroutine profiles  
-- Bar-chart view of hot functions  
-- Download raw `.pprof` for `go tool pprof`  
-
-This profiles the **console server process**, not your NATS workloads.
-
 ---
 
 ## AI assistant (optional)
@@ -250,7 +255,7 @@ The assistant only sees JetStream/console context — not your Postgres rows or 
 ## Common questions
 
 **Why can't I create a stream?**  
-You need **operator** or higher. Ask an admin to check your roles.
+You need the **admin** role (or root). Operators can view JetStream but cannot create, update, or delete streams, consumers, KV, or object stores.
 
 **Why is my cluster empty?**  
 Wrong cluster selected, or NATS credentials expired. Run **Test** on the Clusters page.
