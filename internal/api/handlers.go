@@ -5,12 +5,15 @@ import (
 	"encoding/base64"
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/gopherust-io/nats-consol/internal/app"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
+	"github.com/gopherust-io/nats-consol/internal/metrics"
 	"github.com/gopherust-io/nats-consol/internal/port"
+	"github.com/gopherust-io/nats-consol/internal/snapshot"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 
 	"github.com/valyala/fasthttp"
@@ -18,11 +21,12 @@ import (
 
 type Handler struct {
 	svc *app.Services
+	hub *snapshot.Hub
 	cfg config.Config
 }
 
-func NewHandler(svc *app.Services, cfg config.Config) *Handler {
-	return &Handler{svc: svc, cfg: cfg}
+func NewHandler(svc *app.Services, cfg config.Config, hub *snapshot.Hub) *Handler {
+	return &Handler{svc: svc, cfg: cfg, hub: hub}
 }
 
 func (h *Handler) Health(ctx *fasthttp.RequestCtx) {
@@ -91,6 +95,7 @@ func (h *Handler) CreateStream(ctx *fasthttp.RequestCtx) {
 		if err != nil {
 			return nil, fasthttp.StatusBadRequest, err
 		}
+		h.invalidateTopologySnapshot(ctx)
 		return domain.StreamInfoFromNATS(info), fasthttp.StatusCreated, nil
 	})
 }
@@ -114,19 +119,35 @@ func (h *Handler) UpdateStream(ctx *fasthttp.RequestCtx) {
 		if err != nil {
 			return nil, fasthttp.StatusBadRequest, err
 		}
+		h.invalidateTopologySnapshot(ctx)
 		return domain.StreamInfoFromNATS(info), fasthttp.StatusOK, nil
 	})
 }
 
+func (h *Handler) invalidateTopologySnapshot(ctx *fasthttp.RequestCtx) {
+	if h.hub == nil {
+		return
+	}
+	h.hub.Invalidate(clusterID(ctx))
+}
+
 func (h *Handler) DeleteStream(ctx *fasthttp.RequestCtx) {
 	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
-		return client.DeleteStream(c, routeParam(ctx, "name"))
+		if err := client.DeleteStream(c, routeParam(ctx, "name")); err != nil {
+			return err
+		}
+		h.invalidateTopologySnapshot(ctx)
+		return nil
 	}, fasthttp.StatusBadRequest)
 }
 
 func (h *Handler) PurgeStream(ctx *fasthttp.RequestCtx) {
 	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
-		return client.PurgeStream(c, routeParam(ctx, "name"))
+		if err := client.PurgeStream(c, routeParam(ctx, "name")); err != nil {
+			return err
+		}
+		h.invalidateTopologySnapshot(ctx)
+		return nil
 	}, fasthttp.StatusBadRequest)
 }
 
@@ -171,7 +192,38 @@ func (h *Handler) CreateConsumer(ctx *fasthttp.RequestCtx) {
 		if err != nil {
 			return nil, fasthttp.StatusBadRequest, err
 		}
+		h.invalidateTopologySnapshot(ctx)
 		return domain.ConsumerInfoFromNATS(info), fasthttp.StatusCreated, nil
+	})
+}
+
+func (h *Handler) UpdateConsumer(ctx *fasthttp.RequestCtx) {
+	stream := routeParam(ctx, "name")
+	consumer := routeParam(ctx, "consumer")
+	var req consumerConfigRequest
+	if err := parseJSONBody(ctx, &req); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	if req.DurableName == "" {
+		req.DurableName = consumer
+	}
+	if req.DurableName != consumer {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("consumer name cannot be changed"))
+		return
+	}
+	cfg, err := req.toNATS()
+	if err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
+		info, err := client.UpdateConsumer(c, stream, &cfg)
+		if err != nil {
+			return nil, fasthttp.StatusBadRequest, err
+		}
+		h.invalidateTopologySnapshot(ctx)
+		return domain.ConsumerInfoFromNATS(info), fasthttp.StatusOK, nil
 	})
 }
 
@@ -179,7 +231,11 @@ func (h *Handler) DeleteConsumer(ctx *fasthttp.RequestCtx) {
 	stream := routeParam(ctx, "name")
 	consumer := routeParam(ctx, "consumer")
 	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
-		return client.DeleteConsumer(c, stream, consumer)
+		if err := client.DeleteConsumer(c, stream, consumer); err != nil {
+			return err
+		}
+		h.invalidateTopologySnapshot(ctx)
+		return nil
 	}, fasthttp.StatusBadRequest)
 }
 
@@ -286,7 +342,7 @@ func (h *Handler) ListKVBuckets(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) CreateKVBucket(ctx *fasthttp.RequestCtx) {
-	var req bucketCreateRequest
+	var req kvBucketConfigRequest
 	if err := parseJSONBody(ctx, &req); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
@@ -295,13 +351,53 @@ func (h *Handler) CreateKVBucket(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("bucket"))
 		return
 	}
-	cfg := req.toKVConfig()
+	cfg, err := req.toKVConfig()
+	if err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	opts := domain.KVBucketWriteOpts{
+		LimitMarkerTTLNs: req.LimitMarkerTTLNs,
+		Metadata:         req.Metadata,
+	}
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
-		info, err := client.CreateKVBucket(c, &cfg)
+		info, err := client.CreateKVBucket(c, &cfg, opts)
 		if err != nil {
 			return nil, fasthttp.StatusBadRequest, err
 		}
 		return info, fasthttp.StatusCreated, nil
+	})
+}
+
+func (h *Handler) UpdateKVBucket(ctx *fasthttp.RequestCtx) {
+	var req kvBucketConfigRequest
+	if err := parseJSONBody(ctx, &req); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	bucket := routeParam(ctx, "bucket")
+	if req.Bucket == "" {
+		req.Bucket = bucket
+	}
+	if req.Bucket != bucket {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("bucket name cannot be changed"))
+		return
+	}
+	cfg, err := req.toKVConfig()
+	if err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	opts := domain.KVBucketWriteOpts{
+		LimitMarkerTTLNs: req.LimitMarkerTTLNs,
+		Metadata:         req.Metadata,
+	}
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
+		info, err := client.UpdateKVBucket(c, &cfg, opts)
+		if err != nil {
+			return nil, fasthttp.StatusBadRequest, err
+		}
+		return info, fasthttp.StatusOK, nil
 	})
 }
 
@@ -404,7 +500,7 @@ func (h *Handler) ListObjectBuckets(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) CreateObjectBucket(ctx *fasthttp.RequestCtx) {
-	var req bucketCreateRequest
+	var req objectBucketConfigRequest
 	if err := parseJSONBody(ctx, &req); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
@@ -413,13 +509,45 @@ func (h *Handler) CreateObjectBucket(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("bucket"))
 		return
 	}
-	cfg := req.toObjectConfig()
+	cfg, err := req.toObjectConfig()
+	if err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.CreateObjectBucket(c, &cfg)
 		if err != nil {
 			return nil, fasthttp.StatusBadRequest, err
 		}
 		return info, fasthttp.StatusCreated, nil
+	})
+}
+
+func (h *Handler) UpdateObjectBucket(ctx *fasthttp.RequestCtx) {
+	var req objectBucketConfigRequest
+	if err := parseJSONBody(ctx, &req); err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	bucket := routeParam(ctx, "bucket")
+	if req.Bucket == "" {
+		req.Bucket = bucket
+	}
+	if req.Bucket != bucket {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("bucket name cannot be changed"))
+		return
+	}
+	cfg, err := req.toObjectConfig()
+	if err != nil {
+		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
+		info, err := client.UpdateObjectBucket(c, &cfg)
+		if err != nil {
+			return nil, fasthttp.StatusBadRequest, err
+		}
+		return info, fasthttp.StatusOK, nil
 	})
 }
 
@@ -504,19 +632,21 @@ func (h *Handler) natsAction(ctx *fasthttp.RequestCtx, fn func(context.Context, 
 	var (
 		result any
 		status int
+		etag   string
 	)
 	err := h.svc.JetStream.WithExecutor(c, clusterID(ctx), func(client port.JetStreamExecutor) error {
 		var actionErr error
 		result, status, actionErr = fn(c, client)
+		if tagged, ok := client.(interface{ LastETag() string }); ok {
+			etag = tagged.LastETag()
+		}
 		return actionErr
 	})
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			writeDomainError(ctx, err)
+		status = mapNATSErrorStatus(err, status)
+		if status == fasthttp.StatusNotFound {
+			writeDomainError(ctx, domain.ErrNotFound)
 			return
-		}
-		if status == 0 {
-			status = fasthttp.StatusBadGateway
 		}
 		serializer.WriteError(ctx, status, err)
 		return
@@ -524,7 +654,11 @@ func (h *Handler) natsAction(ctx *fasthttp.RequestCtx, fn func(context.Context, 
 	if status == 0 {
 		status = fasthttp.StatusOK
 	}
-	serializer.WriteJSON(ctx, status, result)
+	if etag != "" && serializer.CheckIfNoneMatch(ctx, etag) {
+		ctx.SetStatusCode(fasthttp.StatusNotModified)
+		return
+	}
+	serializer.WriteJSONWithETag(ctx, status, result, etag)
 }
 
 func (h *Handler) natsVoid(ctx *fasthttp.RequestCtx, fn func(context.Context, port.JetStreamExecutor) error, badStatus int) {
@@ -533,19 +667,66 @@ func (h *Handler) natsVoid(ctx *fasthttp.RequestCtx, fn func(context.Context, po
 		return fn(c, client)
 	})
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			writeDomainError(ctx, err)
+		status := mapNATSErrorStatus(err, badStatus)
+		if status == fasthttp.StatusNotFound {
+			writeDomainError(ctx, domain.ErrNotFound)
 			return
 		}
-		serializer.WriteError(ctx, badStatus, err)
+		serializer.WriteError(ctx, status, err)
 		return
 	}
 	ctx.SetStatusCode(fasthttp.StatusNoContent)
 }
 
+func mapNATSErrorStatus(err error, requested int) int {
+	if err == nil {
+		return fasthttp.StatusOK
+	}
+	if errors.Is(err, domain.ErrNotFound) || isNATSNotFound(err) {
+		return fasthttp.StatusNotFound
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return fasthttp.StatusGatewayTimeout
+	}
+	if requested == fasthttp.StatusNotFound || requested == 0 {
+		return fasthttp.StatusBadGateway
+	}
+	return requested
+}
+
+func isNATSNotFound(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "no stream") ||
+		strings.Contains(msg, "no consumers") ||
+		strings.Contains(msg, "no keys found") ||
+		strings.Contains(msg, "bucket not found")
+}
+
 func (h *Handler) natsRaw(ctx *fasthttp.RequestCtx, path string) {
 	c := requestContext(ctx)
-	client, err := h.svc.JetStream.GetExecutor(c, clusterID(ctx))
+	cluster := clusterID(ctx)
+	fresh := string(ctx.QueryArgs().Peek("fresh")) == "1"
+
+	if !fresh && h.hub != nil {
+		if data, capturedAt, ok := h.hub.MonitoringPayload(cluster, path); ok {
+			if int64(len(data)) > h.cfg.MaxMonitoringBytes() {
+				serializer.WriteError(ctx, fasthttp.StatusBadGateway, errMonitoringTooLarge)
+				return
+			}
+			etag := `"` + capturedAt.UTC().Format("20060102T150405") + `"`
+			if serializer.CheckIfNoneMatch(ctx, etag) {
+				ctx.SetStatusCode(fasthttp.StatusNotModified)
+				return
+			}
+			ctx.Response.Header.Set("X-Snapshot-Age", capturedAt.UTC().Format(timeRFC3339))
+			serializer.WriteRawJSONWithETag(ctx, data, etag)
+			return
+		}
+		metrics.IncSnapshotHubMiss(path)
+	}
+
+	client, err := h.svc.JetStream.GetExecutor(c, cluster)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			writeDomainError(ctx, err)
@@ -559,8 +740,22 @@ func (h *Handler) natsRaw(ctx *fasthttp.RequestCtx, path string) {
 		serializer.WriteError(ctx, fasthttp.StatusBadGateway, err)
 		return
 	}
-	serializer.WriteRawJSON(ctx, data)
+	if int64(len(data)) > h.cfg.MaxMonitoringBytes() {
+		serializer.WriteError(ctx, fasthttp.StatusBadGateway, errMonitoringTooLarge)
+		return
+	}
+	etag := ""
+	if tagged, ok := client.(interface{ LastETag() string }); ok {
+		etag = tagged.LastETag()
+	}
+	if etag != "" && serializer.CheckIfNoneMatch(ctx, etag) {
+		ctx.SetStatusCode(fasthttp.StatusNotModified)
+		return
+	}
+	serializer.WriteRawJSONWithETag(ctx, data, etag)
 }
+
+const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
 
 func routeParam(ctx *fasthttp.RequestCtx, key string) string {
 	value, ok := ctx.UserValue(key).(string)

@@ -1,21 +1,24 @@
 import { FormEvent, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router";
-import SSOProviders from "../components/SSOProviders";
+import LoginSplitLayout from "../components/LoginSplitLayout";
 import Alert from "../components/ui/Alert";
 import { useAuth } from "../lib/auth";
 
 export default function LoginPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { login, oidcEnabled, oidcProviders, basicEnabled, user } = useAuth();
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin");
+  const { login, user } = useAuth();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
     const authError = searchParams.get("error");
     if (authError) {
-      setError(authError === "oidc_failed" ? "SSO sign-in failed. Try again or contact your administrator." : authError);
+      setError(authError);
     }
   }, [searchParams]);
 
@@ -32,78 +35,53 @@ export default function LoginPage() {
       await login(username, password);
       navigate("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(err instanceof Error ? err.message : t("auth.loginFailed"));
     }
   }
 
   return (
-    <div className="login-page">
-      <div className="login-page__backdrop" aria-hidden>
-        <div className="login-orb login-orb--1" />
-        <div className="login-orb login-orb--2" />
-        <div className="login-orb login-orb--3" />
+    <LoginSplitLayout>
+      <h1 className="login-pane__title">{t("auth.signIn")}</h1>
+      <p className="login-pane__sub">{t("auth.needAccess")}</p>
+
+      <div className="login-stack">
+        <form className="login-form" onSubmit={onSubmit}>
+          <label className="login-form__field">
+            <span>{t("auth.username")}</span>
+            <input
+              id="login-username"
+              name="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              autoFocus
+              required
+            />
+          </label>
+          <label className="login-form__field">
+            <span>{t("auth.password")}</span>
+            <input
+              id="login-password"
+              name="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </label>
+          <button className="login-primary-btn" type="submit">
+            {t("auth.submitPassword")}
+          </button>
+        </form>
+
+        <Alert variant="error">{error}</Alert>
+
+        <button type="button" className="login-help-link" onClick={() => setHelpOpen((v) => !v)}>
+          {t("auth.helpLink")}
+        </button>
+        {helpOpen && <p className="login-help-copy">{t("auth.helpCopy")}</p>}
       </div>
-
-      <div className="login-layout">
-        <section className="login-hero">
-          <div className="brand login-hero__brand">
-            <span className="brand__icon">
-              <span className="brand__mark">NC</span>
-            </span>
-            <div className="brand__text">
-              <span className="brand__name">NATS Consol</span>
-              <span className="brand__tagline">JetStream operations console</span>
-            </div>
-          </div>
-          <h1 className="login-hero__title">Operate JetStream with clarity.</h1>
-          <p className="login-hero__desc">
-            Streams, consumers, KV, object stores, and live tail — unified in one fast console built for operators.
-          </p>
-          <ul className="login-hero__features">
-            <li>Multi-cluster management</li>
-            <li>Live message inspection</li>
-            <li>Role-based access control</li>
-          </ul>
-        </section>
-
-        <div className="login-card">
-          <h2 className="login-card__title">Welcome back</h2>
-          <p className="login-card__hint">
-            {oidcEnabled && basicEnabled
-              ? "Sign in with SSO or your console credentials"
-              : oidcEnabled
-                ? "Sign in with your organization account"
-                : "Enter your console credentials"}
-          </p>
-
-          {oidcEnabled && <SSOProviders providers={oidcProviders} />}
-          {oidcEnabled && basicEnabled && <div className="login-divider">or continue with email</div>}
-
-          {basicEnabled && (
-            <form className="form-grid form-grid--login" onSubmit={onSubmit}>
-              <label>
-                Username
-                <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" placeholder="admin" />
-              </label>
-              <label>
-                Password
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                  placeholder="••••••••"
-                />
-              </label>
-              <button className="btn btn--block" type="submit">
-                Sign in
-              </button>
-            </form>
-          )}
-
-          <Alert variant="error">{error}</Alert>
-        </div>
-      </div>
-    </div>
+    </LoginSplitLayout>
   );
 }

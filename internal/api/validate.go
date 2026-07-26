@@ -50,22 +50,6 @@ func validateNATSURL(raw string) error {
 	}
 }
 
-func validateHTTPURL(raw string) error {
-	if raw == "" {
-		return nil
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return errors.New("invalid monitoring url")
-	}
-	switch strings.ToLower(u.Scheme) {
-	case "http", "https":
-		return nil
-	default:
-		return errors.New("invalid monitoring url scheme")
-	}
-}
-
 func validateUUID(id string) error {
 	if !uuidPattern.MatchString(id) {
 		return errors.New("invalid id")

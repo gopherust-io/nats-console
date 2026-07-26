@@ -45,39 +45,17 @@ func (h *Handler) PprofConfig(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	serializer.WriteJSON(ctx, fasthttp.StatusOK, domain.PprofConfig{
-		Enabled:            true,
-		AuthRequired:       h.cfg.PprofAuthEnabled,
-		ContinuousEnabled:  h.cfg.PprofContinuous(),
-		Profiles:           append([]string(nil), supportedPprofProfiles...),
-		MaxCPUSecs:         h.cfg.MaxPprofCPUSecs(),
-		ContinuousInterval: int(h.cfg.ContinuousPprofInterval().Seconds()),
-		ContinuousCPUSlice: int(h.cfg.ContinuousPprofCPUSlice().Seconds()),
+		Enabled:      true,
+		AuthRequired: h.cfg.PprofAuthEnabled,
+		Profiles:     append([]string(nil), supportedPprofProfiles...),
+		MaxCPUSecs:   h.cfg.MaxPprofCPUSecs(),
 	})
-}
-
-func (h *Handler) PprofContinuous(ctx *fasthttp.RequestCtx) {
-	if !h.cfg.PprofEnabled {
-		serializer.WriteError(ctx, fasthttp.StatusNotFound, errPprofDisabled)
-		return
-	}
-	if !h.cfg.PprofContinuous() || profiler.Default == nil {
-		serializer.WriteError(ctx, fasthttp.StatusNotFound, errors.New("continuous profiling is disabled"))
-		return
-	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, profiler.Default.Snapshot())
 }
 
 func (h *Handler) PprofRuntime(ctx *fasthttp.RequestCtx) {
 	if !h.cfg.PprofEnabled {
 		serializer.WriteError(ctx, fasthttp.StatusNotFound, errPprofDisabled)
 		return
-	}
-	if h.cfg.PprofContinuous() && profiler.Default != nil {
-		snapshot := profiler.Default.Snapshot()
-		if n := len(snapshot.RuntimeHistory); n > 0 {
-			serializer.WriteJSON(ctx, fasthttp.StatusOK, snapshot.RuntimeHistory[n-1])
-			return
-		}
 	}
 	serializer.WriteJSON(ctx, fasthttp.StatusOK, profiler.ReadRuntimeStats())
 }
@@ -92,12 +70,6 @@ func (h *Handler) PprofProfileSummary(ctx *fasthttp.RequestCtx) {
 	if !ok {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("missing profile type"))
 		return
-	}
-	if useContinuousSource(ctx) && profiler.Default != nil {
-		if summary, ok := profiler.Default.Profile(profileType); ok {
-			serializer.WriteJSON(ctx, fasthttp.StatusOK, summary)
-			return
-		}
 	}
 
 	seconds := parseCPUSeconds(ctx, h.cfg.MaxPprofCPUSecs())
@@ -152,17 +124,6 @@ func pprofProfileParam(ctx *fasthttp.RequestCtx) (string, bool) {
 	value := ctx.UserValue("profile")
 	name, ok := value.(string)
 	return name, ok && name != ""
-}
-
-func useContinuousSource(ctx *fasthttp.RequestCtx) bool {
-	raw := strings.ToLower(string(ctx.QueryArgs().Peek("source")))
-	if raw == "continuous" || raw == "cache" {
-		return true
-	}
-	if len(ctx.QueryArgs().Peek("source")) == 0 && string(ctx.QueryArgs().Peek("continuous")) == "1" {
-		return true
-	}
-	return false
 }
 
 func parseCPUSeconds(ctx *fasthttp.RequestCtx, maxSeconds int) int {

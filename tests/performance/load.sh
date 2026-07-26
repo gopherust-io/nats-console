@@ -8,12 +8,16 @@
 #
 # Override thresholds via env:
 #   PERF_MIN_RPS=50 PERF_MAX_P99_MS=500 ./tests/performance/load.sh
+#
+# Optional hot-path targets (require CLUSTER_ID of a registered system):
+#   CLUSTER_ID=... ./tests/performance/load.sh
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 DURATION="${DURATION:-10s}"
 RATE="${RATE:-20}"
 AUTH="${AUTH:-admin:admin}"
+CLUSTER_ID="${CLUSTER_ID:-}"
 
 if ! command -v vegeta >/dev/null 2>&1; then
   echo "vegeta not found; install from https://github.com/tsenart/vegeta" >&2
@@ -26,14 +30,33 @@ trap 'rm -f "$TARGETS" "$REPORT"' EXIT
 
 B64="$(printf '%s' "$AUTH" | base64 | tr -d '\n')"
 
-cat >"$TARGETS" <<EOF
+{
+  cat <<EOF
 GET ${BASE_URL}/api/health
 GET ${BASE_URL}/api/v1/auth/config
 GET ${BASE_URL}/api/v1/clusters
 Authorization: Basic ${B64}
 EOF
+  if [[ -n "$CLUSTER_ID" ]]; then
+    cat <<EOF
+GET ${BASE_URL}/api/v1/clusters/${CLUSTER_ID}/streams?limit=100
+Authorization: Basic ${B64}
+GET ${BASE_URL}/api/v1/clusters/${CLUSTER_ID}/monitoring/jsz?streams=1&consumers=1
+Authorization: Basic ${B64}
+GET ${BASE_URL}/api/v1/clusters/${CLUSTER_ID}/kv/buckets
+Authorization: Basic ${B64}
+GET ${BASE_URL}/api/v1/clusters/${CLUSTER_ID}/topology
+Authorization: Basic ${B64}
+GET ${BASE_URL}/api/v1/clusters/${CLUSTER_ID}/account
+Authorization: Basic ${B64}
+EOF
+  fi
+} >"$TARGETS"
 
 echo "==> performance: ${RATE} req/s for ${DURATION} against ${BASE_URL}"
+if [[ -n "$CLUSTER_ID" ]]; then
+  echo "==> including hot paths for cluster ${CLUSTER_ID}"
+fi
 vegeta attack -duration="$DURATION" -rate="$RATE" -targets="$TARGETS" | vegeta report -type=text >"$REPORT"
 cat "$REPORT"
 

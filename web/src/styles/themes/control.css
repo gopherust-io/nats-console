@@ -1,0 +1,137 @@
+[data-theme="control"] {
+  color-scheme: dark;
+  --bg-body: #101013;
+  --bg-gradient: #101013;
+  --bg-sidebar: #18181b;
+  --bg-card: #18181b;
+  --bg-input: #242429;
+  --bg-table-hover: rgba(16, 185, 129, 0.06);
+  --bg-nav-active: rgba(16, 185, 129, 0.14);
+  --bg-badge: rgba(16, 185, 129, 0.12);
+  --bg-btn-secondary: rgba(228, 228, 231, 0.06);
+  --text-primary: #fafafa;
+  --text-secondary: #e4e4e7;
+  --text-muted: #a1a1aa;
+  --border: #242429;
+  --border-subtle: rgba(36, 36, 41, 0.8);
+  --accent: #10b981;
+  --accent-hover: #059669;
+  --accent-text: #ffffff;
+  --danger: #ef4444;
+  --danger-hover: #dc2626;
+  --success: #10b981;
+  --success-bg: rgba(16, 185, 129, 0.12);
+  --success-text: #6ee7b7;
+  --warning-bg: rgba(234, 179, 8, 0.12);
+  --warning-text: #fde047;
+  --error: #fca5a5;
+  --error-bg: rgba(239, 68, 68, 0.12);
+  --shadow: none;
+  --shadow-sm: none;
+  --brand-bg: linear-gradient(135deg, #10b981 0%, #14b8a6 100%);
+  --brand-shadow: none;
+  --btn-bg: #10b981;
+  --btn-bg-hover: #059669;
+  --btn-text: #ffffff;
+  --btn-shadow: none;
+  --btn-shadow-hover: none;
+  --btn-sheen: none;
+  --btn-hover-lift: none;
+  --btn-secondary-bg: transparent;
+  --btn-secondary-bg-hover: #242429;
+  --btn-secondary-text: #e4e4e7;
+  --btn-secondary-text-hover: #fafafa;
+  --btn-secondary-border: #242429;
+  --btn-secondary-border-hover: #34343c;
+  --btn-secondary-shadow: none;
+  --sidebar-blur: 0px;
+  --card-blur: 0px;
+  --surface-elevated: #242429;
+  --surface-overlay: #34343c;
+}
+
+[data-theme="control"] .sidebar,
+[data-theme="control"] .card,
+[data-theme="control"] .login-card,
+[data-theme="control"] .assistant-panel {
+  backdrop-filter: none;
+}
+
+[data-theme="control"] .card,
+[data-theme="control"] .login-card,
+[data-theme="control"] .table-wrap,
+[data-theme="control"] .live-log {
+  box-shadow: none;
+  border-color: var(--border);
+}
+
+[data-theme="control"] .btn::after {
+  display: none;
+}
+
+[data-theme="control"] .btn:hover:not(:disabled),
+[data-theme="control"] .btn:active:not(:disabled) {
+  transform: none;
+}
+
+[data-theme="control"] .btn {
+  transition:
+    background var(--nc-duration, 150ms) var(--nc-ease, cubic-bezier(0.4, 0, 0.2, 1)),
+    border-color var(--nc-duration, 150ms) var(--nc-ease, cubic-bezier(0.4, 0, 0.2, 1)),
+    color var(--nc-duration, 150ms) var(--nc-ease, cubic-bezier(0.4, 0, 0.2, 1)),
+    opacity var(--nc-duration, 150ms) var(--nc-ease, cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+[data-theme="control"] .btn.secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+[data-theme="control"] .btn.secondary:hover:not(:disabled) {
+  background: var(--btn-secondary-bg-hover);
+  border-color: var(--btn-secondary-border-hover);
+}
+
+[data-theme="control"] .status-connected {
+  background: transparent;
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 55%, transparent);
+}
+
+[data-theme="control"] .badge {
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+[data-theme="control"] .nav-link.active {
+  background: var(--bg-nav-active);
+  color: var(--text-primary);
+}
+
+[data-theme="control"] .brand__icon {
+  background: var(--brand-bg);
+  box-shadow: none;
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+[data-theme="control"] .brand__icon::before,
+[data-theme="control"] .brand__icon::after {
+  opacity: 0.25;
+}
+
+[data-theme="control"] .page-header h1 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+[data-theme="control"] .login-orb {
+  opacity: 0.12;
+}
+
+[data-theme="control"] .login-orb--2 {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+[data-theme="control"] .login-page__backdrop {
+  background: #101013;
+}

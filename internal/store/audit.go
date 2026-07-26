@@ -72,7 +72,10 @@ func (s *Store) ListAudit(ctx context.Context, f AuditFilter) ([]AuditEntry, int
 	if f.ClusterID != "" {
 		args = append(args, f.ClusterID)
 		where += fmt.Sprintf(" AND cluster_id = $%d", len(args))
-	} else if len(f.ClusterIDs) > 0 {
+	} else if f.ClusterIDs != nil {
+		if len(f.ClusterIDs) == 0 {
+			return []AuditEntry{}, 0, nil
+		}
 		placeholders := make([]string, len(f.ClusterIDs))
 		for i, clusterID := range f.ClusterIDs {
 			args = append(args, clusterID)

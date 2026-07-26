@@ -4,21 +4,10 @@ import "time"
 
 // goalign:ignore
 type PprofConfig struct {
-	Profiles           []string `json:"profiles"`
-	MaxCPUSecs         int      `json:"maxCpuSeconds"`
-	ContinuousInterval int      `json:"continuousIntervalSecs"`
-	ContinuousCPUSlice int      `json:"continuousCpuSliceSecs"`
-	Enabled            bool     `json:"enabled"`
-	AuthRequired       bool     `json:"authRequired"`
-	ContinuousEnabled  bool     `json:"continuousEnabled"`
-}
-
-type PprofContinuousSnapshot struct {
-	FetchedAt      time.Time                      `json:"fetchedAt"`
-	Profiles       map[string]PprofProfileSummary `json:"profiles"`
-	RuntimeHistory []PprofRuntimeStats            `json:"runtimeHistory"`
-	IntervalSecs   int                            `json:"intervalSecs"`
-	CPUSliceSecs   int                            `json:"cpuSliceSecs"`
+	Profiles     []string `json:"profiles"`
+	MaxCPUSecs   int      `json:"maxCpuSeconds"`
+	Enabled      bool     `json:"enabled"`
+	AuthRequired bool     `json:"authRequired"`
 }
 
 type PprofRuntimeStats struct {

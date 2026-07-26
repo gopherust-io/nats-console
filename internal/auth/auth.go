@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -23,40 +24,37 @@ const (
 	ContextUser   contextKey = "auth_user"
 )
 
-var (
-	ErrUnauthorized    = errors.New("unauthorized")
-	ErrUnknownProvider = errors.New("unknown sso provider")
-)
+var ErrUnauthorized = errors.New("unauthorized")
 
 // goalign:ignore
 type Claims struct {
 	jwt.RegisteredClaims
 
-	UserID   string   `json:"uid"`
-	Username string   `json:"usr"`
-	Roles    []string `json:"roles"`
-	IsRoot   bool     `json:"isRoot"`
+	UserID      string   `json:"uid"`
+	Username    string   `json:"usr"`
+	Roles       []string `json:"roles"`
+	IsRoot      bool     `json:"isRoot"`
+	UserVersion int64    `json:"uv,omitempty"`
 }
 
 type Service struct {
-	store     *store.Store
-	providers map[string]*oauthProvider
-	users     *userCache
-	sessions  *sessionCache
-	cfg       config.Config
+	store        *store.Store
+	users        *userCache
+	sessions     *sessionCache
+	revocations  *sessionRevocations
+	userVersions sync.Map // userID -> int64
+	sessionKey   []byte
+	cfg          config.Config
 }
 
 func NewService(cfg config.Config, st *store.Store) (*Service, error) {
-	providers, err := buildProviders(cfg)
-	if err != nil {
-		return nil, err
-	}
 	return &Service{
-		cfg:       cfg,
-		store:     st,
-		providers: providers,
-		users:     newUserCache(defaultUserCacheTTL),
-		sessions:  newSessionCache(defaultSessionCacheTTL),
+		cfg:         cfg,
+		store:       st,
+		users:       newUserCache(defaultUserCacheTTL),
+		sessions:    newSessionCache(defaultSessionCacheTTL),
+		revocations: newSessionRevocations(),
+		sessionKey:  resolveSessionSecret(cfg),
 	}, nil
 }
 
@@ -89,12 +87,73 @@ func (s *Service) LoadUser(ctx context.Context, userID string) (store.User, erro
 	if err != nil {
 		return store.User{}, err
 	}
+	user.SessionVersion = s.CurrentUserVersion(userID)
+	s.users.Set(user)
+	return user, nil
+}
+
+// LoadUserForSession skips a DB round-trip when the JWT userVersion matches the
+// in-memory stamp and a full user is already in the TTL cache.
+func (s *Service) LoadUserForSession(ctx context.Context, partial store.User) (store.User, error) {
+	if partial.ID == "" {
+		return store.User{}, ErrUnauthorized
+	}
+	current := s.CurrentUserVersion(partial.ID)
+	if partial.SessionVersion > 0 && partial.SessionVersion == current {
+		if user, ok := s.users.Get(partial.ID); ok {
+			return user, nil
+		}
+	}
+	user, err := s.store.GetUserByID(ctx, partial.ID)
+	if err != nil {
+		return store.User{}, err
+	}
+	user.SessionVersion = current
 	s.users.Set(user)
 	return user, nil
 }
 
 func (s *Service) InvalidateUser(userID string) {
 	s.users.Invalidate(userID)
+	s.BumpUserVersion(userID)
+}
+
+func (s *Service) CurrentUserVersion(userID string) int64 {
+	if userID == "" {
+		return 0
+	}
+	if v, ok := s.userVersions.Load(userID); ok {
+		return v.(int64)
+	}
+	return 1
+}
+
+func (s *Service) BumpUserVersion(userID string) int64 {
+	if userID == "" {
+		return 0
+	}
+	for {
+		cur := s.CurrentUserVersion(userID)
+		next := cur + 1
+		if cur == 1 {
+			if _, loaded := s.userVersions.LoadOrStore(userID, next); !loaded {
+				return next
+			}
+			continue
+		}
+		if s.userVersions.CompareAndSwap(userID, cur, next) {
+			return next
+		}
+	}
+}
+
+func (s *Service) InvalidateSession(token string) {
+	s.sessions.Invalidate(token)
+	until := time.Now().Add(s.cfg.SessionTTL)
+	if s.cfg.SessionTTL <= 0 {
+		until = time.Now().Add(8 * time.Hour)
+	}
+	s.revocations.Revoke(token, until)
 }
 
 func (s *Service) AuthenticateBasic(ctx context.Context, username, password string) (store.User, error) {
@@ -121,11 +180,13 @@ func (s *Service) CreateSession(user store.User) (string, error) {
 		return "", err
 	}
 	now := time.Now()
+	version := s.CurrentUserVersion(user.ID)
 	claims := Claims{
-		UserID:   user.ID,
-		Username: user.Username,
-		Roles:    user.Roles,
-		IsRoot:   user.IsRoot,
+		UserID:      user.ID,
+		Username:    user.Username,
+		Roles:       user.Roles,
+		IsRoot:      user.IsRoot,
+		UserVersion: version,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.cfg.SessionTTL)),
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -137,6 +198,9 @@ func (s *Service) CreateSession(user store.User) (string, error) {
 }
 
 func (s *Service) ParseSession(tokenStr string) (store.User, error) {
+	if s.revocations.IsRevoked(tokenStr) {
+		return store.User{}, ErrUnauthorized
+	}
 	if user, ok := s.sessions.Get(tokenStr); ok {
 		return user, nil
 	}
@@ -145,8 +209,11 @@ func (s *Service) ParseSession(tokenStr string) (store.User, error) {
 		return store.User{}, ErrUnauthorized
 	}
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (any, error) {
+		if t.Method != jwt.SigningMethodHS256 {
+			return nil, ErrUnauthorized
+		}
 		return secret, nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 	if err != nil || !token.Valid {
 		return store.User{}, ErrUnauthorized
 	}
@@ -155,36 +222,14 @@ func (s *Service) ParseSession(tokenStr string) (store.User, error) {
 		return store.User{}, ErrUnauthorized
 	}
 	user := store.User{
-		ID:       claims.UserID,
-		Username: claims.Username,
-		Roles:    claims.Roles,
-		IsRoot:   claims.IsRoot,
+		ID:             claims.UserID,
+		Username:       claims.Username,
+		Roles:          claims.Roles,
+		IsRoot:         claims.IsRoot,
+		SessionVersion: claims.UserVersion,
 	}
 	s.sessions.Set(tokenStr, user)
 	return user, nil
-}
-
-func (s *Service) OIDCEnabled() bool {
-	return len(s.providers) > 0
-}
-
-func (s *Service) SSOProviders() []ProviderInfo {
-	order := []string{ProviderGoogle, ProviderGitHub, ProviderGitLab, ProviderMicrosoft, ProviderLegacy}
-	out := make([]ProviderInfo, 0, len(s.providers))
-	for _, id := range order {
-		if p, ok := s.providers[id]; ok {
-			out = append(out, ProviderInfo{ID: p.id, Name: p.name})
-		}
-	}
-	return out
-}
-
-func (s *Service) provider(id string) (*oauthProvider, error) {
-	p, ok := s.providers[id]
-	if !ok {
-		return nil, ErrUnknownProvider
-	}
-	return p, nil
 }
 
 func (s *Service) AuthEnabled() bool {
@@ -192,61 +237,7 @@ func (s *Service) AuthEnabled() bool {
 }
 
 func (s *Service) BasicAuthEnabled() bool {
-	if !s.cfg.AuthEnabled {
-		return false
-	}
-	if !s.OIDCEnabled() {
-		return true
-	}
-	return s.cfg.BasicAuthEnabled
-}
-
-func (s *Service) SSOAuthURL(providerID, state string) (string, error) {
-	p, err := s.provider(providerID)
-	if err != nil {
-		return "", err
-	}
-	return p.authURL(state), nil
-}
-
-func (s *Service) HandleSSOCallback(ctx context.Context, providerID, code string) (store.User, error) {
-	p, err := s.provider(providerID)
-	if err != nil {
-		return store.User{}, err
-	}
-
-	var username, email, sub string
-	if p.github {
-		username, email, sub, err = p.userFromGitHub(ctx, code)
-	} else {
-		username, email, sub, err = p.userFromOIDC(ctx, code)
-	}
-	if err != nil {
-		return store.User{}, err
-	}
-
-	user, err := s.store.GetUserByOIDCSub(ctx, sub)
-	if errors.Is(err, store.ErrNotFound) {
-		clusterIDs, listErr := s.defaultClusterIDs(ctx)
-		if listErr != nil {
-			return store.User{}, listErr
-		}
-		var accessRules *store.AccessRules
-		if len(clusterIDs) > 0 {
-			accessRules = &store.AccessRules{ClusterIDs: clusterIDs}
-		}
-		user, err = s.store.CreateUser(ctx, store.UserCreate{
-			Username:    username,
-			Email:       email,
-			OIDCSub:     sub,
-			Roles:       []string{store.RoleViewer},
-			AccessRules: accessRules,
-		})
-	}
-	if err != nil {
-		return store.User{}, err
-	}
-	return user, nil
+	return s.cfg.AuthEnabled
 }
 
 func (s *Service) SessionCookie(token string) *http.Cookie {
@@ -266,23 +257,7 @@ func (s *Service) ClearCSRFCookie() *http.Cookie {
 }
 
 func (s *Service) NewCSRFToken() (string, error) {
-	return NewOAuthState()
-}
-
-func (s *Service) OAuthStateCookie(state string) *http.Cookie {
-	return s.newCookie("nats_consol_oauth_state", state, 600, true)
-}
-
-func (s *Service) OAuthProviderCookie(provider string) *http.Cookie {
-	return s.newCookie("nats_consol_oauth_provider", provider, 600, true)
-}
-
-func (s *Service) ClearOAuthStateCookie() *http.Cookie {
-	return s.newCookie("nats_consol_oauth_state", "", -1, true)
-}
-
-func (s *Service) ClearOAuthProviderCookie() *http.Cookie {
-	return s.newCookie("nats_consol_oauth_provider", "", -1, true)
+	return NewRandomToken()
 }
 
 func (s *Service) newCookie(name, value string, maxAge int, httpOnly bool) *http.Cookie {
@@ -299,20 +274,21 @@ func (s *Service) newCookie(name, value string, maxAge int, httpOnly bool) *http
 }
 
 func (s *Service) sessionSecret() ([]byte, error) {
-	key := s.cfg.SessionSecret
-	if key == "" {
-		key = s.cfg.EncryptionKey
-	}
-	if key == "" {
-		key = s.cfg.AdminPassword
-	}
-	if len(key) < 16 {
-		return nil, errors.New("session secret must be at least 16 characters")
-	}
-	return []byte(key), nil
+	return s.sessionKey, nil
 }
 
-func NewOAuthState() (string, error) {
+func resolveSessionSecret(cfg config.Config) []byte {
+	key := cfg.SessionSecret
+	if key == "" {
+		key = cfg.EncryptionKey
+	}
+	if key == "" {
+		key = cfg.AdminPassword
+	}
+	return []byte(key)
+}
+
+func NewRandomToken() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -341,16 +317,4 @@ func UserFromContext(ctx context.Context) (store.User, bool) {
 
 func ContextWithUser(ctx context.Context, user store.User) context.Context {
 	return context.WithValue(ctx, ContextUser, user)
-}
-
-func (s *Service) defaultClusterIDs(ctx context.Context) ([]string, error) {
-	clusters, err := s.store.ListClusters(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]string, 0, len(clusters))
-	for _, cluster := range clusters {
-		ids = append(ids, cluster.ID)
-	}
-	return ids, nil
 }

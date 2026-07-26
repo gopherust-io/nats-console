@@ -10,25 +10,20 @@ export type AuthUser = {
   accessRules?: AccessRules;
 };
 
-export type SSOProvider = {
-  id: string;
-  name: string;
-};
-
 type AuthContextValue = {
   user: AuthUser | null;
   loading: boolean;
-  oidcEnabled: boolean;
-  oidcProviders: SSOProvider[];
-  basicEnabled: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   reload: () => Promise<void>;
   canWrite: boolean;
+  canManageJetStream: boolean;
   isAdmin: boolean;
   isRoot: boolean;
   canManageUsers: boolean;
   canViewAudit: boolean;
+  canDeleteClusters: boolean;
+  canManageAlertRules: boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -40,31 +35,20 @@ function hasRole(roles: string[], role: string) {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const [oidcEnabled, setOidcEnabled] = useState(false);
-  const [oidcProviders, setOidcProviders] = useState<SSOProvider[]>([]);
-  const [basicEnabled, setBasicEnabled] = useState(true);
 
   const reload = useCallback(async () => {
     let authEnabled = true;
     try {
       const config = await api<{
-        oidcEnabled: boolean;
-        oidcProviders: SSOProvider[];
-        basicEnabled: boolean;
         authEnabled: boolean;
       }>("/api/v1/auth/config");
-      setOidcEnabled(config.oidcEnabled);
-      setOidcProviders(config.oidcProviders ?? []);
-      setBasicEnabled(config.basicEnabled);
       authEnabled = config.authEnabled;
       if (!authEnabled) {
         setUser({ username: "dev", roles: ["admin"], isRoot: true });
         return;
       }
     } catch {
-      setOidcEnabled(false);
-      setOidcProviders([]);
-      setBasicEnabled(true);
+      // fall through to /me
     }
 
     try {
@@ -110,22 +94,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const legacyAdmin = hasRole(roles, "admin") && !rules;
     const canManageUsers = isRoot || rules?.manageUsers === true || legacyAdmin;
     const canViewAudit = isRoot || rules?.viewAudit === true || legacyAdmin;
+    const canDeleteClusters = isRoot || rules?.deleteClusters === true || legacyAdmin;
+    const canManageAlertRules = isRoot || legacyAdmin || canManageUsers;
     return {
       user,
       loading,
-      oidcEnabled,
-      oidcProviders,
-      basicEnabled,
       login,
       logout,
       reload,
       canWrite: isRoot || hasRole(roles, "admin") || hasRole(roles, "operator"),
+      canManageJetStream: isRoot || hasRole(roles, "admin"),
       isAdmin: hasRole(roles, "admin"),
       isRoot,
       canManageUsers,
       canViewAudit,
+      canDeleteClusters,
+      canManageAlertRules,
     };
-  }, [user, loading, oidcEnabled, oidcProviders, basicEnabled, login, logout, reload]);
+  }, [user, loading, login, logout, reload]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

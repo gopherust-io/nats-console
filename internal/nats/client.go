@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 // Client wraps gopherust-io/nats with console-specific helpers (monitoring URL, domain mapping).
 type Client struct {
 	inner      libnats.Client
+	seqCache   *seqExistsCache
 	monitoring string
 }
 
@@ -29,17 +31,17 @@ type ConnectionHooks struct {
 }
 
 func Connect(ctx context.Context, cfg config.Config, hooks ConnectionHooks) (*Client, error) {
-	return dial(ctx, cfg.NATSURL, cfg.NATSCredsFile, cfg.NATSToken, cfg.MonitoringURL, cfg.RequestTimeout, hooks)
+	return dial(ctx, cfg, cfg.NATSURL, cfg.NATSCredsFile, cfg.NATSToken, cfg.MonitoringURL, hooks)
 }
 
-func ConnectCluster(ctx context.Context, cluster store.Cluster, timeout time.Duration, hooks ConnectionHooks) (*Client, error) {
-	return dial(ctx, cluster.NATSURL, cluster.CredsFilePath, cluster.Token, cluster.MonitoringURL, timeout, hooks)
+func ConnectCluster(ctx context.Context, cfg config.Config, cluster store.Cluster, hooks ConnectionHooks) (*Client, error) {
+	return dial(ctx, cfg, cluster.NATSURL, cluster.CredsFilePath, cluster.Token, cluster.MonitoringURL, hooks)
 }
 
 func dial(
 	ctx context.Context,
+	appCfg config.Config,
 	address, credsFile, token, monitoringURL string,
-	timeout time.Duration,
 	hooks ConnectionHooks,
 ) (*Client, error) {
 	cfg := libnats.DefaultConfig()
@@ -47,8 +49,8 @@ func dial(
 	cfg.Conn.ClientName = "nats-consol"
 	cfg.Conn.CredentialsFile = credsFile
 	cfg.Conn.Secret = token
-	if timeout > 0 {
-		cfg.Conn.ConnectTimeout = timeout
+	if appCfg.RequestTimeout > 0 {
+		cfg.Conn.ConnectTimeout = appCfg.RequestTimeout
 	}
 	cfg.Conn.MaxReconnect = -1
 	cfg.Conn.ReconnectWait = 2 * time.Second
@@ -60,6 +62,12 @@ func dial(
 	cfg.Metrics.AllowMetrics = true
 	cfg.Metrics.AllowTracing = true
 
+	tlsCfg, err := loadNATSTLS(appCfg)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Conn.TLS = tlsCfg
+
 	inner, err := libnats.NewClient(ctx, &cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect to nats: %w", err)
@@ -69,6 +77,41 @@ func dial(
 		inner:      inner,
 		monitoring: monitoringURL,
 	}, nil
+}
+
+func loadNATSTLS(cfg config.Config) (libnats.ConnectionTLS, error) {
+	out := libnats.ConnectionTLS{
+		ServerName:         cfg.NATSTlsServerName,
+		InsecureSkipVerify: cfg.NATSTlsInsecureSkipVerify,
+	}
+	hasMaterial := cfg.NATSTlsCAFile != "" || cfg.NATSTlsCertFile != "" || cfg.NATSTlsKeyFile != "" ||
+		cfg.NATSTlsServerName != "" || cfg.NATSTlsInsecureSkipVerify
+	if !hasMaterial {
+		return out, nil
+	}
+	if (cfg.NATSTlsCertFile == "") != (cfg.NATSTlsKeyFile == "") {
+		return out, errors.New("NATS_TLS_CERT_FILE and NATS_TLS_KEY_FILE must be set together")
+	}
+	if cfg.NATSTlsCAFile != "" {
+		ca, err := os.ReadFile(cfg.NATSTlsCAFile)
+		if err != nil {
+			return out, fmt.Errorf("read NATS_TLS_CA_FILE: %w", err)
+		}
+		out.CA = ca
+	}
+	if cfg.NATSTlsCertFile != "" {
+		cert, err := os.ReadFile(cfg.NATSTlsCertFile)
+		if err != nil {
+			return out, fmt.Errorf("read NATS_TLS_CERT_FILE: %w", err)
+		}
+		key, err := os.ReadFile(cfg.NATSTlsKeyFile)
+		if err != nil {
+			return out, fmt.Errorf("read NATS_TLS_KEY_FILE: %w", err)
+		}
+		out.Cert = cert
+		out.Key = key
+	}
+	return out, nil
 }
 
 func (c *Client) Close() {
@@ -157,6 +200,10 @@ func (c *Client) AddConsumer(ctx context.Context, stream string, cfg *nats.Consu
 	return c.inner.Consumers().AddConsumer(ctx, stream, cfg)
 }
 
+func (c *Client) UpdateConsumer(ctx context.Context, stream string, cfg *nats.ConsumerConfig) (*nats.ConsumerInfo, error) {
+	return c.inner.Consumers().UpdateConsumer(ctx, stream, cfg)
+}
+
 func (c *Client) DeleteConsumer(ctx context.Context, stream, consumer string) error {
 	return c.inner.Consumers().DeleteConsumer(ctx, stream, consumer)
 }
@@ -240,21 +287,13 @@ func (c *Client) GetMessageNav(ctx context.Context, stream string, seq uint64, d
 		if seq <= info.State.FirstSeq {
 			return nil, nats.ErrMsgNotFound
 		}
-		// Walk backward through gaps until a message is found or FirstSeq is passed.
-		for target := seq - 1; target >= info.State.FirstSeq; target-- {
-			msg, err = c.inner.Streams().GetMsg(ctx, stream, target)
-			if err == nil {
-				break
-			}
-			if !errors.Is(err, nats.ErrMsgNotFound) {
-				return nil, err
-			}
-			if target == info.State.FirstSeq {
-				return nil, nats.ErrMsgNotFound
-			}
-		}
-		if msg == nil {
+		prev, ok := c.findPrevSeq(ctx, stream, seq, info.State.FirstSeq)
+		if !ok {
 			return nil, nats.ErrMsgNotFound
+		}
+		msg, err = c.inner.Streams().GetMsg(ctx, stream, prev)
+		if err != nil {
+			return nil, err
 		}
 	default:
 		if direction != "" {
@@ -270,6 +309,7 @@ func (c *Client) GetMessageNav(ctx context.Context, stream string, seq uint64, d
 		Message: domain.StreamMessageFromRaw(msg),
 	}
 	target := msg.Sequence
+	c.ensureSeqCache().mark(stream, target, true)
 	if prev, ok := c.findPrevSeq(ctx, stream, target, info.State.FirstSeq); ok {
 		result.Navigation.PrevSeq = &prev
 	}
@@ -279,23 +319,51 @@ func (c *Client) GetMessageNav(ctx context.Context, stream string, seq uint64, d
 	return result, nil
 }
 
+func (c *Client) ensureSeqCache() *seqExistsCache {
+	if c.seqCache == nil {
+		c.seqCache = newSeqExistsCache()
+	}
+	return c.seqCache
+}
+
+// findPrevSeq locates the nearest existing sequence below seq using binary search
+// over the gap range (O(log gap) probes) with a per-client existence cache.
 func (c *Client) findPrevSeq(ctx context.Context, stream string, seq, firstSeq uint64) (uint64, bool) {
 	if seq <= firstSeq {
 		return 0, false
 	}
-	for target := seq - 1; target >= firstSeq; target-- {
-		_, err := c.inner.Streams().GetMsg(ctx, stream, target)
-		if err == nil {
-			return target, true
+	cache := c.ensureSeqCache()
+	lo, hi := firstSeq, seq-1
+	var found uint64
+	have := false
+	for lo <= hi {
+		mid := lo + (hi-lo)/2
+		exists, known := cache.known(stream, mid)
+		var err error
+		if !known {
+			_, err = c.inner.Streams().GetMsg(ctx, stream, mid)
+			if err == nil {
+				exists = true
+				cache.mark(stream, mid, true)
+			} else if errors.Is(err, nats.ErrMsgNotFound) {
+				exists = false
+				cache.mark(stream, mid, false)
+			} else {
+				return 0, false
+			}
 		}
-		if !errors.Is(err, nats.ErrMsgNotFound) {
-			return 0, false
-		}
-		if target == firstSeq {
-			return 0, false
+		if exists {
+			found = mid
+			have = true
+			lo = mid + 1
+		} else {
+			if mid == firstSeq {
+				break
+			}
+			hi = mid - 1
 		}
 	}
-	return 0, false
+	return found, have
 }
 
 func (c *Client) findNextSeq(ctx context.Context, stream string, seq, lastSeq uint64) (uint64, bool) {

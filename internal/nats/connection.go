@@ -78,22 +78,27 @@ func (m *Manager) markReconnected(clusterID string, nc *nats.Conn) {
 }
 
 func (m *Manager) markConnected(clusterID string, client *Client) {
+	now := time.Now()
+	serverName := client.ServerName()
+	alive := client.IsAlive()
+	jsOK := false
+	var jsErr string
+	if _, err := client.AccountInfo(context.Background()); err == nil {
+		jsOK = true
+	} else if err != nil {
+		jsErr = err.Error()
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	st := m.ensureState(clusterID)
-	now := time.Now()
 	st.cached = true
-	st.connected = client.IsAlive()
-	st.serverName = client.ServerName()
+	st.connected = alive
+	st.serverName = serverName
 	st.lastConnectedAt = now
 	st.lastCheckedAt = now
-	st.lastError = ""
-	if _, err := client.AccountInfo(context.Background()); err == nil {
-		st.jetStreamOK = true
-	} else {
-		st.jetStreamOK = false
-		st.lastError = err.Error()
-	}
+	st.jetStreamOK = jsOK
+	st.lastError = jsErr
 }
 
 func (m *Manager) ensureState(clusterID string) *connectionState {
@@ -213,7 +218,7 @@ func (m *Manager) sweepExpired() {
 
 	m.mu.Lock()
 	for id, entry := range m.cache {
-		if now.Sub(entry.lastUsed) >= ttl {
+		if now.Sub(entry.lastUsed()) >= ttl {
 			expired = append(expired, id)
 			entry.client.Close()
 			delete(m.cache, id)

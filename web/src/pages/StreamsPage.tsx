@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import Pager, { DEFAULT_PAGE_SIZE, pageQuery } from "../components/Pager";
 import VirtualTable from "../components/VirtualTable";
@@ -8,7 +8,7 @@ import PageHeader from "../components/ui/PageHeader";
 import { api, clusterPath, StreamInfo } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
-import { clusterQueryKey } from "../lib/query";
+import { clusterQueryKey, invalidateJetStreamTopology } from "../lib/query";
 
 type StreamListResponse = {
   streams: StreamInfo[];
@@ -19,8 +19,7 @@ type StreamListResponse = {
 
 export default function StreamsPage() {
   const { clusterId } = useCluster();
-  const { canWrite } = useAuth();
-  const queryClient = useQueryClient();
+  const { canManageJetStream } = useAuth();
   const [offset, setOffset] = useState(0);
   const [actionError, setActionError] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -46,7 +45,7 @@ export default function StreamsPage() {
     (streamsQuery.error instanceof Error ? streamsQuery.error.message : "");
 
   async function invalidateStreams() {
-    await queryClient.invalidateQueries({ queryKey: clusterQueryKey(clusterId, "streams") });
+    await invalidateJetStreamTopology(clusterId);
   }
 
   async function createStream(event: FormEvent) {
@@ -93,7 +92,7 @@ export default function StreamsPage() {
         title="Streams"
         subtitle="Create, inspect, and manage message streams across subjects."
         actions={
-          canWrite ? (
+          canManageJetStream ? (
             <button className="btn" type="button" onClick={() => setShowForm((v) => !v)}>
               {showForm ? "Cancel" : "Create stream"}
             </button>
@@ -175,7 +174,7 @@ export default function StreamsPage() {
                 case "storage":
                   return stream.config.storage;
                 case "actions":
-                  return canWrite ? (
+                  return canManageJetStream ? (
                     <button className="btn danger btn--small" type="button" onClick={() => deleteStream(stream.config.name)}>
                       Delete
                     </button>

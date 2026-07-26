@@ -268,6 +268,20 @@ func toDomainCluster(c store.Cluster) domain.Cluster {
 }
 
 func toDomainUser(u store.User) domain.User {
+	grants := make([]domain.AccessGrant, 0, len(u.Grants))
+	for _, g := range u.Grants {
+		grants = append(grants, domain.AccessGrant{
+			ID:           g.ID,
+			UserID:       g.UserID,
+			ResourceType: g.ResourceType,
+			ResourceKey:  g.ResourceKey,
+			Role:         g.Role,
+			CreatedAt:    g.CreatedAt,
+			UpdatedAt:    g.UpdatedAt,
+			Username:     g.Username,
+			Email:        g.Email,
+		})
+	}
 	return domain.User{
 		ID:          u.ID,
 		Username:    u.Username,
@@ -276,6 +290,7 @@ func toDomainUser(u store.User) domain.User {
 		Roles:       u.Roles,
 		IsRoot:      u.IsRoot,
 		AccessRules: toDomainAccessRules(u.AccessRules),
+		Grants:      grants,
 		CreatedAt:   u.CreatedAt,
 	}
 }

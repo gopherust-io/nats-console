@@ -17,19 +17,21 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/crypto"
 	"github.com/gopherust-io/nats-consol/internal/http3edge"
-	"github.com/gopherust-io/nats-consol/internal/profiler"
+	"github.com/gopherust-io/nats-consol/internal/mail"
 	"github.com/gopherust-io/nats-consol/internal/snapshot"
 )
 
 func main() {
-	_ = env.LoadDotEnv(".env")
+	if err := env.LoadDotEnv(".env"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		tel.Fatal().Err(err).Str("component", "env").Msg("cannot open env file")
+	}
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		tel.Fatal().Err(err).Str("component", "config").Msg("failed to load config")
 	}
 	if err := cfg.Validate(); err != nil {
-		tel.Fatal().Err(err).Str("component", "config").Msg("invalid production config")
+		tel.Fatal().Err(err).Str("component", "config").Msg("invalid config")
 	}
 
 	telem := newTelemetry(cfg)
@@ -58,17 +60,29 @@ func main() {
 
 	logAssistantEnabled(app, cfg)
 
-	if cfg.PprofContinuous() {
-		profiler.StartDefault(profiler.Options{
-			Interval: cfg.ContinuousPprofInterval(),
-			CPUSlice: cfg.ContinuousPprofCPUSlice(),
-		})
-		defer profiler.StopDefault()
+	mailer, err := mail.NewSenderFromConfig(cfg.SMTPEnabled, mail.SMTPConfig{
+		Host:     cfg.SMTPHost,
+		Port:     cfg.SMTPPort,
+		Username: cfg.SMTPUsername,
+		Password: cfg.SMTPPassword,
+		From:     cfg.SMTPFrom,
+		TLS:      cfg.SMTPTLS,
+	})
+	if err != nil {
+		tel.Fatal().Err(err).Str("component", "mail").Msg("smtp setup failed")
+	}
+	if cfg.SMTPEnabled {
+		tel.Info().Str("component", "mail").Str("host", cfg.SMTPHost).Int("port", cfg.SMTPPort).Msg("alert email delivery enabled")
 	}
 
-	metricsCollector := snapshot.Start(app.UoW.Raw(), app.NATSManager, cfg)
+	hub := snapshot.NewHub()
+	metricsCollector := snapshot.Start(app.UoW.Raw(), app.NATSManager, cfg, mailer, hub)
 	if metricsCollector != nil {
 		defer metricsCollector.Stop()
+	} else {
+		// Keep a hub even when the collector is disabled so monitoring can still
+		// populate via live fetches / future writers.
+		_ = hub
 	}
 
 	h3Listener, err := http3edge.Start(cfg)
@@ -79,7 +93,7 @@ func main() {
 		defer h3Listener.Stop()
 	}
 
-	server := newHTTPServer(cfg, app)
+	server := newHTTPServer(cfg, app, hub)
 	runUntilSignal(server, cfg.HTTPAddr)
 }
 
@@ -135,13 +149,14 @@ func logAssistantEnabled(app *bootstrap.Application, cfg config.Config) {
 		Msg("ai assistant enabled")
 }
 
-func newHTTPServer(cfg config.Config, app *bootstrap.Application) *fasthttp.Server {
+func newHTTPServer(cfg config.Config, app *bootstrap.Application, hub *snapshot.Hub) *fasthttp.Server {
 	return &fasthttp.Server{
 		Handler: api.NewRouter(api.RouterDeps{
 			Config:      cfg,
 			Services:    app.Services,
 			AuditWriter: app.AuditWriter,
 			Store:       app.UoW.Raw(),
+			SnapshotHub: hub,
 		}),
 		ReadTimeout:        cfg.HTTPReadTimeout,
 		WriteTimeout:       cfg.HTTPWriteTimeout,

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
-	"github.com/jackc/pgx/v5"
 )
 
 type MetricSampleRow struct {
@@ -21,22 +20,21 @@ func (s *Store) InsertMetricSamples(ctx context.Context, clusterID string, captu
 	}
 	capturedAt = capturedAt.UTC().Truncate(time.Second)
 
-	batch := &pgx.Batch{}
-	for _, sample := range samples {
-		batch.Queue(`
-			INSERT INTO cluster_metric_samples (cluster_id, captured_at, metric, value)
-			VALUES ($1, $2, $3, $4)
-			ON CONFLICT (cluster_id, captured_at, metric) DO UPDATE SET value = EXCLUDED.value`,
-			clusterID, capturedAt, sample.Metric, sample.Value)
-	}
-	br := s.pool.SendBatch(ctx, batch)
-	defer func() { _ = br.Close() }()
-	for range samples {
-		if _, err := br.Exec(); err != nil {
-			return err
+	var b strings.Builder
+	args := make([]any, 0, 2+2*len(samples))
+	args = append(args, clusterID, capturedAt)
+	b.WriteString(`INSERT INTO cluster_metric_samples (cluster_id, captured_at, metric, value) VALUES `)
+	for i, sample := range samples {
+		if i > 0 {
+			b.WriteByte(',')
 		}
+		base := i*2 + 3
+		fmt.Fprintf(&b, "($1,$2,$%d,$%d)", base, base+1)
+		args = append(args, sample.Metric, sample.Value)
 	}
-	return br.Close()
+	b.WriteString(` ON CONFLICT (cluster_id, captured_at, metric) DO UPDATE SET value = EXCLUDED.value`)
+	_, err := s.pool.Exec(ctx, b.String(), args...)
+	return err
 }
 
 func (s *Store) DeleteMetricSamplesOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {

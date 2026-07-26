@@ -29,4 +29,5 @@ func TestSessionCacheExpires(t *testing.T) {
 	time.Sleep(2 * time.Millisecond)
 	_, ok := cache.Get("tok")
 	assert.False(t, ok)
+	assert.Equal(t, 0, cache.cache.len(), "expired session should be deleted on Get")
 }

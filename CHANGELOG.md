@@ -2,6 +2,28 @@
 
 All notable changes to NATS Consol are documented in this file.
 
+## [0.11.0] - 2026-07-26
+
+### Added
+
+- Centered Sign In page and invite-accept flow (`/invite/:token`)
+- People invite links (`POST /api/v1/people/invite`) with basic-auth password set (no Keycloak required)
+- System/Account **Access** grants (`access_grants`) with Access roles and middleware enforcement
+- Signing key groups, NATS user detail (rotate NKey, mint JWT via `NATS_ACCOUNT_SEED`, Assign Person)
+- **In-app alerts** — metric threshold rules, snapshot-driven evaluation, open/closed feed, acknowledge, topbar bell badge
+- **Alert email notifications** — optional SMTP delivery to console users when an alert first opens
+- Optional **Mailpit** Compose profile (`--profile mail`) plus Mailpit/Gmail SMTP recipes in `.env.example` and devops docs
+
+### Changed
+
+- Default `docker compose up` no longer starts Keycloak; use `--profile sso` for optional OIDC demo
+- Admin **Console Users** label; Access tabs on system and account levels
+- Profiling is backend-only and on-demand (`/api/v1/pprof/*`, non-prod `/debug/pprof`); removed continuous sampler and Profiling UI
+
+### Removed
+
+- Admin Profiling page and continuous `PPROF_CONTINUOUS*` settings
+
 ## [0.10.0] - 2026-07-25
 
 ### Changed

@@ -12,6 +12,14 @@ var (
 		nats.FileStorage:   "file",
 		nats.MemoryStorage: "memory",
 	}
+	discardPolicyNames = map[nats.DiscardPolicy]string{
+		nats.DiscardOld: "old",
+		nats.DiscardNew: "new",
+	}
+	storeCompressionNames = map[nats.StoreCompression]string{
+		nats.NoCompression: "none",
+		nats.S2Compression: "s2",
+	}
 	deliverPolicyNames = map[nats.DeliverPolicy]string{
 		nats.DeliverAllPolicy:             "all",
 		nats.DeliverLastPolicy:            "last",
@@ -41,6 +49,14 @@ func enumString(v any) string {
 		if name, ok := storageTypeNames[typed]; ok {
 			return name
 		}
+	case nats.DiscardPolicy:
+		if name, ok := discardPolicyNames[typed]; ok {
+			return name
+		}
+	case nats.StoreCompression:
+		if name, ok := storeCompressionNames[typed]; ok {
+			return name
+		}
 	case nats.DeliverPolicy:
 		if name, ok := deliverPolicyNames[typed]; ok {
 			return name
@@ -55,4 +71,11 @@ func enumString(v any) string {
 		}
 	}
 	return ""
+}
+
+func StorageTypeString(v nats.StorageType) string {
+	if name, ok := storageTypeNames[v]; ok {
+		return name
+	}
+	return "file"
 }

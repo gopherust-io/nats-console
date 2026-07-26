@@ -114,6 +114,55 @@ func TestUserServiceProtectsRoot(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrRootProtected)
 }
 
+func TestUserServiceDelegatedAdminManagesWeakerUser(t *testing.T) {
+	repo := &mockUsers{users: map[string]domain.User{
+		"mgr": {
+			ID: "mgr", Username: "mgr", Roles: []string{domain.RoleAdmin},
+			AccessRules: &domain.AccessRules{
+				ClusterIDs:      []string{"cluster-a"},
+				ManageUsers:     true,
+				AssignableRoles: []string{domain.RoleViewer, domain.RoleOperator},
+			},
+		},
+		"viewer": {
+			ID: "viewer", Username: "viewer", Roles: []string{domain.RoleViewer},
+			AccessRules: &domain.AccessRules{ClusterIDs: []string{"cluster-a"}},
+		},
+		"peer": {
+			ID: "peer", Username: "peer", Roles: []string{domain.RoleAdmin},
+			AccessRules: &domain.AccessRules{
+				ClusterIDs:      []string{"cluster-a", "cluster-b"},
+				ManageUsers:     true,
+				AssignableRoles: []string{domain.RoleAdmin, domain.RoleViewer},
+			},
+		},
+	}}
+	svc := app.NewUserService(repo)
+	mgr := repo.users["mgr"]
+
+	err := svc.Delete(context.Background(), mgr, "viewer")
+	require.NoError(t, err, "manager should delete weaker scoped viewer")
+
+	err = svc.Delete(context.Background(), mgr, "peer")
+	require.ErrorIs(t, err, domain.ErrForbidden, "manager must not delete broader peer")
+
+	// Restore viewer for list check
+	repo.users["viewer"] = domain.User{
+		ID: "viewer", Username: "viewer", Roles: []string{domain.RoleViewer},
+		AccessRules: &domain.AccessRules{ClusterIDs: []string{"cluster-a"}},
+	}
+
+	listed, err := svc.List(context.Background(), mgr)
+	require.NoError(t, err)
+	ids := map[string]bool{}
+	for _, u := range listed {
+		ids[u.ID] = true
+	}
+	assert.True(t, ids["viewer"], "list should include manageable viewer")
+	assert.True(t, ids["mgr"], "list should include self")
+	assert.False(t, ids["peer"], "list must not include broader peer")
+}
+
 func TestUserServiceRootCanCreateDelegatedAdmin(t *testing.T) {
 	repo := &mockUsers{users: map[string]domain.User{}}
 	svc := app.NewUserService(repo)

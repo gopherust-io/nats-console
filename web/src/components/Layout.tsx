@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { NavLink, Outlet, useLocation } from "react-router";
 import ThemeSwitcher from "./ThemeSwitcher";
 import NavIcon from "./ui/NavIcon";
@@ -50,14 +51,15 @@ function SidebarLink({ to, end, icon, children }: { to: string; end?: boolean; i
 }
 
 export default function Layout() {
+  const { t } = useTranslation();
   const location = useLocation();
   const { clusters, clusterId, setClusterId, loading, error, cluster } = useCluster();
-  const { user, logout, isAdmin, isRoot, canManageUsers, canViewAudit } = useAuth();
+  const { user, logout, isRoot, canManageUsers, canViewAudit } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen);
   const avatarInitial = (user?.username?.[0] ?? "?").toUpperCase();
   const roleLabel = isRoot
     ? "Root"
-    : isAdmin
+    : user?.roles?.includes("admin")
       ? "Administrator"
       : user?.roles?.includes("operator")
         ? "Operator"
@@ -117,8 +119,8 @@ export default function Layout() {
                 <span className="brand__mark">NC</span>
               </span>
               <div className="brand__text">
-                <span className="brand__name">NATS Consol</span>
-                <span className="brand__tagline">JetStream console</span>
+                <span className="brand__name">{t("common.brand")}</span>
+                <span className="brand__tagline">{t("nav.tagline")}</span>
               </div>
             </div>
           </div>
@@ -152,7 +154,7 @@ export default function Layout() {
             <SidebarLink to="/" end icon="dashboard">
               Dashboard
             </SidebarLink>
-            <SidebarLink to="/clusters" icon="clusters">
+            <SidebarLink to="/systems/clusters" icon="clusters">
               Clusters
             </SidebarLink>
           </div>
@@ -161,12 +163,6 @@ export default function Layout() {
             <div className="nav-section__label">JetStream</div>
             <SidebarLink to="/topology" icon="topology">
               Topology
-            </SidebarLink>
-            <SidebarLink to="/supercluster" icon="supercluster">
-              Supercluster
-            </SidebarLink>
-            <SidebarLink to="/resolver" icon="clusters">
-              JWT Resolver
             </SidebarLink>
             <SidebarLink to="/streams" icon="streams">
               Streams
@@ -189,11 +185,6 @@ export default function Layout() {
             {canManageUsers && (
               <SidebarLink to="/users" icon="users">
                 Users &amp; Roles
-              </SidebarLink>
-            )}
-            {isAdmin && (
-              <SidebarLink to="/profiling" icon="profiling">
-                Profiling
               </SidebarLink>
             )}
           </div>

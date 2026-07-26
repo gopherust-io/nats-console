@@ -1,23 +1,38 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link, useParams } from "react-router";
+import { useTranslation } from "react-i18next";
+import { Link, useLocation, useParams } from "react-router";
 import Alert from "../components/ui/Alert";
+import CreateConsumerPanel, { ConsumerConfigPayload } from "../components/CreateConsumerPanel";
 import {
   api,
   clusterPath,
   ConsumerInfo,
+  jetStreamUIBase,
   ReplayConsumerRequest,
   ReplayConsumerResult,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
+import { invalidateJetStreamTopology } from "../lib/query";
+import { isFromTopology, TOPOLOGY_LOCATION_STATE } from "../lib/topology";
 
 export default function ConsumerDetailPage() {
-  const { name = "", consumer = "" } = useParams();
+  const { t } = useTranslation();
+  const { name = "", consumer = "", clusterId: routeCluster, accountName } = useParams();
   const { clusterId } = useCluster();
-  const { canWrite } = useAuth();
+  const id = routeCluster ?? clusterId;
+  const jsBase = id ? jetStreamUIBase(id, accountName) : "";
+  const streamHref = jsBase ? `${jsBase}/streams/${encodeURIComponent(name)}` : "/systems";
+  const location = useLocation();
+  const fromTopology = isFromTopology(location.state);
+  const backHref = fromTopology ? "/admin/topology" : streamHref;
+  const { canManageJetStream } = useAuth();
   const [info, setInfo] = useState<ConsumerInfo | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
 
   const [replayMode, setReplayMode] = useState<"reset" | "sidecar">("reset");
   const [replayFrom, setReplayFrom] = useState<"seq" | "time" | "beginning" | "new">("seq");
@@ -30,9 +45,9 @@ export default function ConsumerDetailPage() {
   const [createdDurable, setCreatedDurable] = useState<string | null>(null);
 
   async function refresh() {
-    if (!clusterId || !name || !consumer) return;
+    if (!id || !name || !consumer) return;
     const data = await api<ConsumerInfo>(
-      clusterPath(clusterId, `/streams/${encodeURIComponent(name)}/consumers/${encodeURIComponent(consumer)}`),
+      clusterPath(id, `/streams/${encodeURIComponent(name)}/consumers/${encodeURIComponent(consumer)}`),
     );
     setInfo(data);
     const hint = data.ackFloor?.streamSeq || data.delivered?.streamSeq;
@@ -42,28 +57,52 @@ export default function ConsumerDetailPage() {
   }
 
   useEffect(() => {
-    if (!clusterId || !name || !consumer) return;
+    if (!id || !name || !consumer) return;
     refresh()
       .catch((err: Error) => setError(err.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per route params
-  }, [clusterId, name, consumer]);
+  }, [id, name, consumer]);
 
   async function deleteConsumer() {
-    if (!clusterId || !confirm(`Delete consumer "${consumer}"?`)) return;
+    if (!id || !confirm(`Delete consumer "${consumer}"?`)) return;
     try {
       await api(
-        clusterPath(clusterId, `/streams/${encodeURIComponent(name)}/consumers/${encodeURIComponent(consumer)}`),
+        clusterPath(id, `/streams/${encodeURIComponent(name)}/consumers/${encodeURIComponent(consumer)}`),
         { method: "DELETE" },
       );
-      window.location.href = `/streams/${name}`;
+      await invalidateJetStreamTopology(id);
+      window.location.href = fromTopology ? "/admin/topology" : streamHref;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete consumer");
     }
   }
 
+  async function saveConsumerConfig(body: ConsumerConfigPayload) {
+    if (!id) return;
+    setEditBusy(true);
+    setEditError("");
+    try {
+      const updated = await api<ConsumerInfo>(
+        clusterPath(id, `/streams/${encodeURIComponent(name)}/consumers/${encodeURIComponent(consumer)}`),
+        {
+          method: "PUT",
+          body: JSON.stringify({ ...body, durableName: consumer }),
+        },
+      );
+      setInfo(updated);
+      setEditOpen(false);
+      await invalidateJetStreamTopology(id);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Failed to update consumer");
+      throw err;
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
   async function submitReplay(event: FormEvent) {
     event.preventDefault();
-    if (!clusterId) return;
+    if (!id) return;
 
     if (replayMode === "reset") {
       const ok = confirm(
@@ -106,7 +145,7 @@ export default function ConsumerDetailPage() {
     try {
       const result = await api<ReplayConsumerResult>(
         clusterPath(
-          clusterId,
+          id,
           `/streams/${encodeURIComponent(name)}/consumers/${encodeURIComponent(consumer)}/replay`,
         ),
         { method: "POST", body: JSON.stringify(body) },
@@ -127,7 +166,7 @@ export default function ConsumerDetailPage() {
     }
   }
 
-  if (!clusterId) {
+  if (!id) {
     return <p className="text-muted">Select a cluster to view this consumer.</p>;
   }
 
@@ -139,23 +178,53 @@ export default function ConsumerDetailPage() {
     <div>
       <div className="page-header">
         <div>
-          <Link to={`/streams/${name}`} className="link-back">
-            ← Back to {name}
+          <Link
+            to={backHref}
+            className="link-back"
+            state={fromTopology ? TOPOLOGY_LOCATION_STATE : undefined}
+          >
+            {fromTopology ? t("topology.backToTopology") : t("consumers.backToStream", { name })}
           </Link>
           <h1>{info.name}</h1>
+          {info.config.description ? <p className="text-muted">{info.config.description}</p> : null}
         </div>
-        {canWrite && (
-          <button className="btn danger" onClick={deleteConsumer}>
-            Delete Consumer
-          </button>
+        {canManageJetStream && (
+          <div className="actions">
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => {
+                setEditError("");
+                setEditOpen(true);
+              }}
+            >
+              {t("jetstream.editConfig")}
+            </button>
+            <button className="btn danger" type="button" onClick={deleteConsumer}>
+              Delete Consumer
+            </button>
+          </div>
         )}
       </div>
 
       <Alert variant="error">{error}</Alert>
       <Alert variant="success">{success}</Alert>
+
+      <CreateConsumerPanel
+        mode="edit"
+        open={editOpen}
+        initial={info.config}
+        busy={editBusy}
+        error={editError}
+        onClose={() => {
+          setEditOpen(false);
+          setEditError("");
+        }}
+        onSubmit={saveConsumerConfig}
+      />
       {createdDurable && (
         <p>
-          <Link to={`/streams/${name}/consumers/${encodeURIComponent(createdDurable)}`}>
+          <Link to={`${streamHref}/consumers/${encodeURIComponent(createdDurable)}`}>
             Open {createdDurable}
           </Link>
         </p>
@@ -184,7 +253,7 @@ export default function ConsumerDetailPage() {
         </div>
       </div>
 
-      {canWrite && (
+      {canManageJetStream && (
         <>
           <h2 className="mt-32">Replay</h2>
           <p className="text-muted">

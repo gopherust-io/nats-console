@@ -35,9 +35,8 @@ func TestCSRFBlocksSessionCookieMutations(t *testing.T) {
 	}
 	for _, c := range loginResp.Cookies() {
 		if c.Name == "nats_consol_session" {
-			req, _ := http.NewRequest(http.MethodPost, "http://nats-consol.local/api/v1/clusters",
-				strings.NewReader(`{"name":"csrf-test","natsUrl":"nats://localhost:4222"}`))
-			req.Header.Set("Content-Type", "application/json")
+			clusterID := stack.DefaultClusterID(t)
+			req, _ := http.NewRequest(http.MethodPost, "http://nats-consol.local/api/v1/clusters/"+clusterID+"/test", nil)
 			req.AddCookie(c)
 			resp, err := client.Do(req)
 			require.NoError(t, err)

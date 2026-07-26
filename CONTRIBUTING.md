@@ -11,7 +11,8 @@
 ```bash
 make test-unit        # Go unit tests
 make lint-go          # golangci-lint + goalign
-make lint-web         # web lint + typecheck
+make lint-web         # web lint + typecheck + vitest
+make test-web         # web vitest + Playwright e2e
 make ci               # lint-go + lint-web + unit + regression
 ```
 

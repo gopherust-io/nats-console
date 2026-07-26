@@ -26,6 +26,7 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
+	"github.com/gopherust-io/nats-consol/internal/snapshot"
 	"github.com/gopherust-io/nats-consol/internal/store"
 )
 
@@ -247,6 +248,7 @@ func (s *Stack) NewServer(t *testing.T, mutate func(*config.Config)) *Server {
 		Services:    services,
 		AuditWriter: audit.NewWriter(s.Store),
 		Store:       s.Store,
+		SnapshotHub: snapshot.NewHub(),
 	})
 
 	ln := fasthttputil.NewInmemoryListener()

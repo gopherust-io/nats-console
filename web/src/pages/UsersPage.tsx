@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api, AccessRules, UserRecord } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
@@ -14,6 +15,7 @@ const emptyRules: AccessRules = {
 };
 
 export default function UsersPage() {
+  const { t } = useTranslation();
   const { user: currentUser, canManageUsers, isRoot } = useAuth();
   const { clusters } = useCluster();
   const [users, setUsers] = useState<UserRecord[]>([]);
@@ -28,6 +30,10 @@ export default function UsersPage() {
     unscopedAdmin: false,
     accessRules: { ...emptyRules, manageUsers: true, assignableRoles: ["operator", "viewer"] },
   });
+
+  const [inviteForm, setInviteForm] = useState({ username: "", email: "" });
+  const [inviteUrl, setInviteUrl] = useState("");
+  const [inviting, setInviting] = useState(false);
 
   function toggleClusterSelection(clusterIds: string[], clusterId: string, checked: boolean) {
     const next = new Set(clusterIds);
@@ -62,21 +68,21 @@ export default function UsersPage() {
     );
   }
 
-  async function load() {
+  const load = useCallback(async () => {
     setError("");
     try {
       const data = await api<{ users: UserRecord[] }>("/api/v1/users");
       setUsers(data.users ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load users");
+      setError(err instanceof Error ? err.message : t("users.loadFailed"));
     }
-  }
+  }, [t]);
 
   useEffect(() => {
     if (canManageUsers) {
       void load();
     }
-  }, [canManageUsers]);
+  }, [canManageUsers, load]);
 
   async function updateRoles(user: UserRecord, roles: string[]) {
     setSaving(user.id);
@@ -88,7 +94,7 @@ export default function UsersPage() {
       });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update roles");
+      setError(err instanceof Error ? err.message : t("users.updateRolesFailed"));
     } finally {
       setSaving(null);
     }
@@ -104,21 +110,21 @@ export default function UsersPage() {
       });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update access rules");
+      setError(err instanceof Error ? err.message : t("users.updateAccessFailed"));
     } finally {
       setSaving(null);
     }
   }
 
   async function deleteUser(user: UserRecord) {
-    if (!window.confirm(`Delete user ${user.username}?`)) return;
+    if (!window.confirm(t("users.confirmDelete", { username: user.username }))) return;
     setSaving(user.id);
     setError("");
     try {
       await api(`/api/v1/users/${user.id}`, { method: "DELETE" });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete user");
+      setError(err instanceof Error ? err.message : t("users.deleteFailed"));
     } finally {
       setSaving(null);
     }
@@ -152,7 +158,7 @@ export default function UsersPage() {
       });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create user");
+      setError(err instanceof Error ? err.message : t("users.createFailed"));
     } finally {
       setCreating(false);
     }
@@ -183,27 +189,83 @@ export default function UsersPage() {
     return (
       <div>
         <div className="page-header">
-          <h1>Users &amp; Roles</h1>
+          <h1>{t("users.title")}</h1>
         </div>
-        <div className="muted">You do not have permission to manage users.</div>
+        <div className="muted">{t("users.noPermission")}</div>
       </div>
     );
+  }
+
+  async function invitePerson(event: FormEvent) {
+    event.preventDefault();
+    setInviting(true);
+    setError("");
+    setInviteUrl("");
+    try {
+      const res = await api<{ inviteUrl: string }>("/api/v1/people/invite", {
+        method: "POST",
+        body: JSON.stringify({
+          username: inviteForm.username,
+          email: inviteForm.email,
+          roles: ["viewer"],
+        }),
+      });
+      setInviteUrl(res.inviteUrl);
+      setInviteForm({ username: "", email: "" });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("users.inviteFailed"));
+    } finally {
+      setInviting(false);
+    }
   }
 
   return (
     <div>
       <div className="page-header">
-        <h1>Users &amp; Roles</h1>
+        <h1>{t("users.title")}</h1>
       </div>
 
       {error && <div className="error">{error}</div>}
 
+      <div className="card" style={{ marginBottom: "1rem" }}>
+        <h2>{t("users.inviteTitle")}</h2>
+        <p className="muted">{t("users.inviteHelp")}</p>
+        <form className="form-grid" onSubmit={invitePerson}>
+          <label>
+            {t("common.username")}
+            <input
+              value={inviteForm.username}
+              onChange={(e) => setInviteForm((f) => ({ ...f, username: e.target.value }))}
+              required
+            />
+          </label>
+          <label>
+            {t("common.email")}
+            <input
+              type="email"
+              value={inviteForm.email}
+              onChange={(e) => setInviteForm((f) => ({ ...f, email: e.target.value }))}
+            />
+          </label>
+          <button className="btn btn--primary" type="submit" disabled={inviting}>
+{inviting ? t("users.inviting") : t("users.createInvite")}
+          </button>
+        </form>
+        {inviteUrl && (
+          <p className="mt-16">
+{t("users.inviteUrl")}{" "}
+            <code style={{ wordBreak: "break-all" }}>{inviteUrl}</code>
+          </p>
+        )}
+      </div>
+
       {isRoot && (
         <div className="card" style={{ marginBottom: "1rem" }}>
-          <h2>Create admin user</h2>
+          <h2>{t("users.createAdminTitle")}</h2>
           <form className="form-grid" onSubmit={createUser}>
             <label>
-              Username
+              {t("common.username")}
               <input
                 value={form.username}
                 onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
@@ -211,7 +273,7 @@ export default function UsersPage() {
               />
             </label>
             <label>
-              Email
+              {t("common.email")}
               <input
                 type="email"
                 value={form.email}
@@ -219,7 +281,7 @@ export default function UsersPage() {
               />
             </label>
             <label>
-              Password
+              {t("common.password")}
               <input
                 type="password"
                 value={form.password}
@@ -228,7 +290,7 @@ export default function UsersPage() {
               />
             </label>
             <label>
-              Roles
+              {t("common.roles")}
               <select
                 multiple
                 value={form.roles}
@@ -254,7 +316,7 @@ export default function UsersPage() {
                     checked={form.unscopedAdmin}
                     onChange={(e) => setForm((f) => ({ ...f, unscopedAdmin: e.target.checked }))}
                   />
-                  Unscoped admin (all clusters)
+                  {t("users.unscopedAdmin")}
                 </label>
                 <label className="role-chip">
                   <input
@@ -267,7 +329,7 @@ export default function UsersPage() {
                       }))
                     }
                   />
-                  Manage users
+                  {t("users.manageUsers")}
                 </label>
                 <label className="role-chip">
                   <input
@@ -280,7 +342,7 @@ export default function UsersPage() {
                       }))
                     }
                   />
-                  View audit
+                  {t("users.viewAudit")}
                 </label>
                 <label className="role-chip">
                   <input
@@ -293,13 +355,13 @@ export default function UsersPage() {
                       }))
                     }
                   />
-                  Delete clusters
+                  {t("users.deleteClusters")}
                 </label>
               </div>
             )}
             {!(form.roles.length === 1 && form.roles[0] === "admin" && form.unscopedAdmin) && (
               <label>
-                Cluster access
+                {t("users.clusterAccess")}
                 <ClusterAccessPicker
                   clusterIds={form.accessRules.clusterIds ?? []}
                   onChange={(clusterIds) =>
@@ -312,7 +374,7 @@ export default function UsersPage() {
               </label>
             )}
             <button className="btn btn--primary" type="submit" disabled={creating}>
-              {creating ? "Creating…" : "Create user"}
+{creating ? t("users.creating") : t("users.createUser")}
             </button>
           </form>
         </div>
@@ -322,11 +384,11 @@ export default function UsersPage() {
         <table className="table">
           <thead>
             <tr>
-              <th>Username</th>
-              <th>Email</th>
-              <th>Roles</th>
-              <th>Access</th>
-              <th>Created</th>
+              <th>{t("common.username")}</th>
+              <th>{t("common.email")}</th>
+              <th>{t("common.roles")}</th>
+              <th>{t("users.access")}</th>
+              <th>{t("common.created")}</th>
               <th />
             </tr>
           </thead>
@@ -335,9 +397,9 @@ export default function UsersPage() {
               <tr key={user.id}>
                 <td>
                   {user.username}
-                  {user.isRoot && <span className="badge">root</span>}
+{user.isRoot && <span className="badge">{t("users.root")}</span>}
                 </td>
-                <td>{user.email || "—"}</td>
+                <td>{user.email || t("common.emDash")}</td>
                 <td>
                   <div className="role-grid">
                     {ROLES.map((role) => (
@@ -355,7 +417,7 @@ export default function UsersPage() {
                 </td>
                 <td>
                   {user.isRoot ? (
-                    <span className="muted">Full access</span>
+<span className="muted">{t("users.fullAccess")}</span>
                   ) : user.accessRules ? (
                     <div className="role-grid">
                       {user.roles.includes("admin") && (
@@ -372,7 +434,7 @@ export default function UsersPage() {
                                 })
                               }
                             />
-                            users
+                            {t("users.usersShort")}
                           </label>
                           <label className="role-chip">
                             <input
@@ -386,7 +448,7 @@ export default function UsersPage() {
                                 })
                               }
                             />
-                            audit
+                            {t("users.auditShort")}
                           </label>
                           <label className="role-chip">
                             <input
@@ -400,7 +462,7 @@ export default function UsersPage() {
                                 })
                               }
                             />
-                            delete clusters
+                            {t("users.clustersShort")}
                           </label>
                         </>
                       )}
@@ -416,7 +478,7 @@ export default function UsersPage() {
                       />
                     </div>
                   ) : (
-                    <span className="muted">Unscoped admin</span>
+<span className="muted">{t("users.unscopedAdmin")}</span>
                   )}
                 </td>
                 <td>{new Date(user.createdAt).toLocaleDateString()}</td>
@@ -428,7 +490,7 @@ export default function UsersPage() {
                       disabled={saving === user.id}
                       onClick={() => deleteUser(user)}
                     >
-                      Delete
+                      {t("common.delete")}
                     </button>
                   )}
                 </td>
@@ -436,7 +498,7 @@ export default function UsersPage() {
             ))}
           </tbody>
         </table>
-        {users.length === 0 && <div className="muted">No users found.</div>}
+{users.length === 0 && <div className="muted">{t("users.empty")}</div>}
       </div>
     </div>
   );

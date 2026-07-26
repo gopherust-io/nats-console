@@ -29,6 +29,17 @@ func TestClusterIDFromPath(t *testing.T) {
 	}
 }
 
+func TestIsJetStreamResourcePath(t *testing.T) {
+	id := "550e8400-e29b-41d4-a716-446655440000"
+	assert.True(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/streams"))
+	assert.True(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/streams/ORDERS/consumers"))
+	assert.True(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/kv/buckets"))
+	assert.True(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/objects/buckets/x"))
+	assert.False(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/account"))
+	assert.False(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/nats-users"))
+	assert.False(t, isJetStreamResourcePath("/api/v1/clusters"))
+}
+
 func TestFilterClustersForActor(t *testing.T) {
 	clusters := []domain.Cluster{
 		{ID: "550e8400-e29b-41d4-a716-446655440000", Name: "allowed"},
@@ -79,4 +90,16 @@ func TestAuditFilterForActor(t *testing.T) {
 
 	_, err = auditFilterForActor(actor, "660e8400-e29b-41d4-a716-446655440001")
 	require.ErrorIs(t, err, domain.ErrForbidden)
+
+	emptyScope := domain.User{
+		Roles: []string{domain.RoleAdmin},
+		AccessRules: &domain.AccessRules{
+			ViewAudit:   true,
+			ManageUsers: true,
+		},
+	}
+	filter, err = auditFilterForActor(emptyScope, "")
+	require.NoError(t, err)
+	require.NotNil(t, filter.ClusterIDs)
+	assert.Empty(t, filter.ClusterIDs, "empty scope must not omit ClusterIDs (would leak all audit rows)")
 }

@@ -58,7 +58,14 @@ func TestCSRFRequiredForSessionMutations(t *testing.T) {
 	ctx.Request.Header.SetCookie(auth.SessionCookie, "session-token")
 	ctx.Request.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
 	h(ctx)
-	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), "basic auth should bypass csrf")
+	require.Equal(t, fasthttp.StatusForbidden, ctx.Response.StatusCode(), "session cookie must still require CSRF even with Basic header")
+
+	ctx = &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod(fasthttp.MethodPost)
+	ctx.Request.SetRequestURI("/api/v1/clusters")
+	ctx.Request.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
+	h(ctx)
+	require.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), "Basic-only (no session cookie) skips CSRF")
 }
 
 func TestAuthRateLimiter(t *testing.T) {

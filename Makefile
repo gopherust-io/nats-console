@@ -1,6 +1,6 @@
 .PHONY: dev dev-web build run docker-up docker-down tidy generate \
 	test test-unit test-integration test-contract test-security test-regression \
-	test-e2e test-smoke test-performance ci lint lint-go lint-go-fix lint-web lint-web-docker lint-web-local align
+	test-e2e test-smoke test-performance test-stress test-web ci lint lint-go lint-go-fix lint-web lint-web-docker lint-web-local align
 
 NODE_IMAGE ?= node:22-alpine
 WEB_DIR := web
@@ -70,10 +70,17 @@ test-regression: test-integration test-contract test-security
 test-e2e test-smoke:
 	./tests/e2e/smoke.sh
 
+test-web:
+	cd $(WEB_DIR) && npm ci && npm test && npm run build && npx playwright install --with-deps chromium && npm run test:e2e
+
 test-performance:
 	./tests/performance/load.sh
 
+test-stress:
+	./tests/performance/stress.sh
+
 # Targets run on every pull request in GitHub Actions (.github/workflows/test.yml).
+# Smoke needs a running compose stack (CI starts it); run `make test-smoke` separately locally.
 ci: lint-go lint-web test-unit test-regression
 
 lint: lint-go lint-web
@@ -91,13 +98,13 @@ lint-go-fix: align
 
 lint-web:
 	@if command -v npm >/dev/null 2>&1; then \
-		cd $(WEB_DIR) && npm install && npm run lint && npm run typecheck; \
+		cd $(WEB_DIR) && npm install && npm run lint && npm run typecheck && npm test; \
 	else \
 		$(MAKE) lint-web-docker; \
 	fi
 
 lint-web-docker:
-	docker run --rm -v "$(CURDIR)/$(WEB_DIR):/web" -w /web $(NODE_IMAGE) sh -c "npm install && npm run lint && npm run typecheck"
+	docker run --rm -v "$(CURDIR)/$(WEB_DIR):/web" -w /web $(NODE_IMAGE) sh -c "npm install && npm run lint && npm run typecheck && npm test"
 
 lint-web-local:
-	cd $(WEB_DIR) && npm install && npm run lint && npm run typecheck
+	cd $(WEB_DIR) && npm install && npm run lint && npm run typecheck && npm test

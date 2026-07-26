@@ -1,0 +1,137 @@
+[data-theme="control-light"] {
+  color-scheme: light;
+  --bg-body: #fafafa;
+  --bg-gradient: #fafafa;
+  --bg-sidebar: #ffffff;
+  --bg-card: #ffffff;
+  --bg-input: #f4f4f5;
+  --bg-table-hover: rgba(16, 185, 129, 0.06);
+  --bg-nav-active: rgba(16, 185, 129, 0.12);
+  --bg-badge: rgba(16, 185, 129, 0.1);
+  --bg-btn-secondary: rgba(24, 24, 27, 0.04);
+  --text-primary: #18181b;
+  --text-secondary: #3f3f46;
+  --text-muted: #71717a;
+  --border: #e4e4e7;
+  --border-subtle: rgba(228, 228, 231, 0.9);
+  --accent: #10b981;
+  --accent-hover: #059669;
+  --accent-text: #ffffff;
+  --danger: #ef4444;
+  --danger-hover: #dc2626;
+  --success: #10b981;
+  --success-bg: rgba(16, 185, 129, 0.1);
+  --success-text: #047857;
+  --warning-bg: rgba(234, 179, 8, 0.12);
+  --warning-text: #a16207;
+  --error: #dc2626;
+  --error-bg: rgba(239, 68, 68, 0.08);
+  --shadow: none;
+  --shadow-sm: none;
+  --brand-bg: linear-gradient(135deg, #10b981 0%, #14b8a6 100%);
+  --brand-shadow: none;
+  --btn-bg: #10b981;
+  --btn-bg-hover: #059669;
+  --btn-text: #ffffff;
+  --btn-shadow: none;
+  --btn-shadow-hover: none;
+  --btn-sheen: none;
+  --btn-hover-lift: none;
+  --btn-secondary-bg: transparent;
+  --btn-secondary-bg-hover: #f4f4f5;
+  --btn-secondary-text: #3f3f46;
+  --btn-secondary-text-hover: #18181b;
+  --btn-secondary-border: #e4e4e7;
+  --btn-secondary-border-hover: #d4d4d8;
+  --btn-secondary-shadow: none;
+  --sidebar-blur: 0px;
+  --card-blur: 0px;
+  --surface-elevated: #f4f4f5;
+  --surface-overlay: #e4e4e7;
+}
+
+[data-theme="control-light"] .sidebar,
+[data-theme="control-light"] .card,
+[data-theme="control-light"] .login-card,
+[data-theme="control-light"] .assistant-panel {
+  backdrop-filter: none;
+}
+
+[data-theme="control-light"] .card,
+[data-theme="control-light"] .login-card,
+[data-theme="control-light"] .table-wrap,
+[data-theme="control-light"] .live-log {
+  box-shadow: none;
+  border-color: var(--border);
+}
+
+[data-theme="control-light"] .btn::after {
+  display: none;
+}
+
+[data-theme="control-light"] .btn:hover:not(:disabled),
+[data-theme="control-light"] .btn:active:not(:disabled) {
+  transform: none;
+}
+
+[data-theme="control-light"] .btn {
+  transition:
+    background var(--nc-duration, 150ms) var(--nc-ease, cubic-bezier(0.4, 0, 0.2, 1)),
+    border-color var(--nc-duration, 150ms) var(--nc-ease, cubic-bezier(0.4, 0, 0.2, 1)),
+    color var(--nc-duration, 150ms) var(--nc-ease, cubic-bezier(0.4, 0, 0.2, 1)),
+    opacity var(--nc-duration, 150ms) var(--nc-ease, cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+[data-theme="control-light"] .btn.secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+[data-theme="control-light"] .btn.secondary:hover:not(:disabled) {
+  background: var(--btn-secondary-bg-hover);
+  border-color: var(--btn-secondary-border-hover);
+}
+
+[data-theme="control-light"] .status-connected {
+  background: transparent;
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 55%, transparent);
+}
+
+[data-theme="control-light"] .badge {
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+[data-theme="control-light"] .nav-link.active {
+  background: var(--bg-nav-active);
+  color: var(--text-primary);
+}
+
+[data-theme="control-light"] .brand__icon {
+  background: var(--brand-bg);
+  box-shadow: none;
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+[data-theme="control-light"] .brand__icon::before,
+[data-theme="control-light"] .brand__icon::after {
+  opacity: 0.25;
+}
+
+[data-theme="control-light"] .page-header h1 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+[data-theme="control-light"] .login-orb {
+  opacity: 0.1;
+}
+
+[data-theme="control-light"] .login-orb--2 {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+[data-theme="control-light"] .login-page__backdrop {
+  background: #fafafa;
+}

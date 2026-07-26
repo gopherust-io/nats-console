@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { Link } from "react-router";
+import { motion } from "motion/react";
+import { useTranslation } from "react-i18next";
 import type { TopologyNode, TopologyNodeKind } from "../lib/topology";
-import { splitStreamChildren } from "../lib/topology";
+import { splitStreamChildren, TOPOLOGY_LOCATION_STATE } from "../lib/topology";
+import { useTopologyMotion } from "../lib/topologyMotion";
 
 const kindLabels: Record<TopologyNodeKind, string> = {
   cluster: "Cluster",
@@ -19,26 +22,92 @@ const kindIcons: Record<TopologyNodeKind, string> = {
 
 type TopologyTreeProps = {
   root: TopologyNode;
-  defaultExpanded?: boolean;
-  expandAll?: boolean;
-  selectedStreamId?: string | null;
+  selectedNodeId?: string | null;
+  onSelectNode?: (node: TopologyNode) => void;
 };
+
+function BranchRail({ visible }: { visible: boolean }) {
+  const { reduceMotion, pathDraw } = useTopologyMotion();
+  if (!visible) return null;
+
+  return (
+    <span className="topology-branch__rail" aria-hidden>
+      <svg className="topology-branch__rail-svg" viewBox="0 0 16 36" preserveAspectRatio="none">
+        <motion.path
+          d="M 7 0 V 18 H 14"
+          className="topology-branch__rail-path"
+          fill="none"
+          initial={{ pathLength: 0, opacity: 0 }}
+          animate={{ pathLength: 1, opacity: 1 }}
+          transition={reduceMotion ? { duration: 0 } : pathDraw}
+        />
+        <motion.circle
+          cx="14"
+          cy="18"
+          r="2"
+          className="topology-branch__rail-dot"
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={reduceMotion ? { duration: 0 } : { ...pathDraw, delay: 0.15 }}
+        />
+      </svg>
+    </span>
+  );
+}
+
+function BranchChildren({ className, children }: { className?: string; children: ReactNode }) {
+  const { reduceMotion, collapseTransition } = useTopologyMotion();
+
+  return (
+    <motion.ul
+      className={className}
+      initial={reduceMotion ? false : { opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{
+        ...collapseTransition,
+        when: "beforeChildren",
+        staggerChildren: reduceMotion ? 0 : 0.045,
+        delayChildren: reduceMotion ? 0 : 0.04,
+      }}
+    >
+      {children}
+    </motion.ul>
+  );
+}
 
 function NodeCard({
   node,
-  expanded,
-  hasChildren,
-  onToggle,
+  selected,
+  onSelect,
 }: {
   node: TopologyNode;
-  expanded: boolean;
-  hasChildren: boolean;
-  onToggle: () => void;
+  selected: boolean;
+  onSelect: () => void;
 }) {
+  const { spring } = useTopologyMotion();
   const statusClass = node.status ? ` topology-node--${node.status}` : "";
+  const selectedClass = selected ? " topology-node--selected" : "";
+  const selectable = node.kind !== "cluster";
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!selectable) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect();
+    }
+  };
 
   return (
-    <div className={`topology-node${statusClass}`}>
+    <motion.div
+      className={`topology-node topology-node--chip${statusClass}${selectedClass}${selectable ? " topology-node--selectable" : ""}`}
+      role={selectable ? "treeitem" : undefined}
+      aria-selected={selectable ? selected : undefined}
+      tabIndex={selectable ? 0 : undefined}
+      onClick={selectable ? onSelect : undefined}
+      onKeyDown={onKeyDown}
+      layout
+      transition={spring}
+    >
       <span className={`topology-node__icon topology-node__icon--${node.kind}`} aria-hidden>
         {kindIcons[node.kind]}
       </span>
@@ -48,7 +117,18 @@ function NodeCard({
           {node.status && <span className={`topology-node__status topology-node__status--${node.status}`} />}
         </div>
         <div className="topology-node__name">
-          {node.href ? <Link to={node.href}>{node.name}</Link> : node.name}
+          {node.href ? (
+            <Link
+              to={node.href}
+              state={TOPOLOGY_LOCATION_STATE}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <motion.span layoutId={selectable ? `topo-name-${node.id}` : undefined}>{node.name}</motion.span>
+            </Link>
+          ) : (
+            <motion.span layoutId={selectable ? `topo-name-${node.id}` : undefined}>{node.name}</motion.span>
+          )}
         </div>
         {node.meta && node.meta.length > 0 && (
           <div className="topology-node__meta">
@@ -60,40 +140,16 @@ function NodeCard({
           </div>
         )}
       </div>
-      {hasChildren && (
-        <button
-          type="button"
-          className={`topology-node__toggle${expanded ? " is-open" : ""}`}
-          onClick={onToggle}
-          aria-expanded={expanded}
-          aria-label={expanded ? "Collapse" : "Expand"}
-        >
-          ▾
-        </button>
-      )}
-    </div>
+    </motion.div>
   );
 }
 
-function GroupHeader({
-  label,
-  count,
-  expanded,
-  onToggle,
-}: {
-  label: string;
-  count: number;
-  expanded: boolean;
-  onToggle: () => void;
-}) {
+function GroupHeader({ label, count }: { label: string; count: number }) {
   return (
-    <button type="button" className="topology-group__header" onClick={onToggle} aria-expanded={expanded}>
+    <div className="topology-group__header">
       <span className="topology-group__label">{label}</span>
       <span className="topology-group__count">{count}</span>
-      <span className={`topology-group__chevron${expanded ? " is-open" : ""}`} aria-hidden>
-        ▾
-      </span>
-    </button>
+    </div>
   );
 }
 
@@ -102,112 +158,107 @@ function LeafBranch({
   depth,
   isLast,
   branchIndex = 0,
+  selectedNodeId,
+  onSelectNode,
 }: {
   node: TopologyNode;
   depth: number;
   isLast: boolean;
   branchIndex?: number;
+  selectedNodeId?: string | null;
+  onSelectNode?: (node: TopologyNode) => void;
 }) {
+  const { itemVariants, transition } = useTopologyMotion();
   const branchStyle = { "--branch-index": branchIndex } as CSSProperties;
 
   return (
-    <li className={`topology-branch${isLast ? " topology-branch--last" : ""}`} data-depth={depth} style={branchStyle}>
+    <motion.li
+      className={`topology-branch${isLast ? " topology-branch--last" : ""}`}
+      data-depth={depth}
+      style={branchStyle}
+      variants={itemVariants}
+      transition={transition}
+    >
       <div className="topology-branch__row">
-        {depth > 0 && <span className="topology-branch__rail" aria-hidden />}
-        <NodeCard node={node} expanded={false} hasChildren={false} onToggle={() => undefined} />
+        <BranchRail visible={depth > 0} />
+        <NodeCard
+          node={node}
+          selected={node.id === selectedNodeId}
+          onSelect={() => onSelectNode?.(node)}
+        />
       </div>
-    </li>
+    </motion.li>
   );
 }
 
 function StreamGroups({
   stream,
   depth,
-  defaultExpanded,
-  expandAll,
-  selectedStreamId,
+  selectedNodeId,
+  onSelectNode,
 }: {
   stream: TopologyNode;
   depth: number;
-  defaultExpanded: boolean;
-  expandAll?: boolean;
-  selectedStreamId?: string | null;
+  selectedNodeId?: string | null;
+  onSelectNode?: (node: TopologyNode) => void;
 }) {
+  const { itemVariants, transition } = useTopologyMotion();
   const { subjects, consumers } = splitStreamChildren(stream);
-  const isSelected = stream.id === selectedStreamId;
-  const [streamOpen, setStreamOpen] = useState(() => defaultExpanded || isSelected);
-  const [subjectsOpen, setSubjectsOpen] = useState(() => isSelected || subjects.length <= 4);
-  const [consumersOpen, setConsumersOpen] = useState(() => isSelected || consumers.length <= 4);
-
-  useEffect(() => {
-    if (expandAll === undefined) return;
-    setStreamOpen(expandAll);
-    setSubjectsOpen(expandAll);
-    setConsumersOpen(expandAll);
-  }, [expandAll]);
+  const isSelected = stream.id === selectedNodeId;
+  const hasChildren = subjects.length > 0 || consumers.length > 0;
 
   return (
-    <li className="topology-branch topology-branch--last" data-depth={depth}>
+    <motion.li
+      className="topology-branch topology-branch--last"
+      data-depth={depth}
+      variants={itemVariants}
+      transition={transition}
+    >
       <div className="topology-branch__row">
-        {depth > 0 && <span className="topology-branch__rail" aria-hidden />}
-        <NodeCard
-          node={stream}
-          expanded={streamOpen}
-          hasChildren={subjects.length + consumers.length > 0}
-          onToggle={() => setStreamOpen((value) => !value)}
-        />
+        <BranchRail visible={depth > 0} />
+        <NodeCard node={stream} selected={isSelected} onSelect={() => onSelectNode?.(stream)} />
       </div>
-      {streamOpen && (subjects.length > 0 || consumers.length > 0) && (
-        <ul className="topology-branch__children is-open">
+      {hasChildren && (
+        <BranchChildren className="topology-branch__children is-open">
           {subjects.length > 0 && (
             <li className="topology-group">
-              <GroupHeader
-                label="Subjects"
-                count={subjects.length}
-                expanded={subjectsOpen}
-                onToggle={() => setSubjectsOpen((value) => !value)}
-              />
-              {subjectsOpen && (
-                <ul className="topology-group__items">
-                  {subjects.map((subject, index) => (
-                    <LeafBranch
-                      key={subject.id}
-                      node={subject}
-                      depth={depth + 2}
-                      isLast={index === subjects.length - 1}
-                      branchIndex={index}
-                    />
-                  ))}
-                </ul>
-              )}
+              <GroupHeader label="Subjects" count={subjects.length} />
+              <BranchChildren className="topology-group__items">
+                {subjects.map((subject, index) => (
+                  <LeafBranch
+                    key={subject.id}
+                    node={subject}
+                    depth={depth + 2}
+                    isLast={index === subjects.length - 1}
+                    branchIndex={index}
+                    selectedNodeId={selectedNodeId}
+                    onSelectNode={onSelectNode}
+                  />
+                ))}
+              </BranchChildren>
             </li>
           )}
           {consumers.length > 0 && (
             <li className="topology-group">
-              <GroupHeader
-                label="Consumers"
-                count={consumers.length}
-                expanded={consumersOpen}
-                onToggle={() => setConsumersOpen((value) => !value)}
-              />
-              {consumersOpen && (
-                <ul className="topology-group__items">
-                  {consumers.map((consumer, index) => (
-                    <LeafBranch
-                      key={consumer.id}
-                      node={consumer}
-                      depth={depth + 2}
-                      isLast={index === consumers.length - 1}
-                      branchIndex={index}
-                    />
-                  ))}
-                </ul>
-              )}
+              <GroupHeader label="Consumers" count={consumers.length} />
+              <BranchChildren className="topology-group__items">
+                {consumers.map((consumer, index) => (
+                  <LeafBranch
+                    key={consumer.id}
+                    node={consumer}
+                    depth={depth + 2}
+                    isLast={index === consumers.length - 1}
+                    branchIndex={index}
+                    selectedNodeId={selectedNodeId}
+                    onSelectNode={onSelectNode}
+                  />
+                ))}
+              </BranchChildren>
             </li>
           )}
-        </ul>
+        </BranchChildren>
       )}
-    </li>
+    </motion.li>
   );
 }
 
@@ -215,34 +266,26 @@ function TreeBranch({
   node,
   depth,
   isLast,
-  defaultExpanded,
-  expandAll,
-  selectedStreamId,
+  selectedNodeId,
+  onSelectNode,
   branchIndex = 0,
 }: {
   node: TopologyNode;
   depth: number;
   isLast: boolean;
-  defaultExpanded: boolean;
-  expandAll?: boolean;
-  selectedStreamId?: string | null;
+  selectedNodeId?: string | null;
+  onSelectNode?: (node: TopologyNode) => void;
   branchIndex?: number;
 }) {
-  const [expanded, setExpanded] = useState(() => depth === 0 || defaultExpanded);
-
-  useEffect(() => {
-    if (expandAll === undefined) return;
-    setExpanded(expandAll);
-  }, [expandAll]);
+  const { itemVariants, transition } = useTopologyMotion();
 
   if (node.kind === "stream") {
     return (
       <StreamGroups
         stream={node}
         depth={depth}
-        defaultExpanded={defaultExpanded}
-        expandAll={expandAll}
-        selectedStreamId={selectedStreamId}
+        selectedNodeId={selectedNodeId}
+        onSelectNode={onSelectNode}
       />
     );
   }
@@ -251,84 +294,74 @@ function TreeBranch({
   const branchStyle = { "--branch-index": branchIndex } as CSSProperties;
 
   return (
-    <li
+    <motion.li
       className={`topology-branch${isLast ? " topology-branch--last" : ""}`}
       data-depth={depth}
       style={branchStyle}
+      variants={itemVariants}
+      transition={transition}
     >
       <div className="topology-branch__row">
-        {depth > 0 && <span className="topology-branch__rail" aria-hidden />}
+        <BranchRail visible={depth > 0} />
         <NodeCard
           node={node}
-          expanded={expanded}
-          hasChildren={hasChildren}
-          onToggle={() => setExpanded((value) => !value)}
+          selected={node.id === selectedNodeId}
+          onSelect={() => onSelectNode?.(node)}
         />
       </div>
       {hasChildren && (
-        <ul className={`topology-branch__children${expanded ? " is-open" : ""}`}>
+        <BranchChildren className="topology-branch__children is-open">
           {node.children.map((child, index) => (
             <TreeBranch
               key={child.id}
               node={child}
               depth={depth + 1}
               isLast={index === node.children.length - 1}
-              defaultExpanded={defaultExpanded}
-              expandAll={expandAll}
-              selectedStreamId={selectedStreamId}
+              selectedNodeId={selectedNodeId}
+              onSelectNode={onSelectNode}
               branchIndex={index}
             />
           ))}
-        </ul>
+        </BranchChildren>
       )}
-    </li>
+    </motion.li>
   );
 }
 
 export default function TopologyTree({
   root,
-  defaultExpanded = false,
-  expandAll,
-  selectedStreamId = null,
+  selectedNodeId = null,
+  onSelectNode,
 }: TopologyTreeProps) {
-  const legend = useMemo(
-    () => [
-      { kind: "subject" as const, label: "Subject publishes to a pattern" },
-      { kind: "stream" as const, label: "Stream captures matching messages" },
-      { kind: "consumer" as const, label: "Consumer receives from the stream" },
-    ],
-    [],
-  );
+  const { t } = useTranslation();
+  const { listVariants } = useTopologyMotion();
 
   return (
-    <div className="topology-tree">
+    <div className="topology-tree topology-tree--constellation">
       <div className="topology-tree__head">
         <div>
-          <h2 className="topology-tree__title">Hierarchy explorer</h2>
-          <p className="topology-tree__subtitle">Subjects and consumers are grouped under each stream.</p>
+          <h2 className="topology-tree__title">{t("topology.hierarchyTitle")}</h2>
+          <p className="topology-tree__subtitle">{t("topology.hierarchySubtitle")}</p>
         </div>
       </div>
 
-      <div className="topology-tree__legend">
-        {legend.map((item) => (
-          <span key={item.kind} className="topology-tree__legend-item">
-            <span className={`topology-node__icon topology-node__icon--${item.kind}`}>{kindIcons[item.kind]}</span>
-            {item.label}
-          </span>
-        ))}
-      </div>
-
       <div className="topology-tree__canvas">
-        <ul className="topology-tree__root">
+        <motion.ul
+          className="topology-tree__root"
+          role="tree"
+          aria-label={t("topology.hierarchyTitle")}
+          variants={listVariants}
+          initial="hidden"
+          animate="visible"
+        >
           <TreeBranch
             node={root}
             depth={0}
             isLast
-            defaultExpanded={defaultExpanded}
-            expandAll={expandAll}
-            selectedStreamId={selectedStreamId}
+            selectedNodeId={selectedNodeId}
+            onSelectNode={onSelectNode}
           />
-        </ul>
+        </motion.ul>
       </div>
     </div>
   );

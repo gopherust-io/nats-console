@@ -15,9 +15,8 @@ func TestIsPublicPath(t *testing.T) {
 		"/api/v1/auth/config",
 		"/api/v1/auth/login",
 		"/api/v1/auth/logout",
-		"/api/v1/auth/oidc/login",
-		"/api/v1/auth/oidc/callback",
-		"/api/v1/auth/oidc/google/login",
+		"/api/v1/auth/invite/accept",
+		"/api/v1/auth/invite/abc123",
 	}
 	for _, path := range public {
 		assert.True(t, isPublicPath(path), "%q should be public", path)
@@ -29,6 +28,7 @@ func TestIsPublicPath(t *testing.T) {
 		"/api/v1/auth/me",
 		"/api/v1/users",
 		"/api/v1/audit",
+		"/api/v1/auth/oidc/login",
 	}
 	for _, path := range protected {
 		assert.False(t, isPublicPath(path), "%q should not be public", path)

@@ -33,7 +33,7 @@ func (s *UserService) List(ctx context.Context, actor domain.User) ([]domain.Use
 		if user.IsRoot {
 			continue
 		}
-		if domain.PermissionsFor(user).SupersetOf(perms) || actor.ID == user.ID {
+		if perms.SupersetOf(domain.PermissionsFor(user)) || actor.ID == user.ID {
 			filtered = append(filtered, user)
 		}
 	}
@@ -128,7 +128,7 @@ func (s *UserService) authorizeUserMutation(actor, target domain.User) error {
 	if perms.IsRoot {
 		return nil
 	}
-	if !domain.PermissionsFor(target).SupersetOf(perms) && actor.ID != target.ID {
+	if !perms.SupersetOf(domain.PermissionsFor(target)) && actor.ID != target.ID {
 		return domain.ErrForbidden
 	}
 	return nil

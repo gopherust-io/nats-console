@@ -31,14 +31,16 @@ type AccessRules struct {
 
 // goalign:ignore
 type User struct {
-	CreatedAt   time.Time    `json:"created_at"`
-	AccessRules *AccessRules `json:"access_rules,omitempty"`
-	ID          string       `json:"id"`
-	Username    string       `json:"username"`
-	Email       string       `json:"email"`
-	OIDCSub     string       `json:"oidc_sub,omitempty"`
-	Roles       []string     `json:"roles"`
-	IsRoot      bool         `json:"is_root"`
+	CreatedAt      time.Time     `json:"created_at"`
+	AccessRules    *AccessRules  `json:"access_rules,omitempty"`
+	Grants         []AccessGrant `json:"grants,omitempty"`
+	ID             string        `json:"id"`
+	Username       string        `json:"username"`
+	Email          string        `json:"email"`
+	OIDCSub        string        `json:"oidc_sub,omitempty"`
+	Roles          []string      `json:"roles"`
+	IsRoot         bool          `json:"is_root"`
+	SessionVersion int64         `json:"-"`
 }
 
 // goalign:ignore
@@ -64,15 +66,38 @@ type UserUpdate struct {
 	ClearRules  bool
 }
 
+const userSelectWithRolesGrants = `
+	SELECT u.id, u.username, u.email, u.oidc_sub, u.is_root, u.access_rules, u.created_at,
+	       COALESCE((
+	         SELECT array_agg(r.name ORDER BY r.name)
+	         FROM user_roles ur
+	         JOIN roles r ON r.id = ur.role_id
+	         WHERE ur.user_id = u.id
+	       ), '{}'),
+	       COALESCE((
+	         SELECT json_agg(json_build_object(
+	           'id', g.id,
+	           'user_id', g.user_id,
+	           'resource_type', g.resource_type,
+	           'resource_key', g.resource_key,
+	           'role', g.role,
+	           'created_at', g.created_at,
+	           'updated_at', g.updated_at
+	         ) ORDER BY g.resource_type, g.resource_key)
+	         FROM access_grants g WHERE g.user_id = u.id
+	       ), '[]'::json)`
+
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, string, error) {
-	row := s.pool.QueryRow(ctx, `
-		SELECT u.id, u.username, u.email, u.password_hash, u.oidc_sub, u.is_root, u.access_rules, u.created_at
+	row := s.pool.QueryRow(ctx, userSelectWithRolesGrants+`, u.password_hash
 		FROM users u WHERE u.username = $1`, username)
 
 	var u User
 	var passwordHash string
-	var rulesJSON []byte
-	err := row.Scan(&u.ID, &u.Username, &u.Email, &passwordHash, &u.OIDCSub, &u.IsRoot, &rulesJSON, &u.CreatedAt)
+	var rulesJSON, grantsJSON []byte
+	err := row.Scan(
+		&u.ID, &u.Username, &u.Email, &u.OIDCSub, &u.IsRoot, &rulesJSON, &u.CreatedAt,
+		&u.Roles, &grantsJSON, &passwordHash,
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, "", ErrNotFound
 	}
@@ -82,49 +107,30 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, s
 	if err := decodeAccessRules(rulesJSON, &u.AccessRules); err != nil {
 		return User{}, "", err
 	}
-
-	roles, err := s.listUserRoles(ctx, u.ID)
-	if err != nil {
+	if err := decodeUserGrants(grantsJSON, &u.Grants); err != nil {
 		return User{}, "", err
 	}
-	u.Roles = roles
 	return u, passwordHash, nil
 }
 
 func (s *Store) GetUserByOIDCSub(ctx context.Context, sub string) (User, error) {
-	row := s.pool.QueryRow(ctx, `
-		SELECT u.id, u.username, u.email, u.oidc_sub, u.is_root, u.access_rules, u.created_at
-		FROM users u WHERE u.oidc_sub = $1`, sub)
-
-	var u User
-	var rulesJSON []byte
-	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.OIDCSub, &u.IsRoot, &rulesJSON, &u.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return User{}, ErrNotFound
-	}
-	if err != nil {
-		return User{}, err
-	}
-	if err := decodeAccessRules(rulesJSON, &u.AccessRules); err != nil {
-		return User{}, err
-	}
-
-	roles, err := s.listUserRoles(ctx, u.ID)
-	if err != nil {
-		return User{}, err
-	}
-	u.Roles = roles
-	return u, nil
+	return s.getUserWhere(ctx, "u.oidc_sub = $1", sub)
 }
 
 func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
-	row := s.pool.QueryRow(ctx, `
-		SELECT u.id, u.username, u.email, u.oidc_sub, u.is_root, u.access_rules, u.created_at
-		FROM users u WHERE u.id = $1`, id)
+	return s.getUserWhere(ctx, "u.id = $1", id)
+}
+
+func (s *Store) getUserWhere(ctx context.Context, where string, arg any) (User, error) {
+	row := s.pool.QueryRow(ctx, userSelectWithRolesGrants+`
+		FROM users u WHERE `+where, arg)
 
 	var u User
-	var rulesJSON []byte
-	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.OIDCSub, &u.IsRoot, &rulesJSON, &u.CreatedAt)
+	var rulesJSON, grantsJSON []byte
+	err := row.Scan(
+		&u.ID, &u.Username, &u.Email, &u.OIDCSub, &u.IsRoot, &rulesJSON, &u.CreatedAt,
+		&u.Roles, &grantsJSON,
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -134,12 +140,9 @@ func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
 	if err := decodeAccessRules(rulesJSON, &u.AccessRules); err != nil {
 		return User{}, err
 	}
-
-	roles, err := s.listUserRoles(ctx, u.ID)
-	if err != nil {
+	if err := decodeUserGrants(grantsJSON, &u.Grants); err != nil {
 		return User{}, err
 	}
-	u.Roles = roles
 	return u, nil
 }
 
@@ -172,7 +175,13 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	if users == nil {
 		users = []User{}
 	}
-	return users, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.attachGrants(ctx, users); err != nil {
+		return nil, err
+	}
+	return users, nil
 }
 
 func (s *Store) CreateUser(ctx context.Context, in UserCreate) (User, error) {
@@ -346,28 +355,6 @@ func (s *Store) setUserRolesTx(ctx context.Context, tx pgx.Tx, userID string, ro
 	return nil
 }
 
-func (s *Store) listUserRoles(ctx context.Context, userID string) ([]string, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT r.name FROM roles r
-		JOIN user_roles ur ON ur.role_id = r.id
-		WHERE ur.user_id = $1
-		ORDER BY r.name`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var roles []string
-	for rows.Next() {
-		var role string
-		if err := rows.Scan(&role); err != nil {
-			return nil, err
-		}
-		roles = append(roles, role)
-	}
-	return roles, rows.Err()
-}
-
 func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	var count int
 	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
@@ -405,5 +392,40 @@ func decodeAccessRules(data []byte, out **AccessRules) error {
 		return err
 	}
 	*out = &rules
+	return nil
+}
+
+type grantJSON struct {
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	ID           string    `json:"id"`
+	UserID       string    `json:"user_id"`
+	ResourceType string    `json:"resource_type"`
+	ResourceKey  string    `json:"resource_key"`
+	Role         string    `json:"role"`
+}
+
+func decodeUserGrants(data []byte, out *[]AccessGrant) error {
+	if len(data) == 0 || string(data) == "[]" || string(data) == "null" {
+		*out = []AccessGrant{}
+		return nil
+	}
+	var rows []grantJSON
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return err
+	}
+	grants := make([]AccessGrant, 0, len(rows))
+	for _, g := range rows {
+		grants = append(grants, AccessGrant{
+			ID:           g.ID,
+			UserID:       g.UserID,
+			ResourceType: g.ResourceType,
+			ResourceKey:  g.ResourceKey,
+			Role:         g.Role,
+			CreatedAt:    g.CreatedAt,
+			UpdatedAt:    g.UpdatedAt,
+		})
+	}
+	*out = grants
 	return nil
 }

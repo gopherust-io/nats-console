@@ -1,4 +1,4 @@
-import { api, clusterPath, type ConsumerInfo, type StreamInfo } from "./api";
+import { api, clusterPath, jetStreamUIBase, type ConsumerInfo, type StreamInfo } from "./api";
 import { TOPOLOGY_PAGE_SIZE } from "./constants";
 
 export type TopologyNodeKind = "cluster" | "stream" | "subject" | "consumer";
@@ -13,44 +13,40 @@ export type TopologyNode = {
   children: TopologyNode[];
 };
 
-type JSZStreamDetail = {
-  name: string;
-  config?: {
-    subjects?: string[];
-    retention?: string;
-    storage?: string;
-  };
-  state?: {
-    messages?: number;
-    consumer_count?: number;
-    bytes?: number;
-  };
-  consumer_detail?: JSZConsumerDetail[];
-};
+/** Location state marker so stream/consumer pages can return to Topology. */
+export const TOPOLOGY_LOCATION_STATE = { from: "topology" } as const;
 
-type JSZConsumerDetail = {
-  name: string;
-  stream_name?: string;
-  config?: {
-    filter_subject?: string;
-    durable_name?: string;
-    deliver_policy?: string;
-    ack_policy?: string;
-  };
-  num_pending?: number;
-  num_ack_pending?: number;
-};
+export type TopologyLocationState = { from?: string };
 
-type JSZTopologyResponse = {
-  account_details?: Array<{
-    name: string;
-    stream_detail?: JSZStreamDetail[];
-  }>;
-  total?: {
-    streams?: number;
-    consumers?: number;
-  };
-};
+export function isFromTopology(state: unknown): boolean {
+  return Boolean(state && typeof state === "object" && (state as TopologyLocationState).from === "topology");
+}
+
+/** Rewrite stream/consumer hrefs to account-scoped JetStream UI paths. */
+export function withJetStreamHrefs(
+  root: TopologyNode,
+  clusterId: string,
+  accountName: string,
+): TopologyNode {
+  const jsBase = jetStreamUIBase(clusterId, accountName || "Default");
+
+  function walk(node: TopologyNode, parentStream?: string): TopologyNode {
+    let href = node.href;
+    if (node.kind === "stream") {
+      href = `${jsBase}/streams/${encodeURIComponent(node.name)}`;
+    } else if (node.kind === "consumer" && parentStream) {
+      href = `${jsBase}/streams/${encodeURIComponent(parentStream)}/consumers/${encodeURIComponent(node.name)}`;
+    }
+    const streamName = node.kind === "stream" ? node.name : parentStream;
+    return {
+      ...node,
+      href,
+      children: (Array.isArray(node.children) ? node.children : []).map((child) => walk(child, streamName)),
+    };
+  }
+
+  return walk(root);
+}
 
 type StreamListResponse = {
   streams: StreamInfo[];
@@ -109,93 +105,41 @@ function createStreamTopologyNode(
     deliverPolicy?: string;
   }>,
 ): TopologyNode {
-  const children: TopologyNode[] = [];
+  const subjectNodes: TopologyNode[] = (stream.subjects ?? []).map((subject) => ({
+    id: `subject:${stream.name}:${subject}`,
+    kind: "subject",
+    name: subject,
+    children: [],
+  }));
 
-  for (const subject of stream.subjects) {
-    children.push({
-      id: `stream:${stream.name}:subject:${subject}`,
-      kind: "subject",
-      name: subject,
-      meta: ["Captures published messages"],
-      children: [],
-    });
-  }
-
-  for (const consumer of consumers) {
+  const consumerNodes: TopologyNode[] = consumers.map((consumer) => {
     const meta: string[] = [];
-    if (consumer.filterSubject) meta.push(`Filter ${consumer.filterSubject}`);
+    if (consumer.filterSubject) meta.push(`filter ${consumer.filterSubject}`);
     if (consumer.deliverPolicy) meta.push(consumer.deliverPolicy);
-    if (consumer.pending > 0) meta.push(`${consumer.pending} pending`);
-    if (consumer.ackPending > 0) meta.push(`${consumer.ackPending} ack pending`);
-
-    children.push({
-      id: `stream:${stream.name}:consumer:${consumer.name}`,
-      kind: "consumer",
+    if (consumer.pending > 0) meta.push("pending");
+    return {
+      id: `consumer:${stream.name}:${consumer.name}`,
+      kind: "consumer" as const,
       name: consumer.name,
       meta,
-      href: `/streams/${encodeURIComponent(stream.name)}/consumers/${encodeURIComponent(consumer.name)}`,
       status: consumerHealthStatus(consumer.pending, consumer.ackPending),
+      href: `/streams/${stream.name}/consumers/${consumer.name}`,
       children: [],
-    });
-  }
+    };
+  });
 
-  const streamMeta: string[] = [];
-  if (stream.storage) streamMeta.push(stream.storage);
-  if (stream.retention) streamMeta.push(stream.retention);
-  streamMeta.push(`${stream.messages} msgs`);
-  streamMeta.push(`${stream.consumerCount} consumers`);
+  const meta = [`${stream.messages} msgs`, `${Math.max(stream.consumerCount, consumers.length)} consumers`];
+  if (stream.storage) meta.push(stream.storage);
+  if (stream.retention) meta.push(stream.retention);
 
   return {
     id: `stream:${stream.name}`,
     kind: "stream",
     name: stream.name,
-    meta: streamMeta,
-    href: `/streams/${encodeURIComponent(stream.name)}`,
-    status: stream.messages > 0 || stream.consumerCount > 0 ? "healthy" : "idle",
-    children,
-  };
-}
-
-function buildTopologyFromMonitoring(jsz: JSZTopologyResponse, clusterName: string): TopologyNode | null {
-  const streamDetails =
-    jsz.account_details?.flatMap((account) => account.stream_detail ?? []) ?? [];
-
-  if (streamDetails.length === 0) {
-    return null;
-  }
-
-  const streamNodes = streamDetails.map((stream) => {
-    const subjects = stream.config?.subjects ?? [];
-    const consumers =
-      stream.consumer_detail?.map((consumer) => ({
-        name: consumer.name,
-        filterSubject: consumer.config?.filter_subject,
-        pending: consumer.num_pending ?? 0,
-        ackPending: consumer.num_ack_pending ?? 0,
-        deliverPolicy: consumer.config?.deliver_policy,
-      })) ?? [];
-
-    return createStreamTopologyNode(
-      {
-        name: stream.name,
-        subjects,
-        messages: stream.state?.messages ?? 0,
-        consumerCount: stream.state?.consumer_count ?? consumers.length,
-        storage: stream.config?.storage,
-        retention: stream.config?.retention,
-      },
-      consumers,
-    );
-  });
-
-  streamNodes.sort((a, b) => a.name.localeCompare(b.name));
-
-  return {
-    id: "cluster:root",
-    kind: "cluster",
-    name: clusterName,
-    meta: [`${streamNodes.length} streams`],
-    children: streamNodes,
+    meta,
+    href: `/streams/${stream.name}`,
+    status: "healthy",
+    children: [...subjectNodes, ...consumerNodes],
   };
 }
 
@@ -278,14 +222,20 @@ async function buildTopologyFromAPI(clusterId: string, clusterName: string): Pro
   };
 }
 
-export async function fetchTopology(clusterId: string, clusterName: string): Promise<TopologyNode> {
+/** Prefer backend aggregate (hub/jsz); fall back to REST only if that fails.
+ * Pass fresh=true after mutations so the ~60s snapshot hub is bypassed. */
+export async function fetchTopology(
+  clusterId: string,
+  clusterName: string,
+  options?: { fresh?: boolean },
+): Promise<TopologyNode> {
   try {
-    const jsz = await api<JSZTopologyResponse>(
-      clusterPath(clusterId, "/monitoring/jsz?streams=1&consumers=1&config=1"),
+    const fresh = options?.fresh ? "&fresh=1" : "";
+    const tree = await api<TopologyNode>(
+      clusterPath(clusterId, `/topology?name=${encodeURIComponent(clusterName)}${fresh}`),
     );
-    const fromMonitoring = buildTopologyFromMonitoring(jsz, clusterName);
-    if (fromMonitoring) {
-      return fromMonitoring;
+    if (tree?.kind === "cluster") {
+      return normalizeTopologyNode(tree);
     }
   } catch {
     // Fall back to REST aggregation below.
@@ -294,9 +244,19 @@ export async function fetchTopology(clusterId: string, clusterName: string): Pro
   return buildTopologyFromAPI(clusterId, clusterName);
 }
 
+/** Ensure every node has a real children array (API may encode nil slices as null). */
+export function normalizeTopologyNode(node: TopologyNode): TopologyNode {
+  const children = Array.isArray(node.children) ? node.children.map(normalizeTopologyNode) : [];
+  return { ...node, children };
+}
+
+function nodeChildren(node: TopologyNode): TopologyNode[] {
+  return Array.isArray(node.children) ? node.children : [];
+}
+
 export function flattenTopology(node: TopologyNode): TopologyNode[] {
   const flattened: TopologyNode[] = [node];
-  for (const child of node.children) {
+  for (const child of nodeChildren(node)) {
     flattened.push(...flattenTopology(child));
   }
   return flattened;
@@ -306,7 +266,7 @@ export function filterTopology(node: TopologyNode, filterQuery: string): Topolog
   const normalizedFilter = filterQuery.trim().toLowerCase();
   if (!normalizedFilter) return node;
 
-  const filteredChildren = node.children
+  const filteredChildren = nodeChildren(node)
     .map((child) => filterTopology(child, normalizedFilter))
     .filter((child): child is TopologyNode => child !== null);
 
@@ -318,7 +278,7 @@ export function filterTopology(node: TopologyNode, filterQuery: string): Topolog
   if (selfMatch || filteredChildren.length > 0) {
     return {
       ...node,
-      children: selfMatch ? node.children : filteredChildren,
+      children: selfMatch ? nodeChildren(node) : filteredChildren,
     };
   }
 
@@ -342,7 +302,7 @@ export function countTopology(node: TopologyNode) {
         consumers += 1;
         break;
     }
-    for (const child of current.children) {
+    for (const child of nodeChildren(current)) {
       walk(child);
     }
   }
@@ -352,18 +312,37 @@ export function countTopology(node: TopologyNode) {
 }
 
 export function getStreamNodes(root: TopologyNode): TopologyNode[] {
-  return root.children.filter((child) => child.kind === "stream");
+  return nodeChildren(root).filter((child) => child.kind === "stream");
 }
 
 export function splitStreamChildren(stream: TopologyNode) {
+  const children = nodeChildren(stream);
   return {
-    subjects: stream.children.filter((child) => child.kind === "subject"),
-    consumers: stream.children.filter((child) => child.kind === "consumer"),
+    subjects: children.filter((child) => child.kind === "subject"),
+    consumers: children.filter((child) => child.kind === "consumer"),
   };
 }
 
 export function findStreamById(root: TopologyNode, streamId: string): TopologyNode | null {
   return getStreamNodes(root).find((stream) => stream.id === streamId) ?? null;
+}
+
+export function findNodeById(root: TopologyNode, id: string): TopologyNode | null {
+  if (root.id === id) return root;
+  for (const child of nodeChildren(root)) {
+    const found = findNodeById(child, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Stream that owns `nodeId`, or the node itself when it is a stream. */
+export function findParentStream(root: TopologyNode, nodeId: string): TopologyNode | null {
+  for (const stream of getStreamNodes(root)) {
+    if (stream.id === nodeId) return stream;
+    if (nodeChildren(stream).some((child) => child.id === nodeId)) return stream;
+  }
+  return null;
 }
 
 export type StreamOverviewSort = "name" | "messages" | "consumers" | "subjects";
