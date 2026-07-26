@@ -130,6 +130,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Prepare compose env
+        run: |
+          cp .env.example .env
+          # Match smoke/load AUTH=admin:admin used by CI scripts.
+          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env
       - name: Start stack
         run: docker compose up --build -d
       - name: Wait for health
@@ -163,6 +168,10 @@ jobs:
         run: go install github.com/tsenart/vegeta/v12@v12.13.0
       - name: Add Go bin to PATH
         run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
+      - name: Prepare compose env
+        run: |
+          cp .env.example .env
+          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env
       - name: Start stack
         run: docker compose up --build -d
       - name: Wait for health
@@ -193,6 +202,10 @@ jobs:
         run: go install github.com/tsenart/vegeta/v12@v12.13.0
       - name: Add Go bin to PATH
         run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
+      - name: Prepare compose env
+        run: |
+          cp .env.example .env
+          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env
       - name: Start stack
         run: docker compose up --build -d
       - name: Wait for health
