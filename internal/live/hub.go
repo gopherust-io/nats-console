@@ -12,12 +12,13 @@ import (
 	"github.com/fasthttp/websocket"
 	"github.com/valyala/fasthttp"
 
+	"github.com/gopherust-io/tel"
+
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/metrics"
 	"github.com/gopherust-io/nats-consol/internal/port"
-	"github.com/gopherust-io/tel"
 )
 
 const (
@@ -98,10 +99,6 @@ type liveFrame struct {
 	Seq     uint64 `json:"seq,omitempty"`
 }
 
-func requestContext(ctx *fasthttp.RequestCtx) context.Context {
-	return httpctx.FromRequest(ctx)
-}
-
 func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 	clusterID, ok := ctx.UserValue("clusterId").(string)
 	if !ok || clusterID == "" {
@@ -130,7 +127,7 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 		fromSeq = parsed
 	}
 
-	reqCtx := requestContext(ctx)
+	reqCtx := httpctx.FromRequest(ctx)
 	client, err := h.gateway.GetExecutor(reqCtx, clusterID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {

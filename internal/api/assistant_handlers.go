@@ -6,6 +6,7 @@ import (
 	"github.com/valyala/fasthttp"
 
 	"github.com/gopherust-io/nats-consol/internal/assistant"
+	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 )
 
@@ -43,7 +44,7 @@ func (h *AssistantHandler) Chat(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	resp, err := h.svc.Chat(requestContext(ctx), clusterID(ctx), req)
+	resp, err := h.svc.Chat(httpctx.FromRequest(ctx), clusterID(ctx), req)
 	if err != nil {
 		writeAssistantError(ctx, assistant.WrapError(err))
 		return

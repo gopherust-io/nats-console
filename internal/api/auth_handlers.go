@@ -9,6 +9,7 @@ import (
 
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 )
 
@@ -30,7 +31,7 @@ func (h *AuthHandler) Config(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *AuthHandler) Me(ctx *fasthttp.RequestCtx) {
-	c := requestContext(ctx)
+	c := httpctx.FromRequest(ctx)
 	user, ok := auth.UserFromContext(c)
 	if !ok {
 		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
@@ -52,7 +53,7 @@ func (h *AuthHandler) Login(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	user, err := h.auth.AuthenticateBasic(requestContext(ctx), req.Username, req.Password)
+	user, err := h.auth.AuthenticateBasic(httpctx.FromRequest(ctx), req.Username, req.Password)
 	if err != nil {
 		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
 		ctx.SetBodyString("unauthorized")

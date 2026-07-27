@@ -11,6 +11,7 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/store"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 )
@@ -63,7 +64,7 @@ func (h *AlertsHandler) List(ctx *fasthttp.RequestCtx) {
 		}
 	}
 
-	alerts, total, err := h.store.ListAlerts(requestContext(ctx), filter)
+	alerts, total, err := h.store.ListAlerts(httpctx.FromRequest(ctx), filter)
 	if err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
 		return
@@ -88,7 +89,7 @@ func (h *AlertsHandler) OpenSummary(ctx *fasthttp.RequestCtx) {
 			return
 		}
 	}
-	alerts, total, err := h.store.ListOpenUnacknowledged(requestContext(ctx), clusterIDs, 8)
+	alerts, total, err := h.store.ListOpenUnacknowledged(httpctx.FromRequest(ctx), clusterIDs, 8)
 	if err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
 		return
@@ -105,12 +106,12 @@ func (h *AlertsHandler) Get(ctx *fasthttp.RequestCtx) {
 		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
 		return
 	}
-	id := routeParam(ctx, "alertId")
+	id := httpctx.RouteParam(ctx, "alertId")
 	if err := validateUUID(id); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	alert, err := h.store.GetAlert(requestContext(ctx), id)
+	alert, err := h.store.GetAlert(httpctx.FromRequest(ctx), id)
 	if err != nil {
 		writeAlertStoreError(ctx, err)
 		return
@@ -128,12 +129,12 @@ func (h *AlertsHandler) Acknowledge(ctx *fasthttp.RequestCtx) {
 		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
 		return
 	}
-	id := routeParam(ctx, "alertId")
+	id := httpctx.RouteParam(ctx, "alertId")
 	if err := validateUUID(id); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	existing, err := h.store.GetAlert(requestContext(ctx), id)
+	existing, err := h.store.GetAlert(httpctx.FromRequest(ctx), id)
 	if err != nil {
 		writeAlertStoreError(ctx, err)
 		return
@@ -142,7 +143,7 @@ func (h *AlertsHandler) Acknowledge(ctx *fasthttp.RequestCtx) {
 		ctx.SetStatusCode(fasthttp.StatusForbidden)
 		return
 	}
-	alert, err := h.store.AcknowledgeAlert(requestContext(ctx), id, actor.Username)
+	alert, err := h.store.AcknowledgeAlert(httpctx.FromRequest(ctx), id, actor.Username)
 	if err != nil {
 		writeAlertStoreError(ctx, err)
 		return
@@ -161,7 +162,7 @@ func (h *AlertsHandler) ListRules(ctx *fasthttp.RequestCtx) {
 			return
 		}
 	}
-	rules, err := h.store.ListAlertRules(requestContext(ctx), clusterID, false)
+	rules, err := h.store.ListAlertRules(httpctx.FromRequest(ctx), clusterID, false)
 	if err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
 		return
@@ -187,12 +188,12 @@ func (h *AlertsHandler) GetRule(ctx *fasthttp.RequestCtx) {
 	if _, _, ok := requireManageAlertRules(ctx); !ok {
 		return
 	}
-	id := routeParam(ctx, "ruleId")
+	id := httpctx.RouteParam(ctx, "ruleId")
 	if err := validateUUID(id); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	rule, err := h.store.GetAlertRule(requestContext(ctx), id)
+	rule, err := h.store.GetAlertRule(httpctx.FromRequest(ctx), id)
 	if err != nil {
 		writeAlertStoreError(ctx, err)
 		return
@@ -220,7 +221,7 @@ func (h *AlertsHandler) CreateRule(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	rule, err := h.store.CreateAlertRule(requestContext(ctx), req, actor.Username)
+	rule, err := h.store.CreateAlertRule(httpctx.FromRequest(ctx), req, actor.Username)
 	if err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
 		return
@@ -232,7 +233,7 @@ func (h *AlertsHandler) UpdateRule(ctx *fasthttp.RequestCtx) {
 	if _, _, ok := requireManageAlertRules(ctx); !ok {
 		return
 	}
-	id := routeParam(ctx, "ruleId")
+	id := httpctx.RouteParam(ctx, "ruleId")
 	if err := validateUUID(id); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
@@ -246,7 +247,7 @@ func (h *AlertsHandler) UpdateRule(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	rule, err := h.store.UpdateAlertRule(requestContext(ctx), id, req)
+	rule, err := h.store.UpdateAlertRule(httpctx.FromRequest(ctx), id, req)
 	if err != nil {
 		writeAlertStoreError(ctx, err)
 		return
@@ -258,12 +259,12 @@ func (h *AlertsHandler) DeleteRule(ctx *fasthttp.RequestCtx) {
 	if _, _, ok := requireManageAlertRules(ctx); !ok {
 		return
 	}
-	id := routeParam(ctx, "ruleId")
+	id := httpctx.RouteParam(ctx, "ruleId")
 	if err := validateUUID(id); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if err := h.store.DeleteAlertRule(requestContext(ctx), id); err != nil {
+	if err := h.store.DeleteAlertRule(httpctx.FromRequest(ctx), id); err != nil {
 		writeAlertStoreError(ctx, err)
 		return
 	}
@@ -284,7 +285,7 @@ func requireManageAlertRules(ctx *fasthttp.RequestCtx) (domain.User, store.User,
 }
 
 func actorStoreFromContext(ctx *fasthttp.RequestCtx) (domain.User, store.User, bool) {
-	c := requestContext(ctx)
+	c := httpctx.FromRequest(ctx)
 	user, ok := auth.UserFromContext(c)
 	if !ok {
 		return domain.User{}, store.User{}, false

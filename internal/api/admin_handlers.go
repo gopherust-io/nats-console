@@ -3,12 +3,14 @@ package api
 import (
 	"strings"
 
+	"github.com/valyala/fasthttp"
+
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/crypto"
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/store"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
-	"github.com/valyala/fasthttp"
 )
 
 type AdminHandler struct {
@@ -20,7 +22,7 @@ func NewAdminHandler(st *store.Store) *AdminHandler {
 }
 
 func (h *AdminHandler) RotateEncryptionKey(ctx *fasthttp.RequestCtx) {
-	c := requestContext(ctx)
+	c := httpctx.FromRequest(ctx)
 	user, ok := auth.UserFromContext(c)
 	if !ok || !user.IsRoot {
 		ctx.SetStatusCode(fasthttp.StatusForbidden)

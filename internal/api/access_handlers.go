@@ -10,6 +10,7 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/store"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 )
@@ -37,7 +38,7 @@ func (h *AccessHandler) DeleteSystemAccess(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *AccessHandler) ListAccountAccess(ctx *fasthttp.RequestCtx) {
-	account := routeParam(ctx, "account")
+	account := httpctx.RouteParam(ctx, "account")
 	if account == "" {
 		account = "Default"
 	}
@@ -45,7 +46,7 @@ func (h *AccessHandler) ListAccountAccess(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *AccessHandler) UpsertAccountAccess(ctx *fasthttp.RequestCtx) {
-	account := routeParam(ctx, "account")
+	account := httpctx.RouteParam(ctx, "account")
 	if account == "" {
 		account = "Default"
 	}
@@ -53,7 +54,7 @@ func (h *AccessHandler) UpsertAccountAccess(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *AccessHandler) DeleteAccountAccess(ctx *fasthttp.RequestCtx) {
-	account := routeParam(ctx, "account")
+	account := httpctx.RouteParam(ctx, "account")
 	if account == "" {
 		account = "Default"
 	}
@@ -91,7 +92,7 @@ func (h *AccessHandler) InvitePerson(ctx *fasthttp.RequestCtx) {
 	if req.Email == "" {
 		req.Email = req.Username + "@local"
 	}
-	user, err := h.store.CreateUser(requestContext(ctx), store.UserCreate{
+	user, err := h.store.CreateUser(httpctx.FromRequest(ctx), store.UserCreate{
 		Username: req.Username,
 		Email:    req.Email,
 		Roles:    req.Roles,
@@ -108,7 +109,7 @@ func (h *AccessHandler) InvitePerson(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	inv, err := h.store.CreateUserInvite(requestContext(ctx), user.ID, 7*24*time.Hour)
+	inv, err := h.store.CreateUserInvite(httpctx.FromRequest(ctx), user.ID, 7*24*time.Hour)
 	if err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
 		return
@@ -122,8 +123,8 @@ func (h *AccessHandler) InvitePerson(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *AccessHandler) GetInvite(ctx *fasthttp.RequestCtx) {
-	token := routeParam(ctx, "token")
-	inv, err := h.store.GetUserInvite(requestContext(ctx), token)
+	token := httpctx.RouteParam(ctx, "token")
+	inv, err := h.store.GetUserInvite(httpctx.FromRequest(ctx), token)
 	if err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
 		return
@@ -152,7 +153,7 @@ func (h *AccessHandler) AcceptInvite(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("token and password required"))
 		return
 	}
-	user, err := h.store.AcceptUserInvite(requestContext(ctx), req.Token, req.Password)
+	user, err := h.store.AcceptUserInvite(httpctx.FromRequest(ctx), req.Token, req.Password)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
@@ -192,7 +193,7 @@ func (h *AccessHandler) listResourceAccess(ctx *fasthttp.RequestCtx, resourceTyp
 		ctx.SetBodyString("forbidden")
 		return
 	}
-	grants, err := h.store.ListAccessGrantsByResource(requestContext(ctx), resourceType, resourceKey)
+	grants, err := h.store.ListAccessGrantsByResource(httpctx.FromRequest(ctx), resourceType, resourceKey)
 	if err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
 		return
@@ -226,7 +227,7 @@ func (h *AccessHandler) upsertResourceAccess(ctx *fasthttp.RequestCtx, resourceT
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("credential_downloader is account-scoped"))
 		return
 	}
-	grant, err := h.store.UpsertAccessGrant(requestContext(ctx), store.AccessGrantUpsert{
+	grant, err := h.store.UpsertAccessGrant(httpctx.FromRequest(ctx), store.AccessGrantUpsert{
 		UserID:       req.UserID,
 		ResourceType: resourceType,
 		ResourceKey:  resourceKey,
@@ -251,9 +252,9 @@ func (h *AccessHandler) deleteResourceAccess(ctx *fasthttp.RequestCtx, resourceT
 		ctx.SetBodyString("forbidden")
 		return
 	}
-	grantID := routeParam(ctx, "grantId")
+	grantID := httpctx.RouteParam(ctx, "grantId")
 	userID := string(ctx.QueryArgs().Peek("userId"))
-	c := requestContext(ctx)
+	c := httpctx.FromRequest(ctx)
 	if grantID != "" {
 		if err := h.store.DeleteAccessGrant(c, grantID); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
@@ -298,6 +299,6 @@ func (h *AccessHandler) canManage(actor store.User, resourceType, resourceKey st
 }
 
 func storeActor(ctx *fasthttp.RequestCtx) (store.User, bool) {
-	c := requestContext(ctx)
+	c := httpctx.FromRequest(ctx)
 	return auth.UserFromContext(c)
 }

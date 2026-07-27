@@ -4,13 +4,14 @@ import (
 	"errors"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 
 	"github.com/valyala/fasthttp"
 )
 
 func (h *Handler) ListClusters(ctx *fasthttp.RequestCtx) {
-	clusters, err := h.svc.Cluster.List(requestContext(ctx))
+	clusters, err := h.svc.Cluster.List(httpctx.FromRequest(ctx))
 	if err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
 		return
@@ -31,7 +32,7 @@ func (h *Handler) GetCluster(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	cluster, err := h.svc.Cluster.Get(requestContext(ctx), id)
+	cluster, err := h.svc.Cluster.Get(httpctx.FromRequest(ctx), id)
 	if err != nil {
 		writeDomainError(ctx, err)
 		return
@@ -45,7 +46,7 @@ func (h *Handler) TestCluster(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	result, err := h.svc.Cluster.Test(requestContext(ctx), id)
+	result, err := h.svc.Cluster.Test(httpctx.FromRequest(ctx), id)
 	if err != nil {
 		writeDomainError(ctx, err)
 		return
@@ -59,7 +60,7 @@ func (h *Handler) GetClusterConnection(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	status, err := h.svc.Cluster.ConnectionStatus(requestContext(ctx), id)
+	status, err := h.svc.Cluster.ConnectionStatus(httpctx.FromRequest(ctx), id)
 	if err != nil {
 		writeDomainError(ctx, err)
 		return
@@ -68,7 +69,7 @@ func (h *Handler) GetClusterConnection(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) ListClusterConnections(ctx *fasthttp.RequestCtx) {
-	statuses := h.svc.Cluster.ListConnectionStatuses(requestContext(ctx))
+	statuses := h.svc.Cluster.ListConnectionStatuses(httpctx.FromRequest(ctx))
 	if actor, ok := actorFromContext(ctx); ok {
 		statuses = filterConnectionStatusesForActor(statuses, actor)
 	}
@@ -92,7 +93,7 @@ func (h *Handler) CreateCluster(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	cluster, err := h.svc.Cluster.Create(requestContext(ctx), domain.ClusterCreate{
+	cluster, err := h.svc.Cluster.Create(httpctx.FromRequest(ctx), domain.ClusterCreate{
 		Name:          req.Name,
 		NATSURL:       req.NATSURL,
 		MonitoringURL: req.MonitoringURL,
@@ -125,7 +126,7 @@ func (h *Handler) UpdateCluster(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	cluster, err := h.svc.Cluster.Update(requestContext(ctx), id, domain.ClusterUpdate{
+	cluster, err := h.svc.Cluster.Update(httpctx.FromRequest(ctx), id, domain.ClusterUpdate{
 		Name:          req.Name,
 		NATSURL:       req.NATSURL,
 		MonitoringURL: req.MonitoringURL,
@@ -156,7 +157,7 @@ func (h *Handler) DeleteCluster(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if err := h.svc.Cluster.Delete(requestContext(ctx), id); err != nil {
+	if err := h.svc.Cluster.Delete(httpctx.FromRequest(ctx), id); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
 			return
@@ -176,5 +177,5 @@ func writeDomainError(ctx *fasthttp.RequestCtx, err error) {
 }
 
 func clusterID(ctx *fasthttp.RequestCtx) string {
-	return routeParam(ctx, "clusterId")
+	return httpctx.RouteParam(ctx, "clusterId")
 }

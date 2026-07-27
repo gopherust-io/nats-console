@@ -30,7 +30,7 @@ func NewHandler(svc *app.Services, cfg config.Config, hub *snapshot.Hub) *Handle
 }
 
 func (h *Handler) Health(ctx *fasthttp.RequestCtx) {
-	status, code := h.svc.Health.Check(requestContext(ctx))
+	status, code := h.svc.Health.Check(httpctx.FromRequest(ctx))
 	serializer.WriteJSON(ctx, code, status)
 }
 
@@ -57,7 +57,7 @@ func (h *Handler) ListStreams(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) GetStream(ctx *fasthttp.RequestCtx) {
-	name := routeParam(ctx, "name")
+	name := httpctx.RouteParam(ctx, "name")
 	if err := validateResourceName(name); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
@@ -107,7 +107,7 @@ func (h *Handler) UpdateStream(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	if req.Name == "" {
-		req.Name = routeParam(ctx, "name")
+		req.Name = httpctx.RouteParam(ctx, "name")
 	}
 	cfg, err := req.toNATS()
 	if err != nil {
@@ -133,7 +133,7 @@ func (h *Handler) invalidateTopologySnapshot(ctx *fasthttp.RequestCtx) {
 
 func (h *Handler) DeleteStream(ctx *fasthttp.RequestCtx) {
 	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
-		if err := client.DeleteStream(c, routeParam(ctx, "name")); err != nil {
+		if err := client.DeleteStream(c, httpctx.RouteParam(ctx, "name")); err != nil {
 			return err
 		}
 		h.invalidateTopologySnapshot(ctx)
@@ -143,7 +143,7 @@ func (h *Handler) DeleteStream(ctx *fasthttp.RequestCtx) {
 
 func (h *Handler) PurgeStream(ctx *fasthttp.RequestCtx) {
 	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
-		if err := client.PurgeStream(c, routeParam(ctx, "name")); err != nil {
+		if err := client.PurgeStream(c, httpctx.RouteParam(ctx, "name")); err != nil {
 			return err
 		}
 		h.invalidateTopologySnapshot(ctx)
@@ -152,7 +152,7 @@ func (h *Handler) PurgeStream(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) ListConsumers(ctx *fasthttp.RequestCtx) {
-	stream := routeParam(ctx, "name")
+	stream := httpctx.RouteParam(ctx, "name")
 	offset, limit := parsePaginationParams(ctx, h.cfg)
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		consumers, total, err := client.ListConsumers(c, stream, offset, limit)
@@ -164,8 +164,8 @@ func (h *Handler) ListConsumers(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) GetConsumer(ctx *fasthttp.RequestCtx) {
-	stream := routeParam(ctx, "name")
-	consumer := routeParam(ctx, "consumer")
+	stream := httpctx.RouteParam(ctx, "name")
+	consumer := httpctx.RouteParam(ctx, "consumer")
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.ConsumerInfo(c, stream, consumer)
 		if err != nil {
@@ -176,7 +176,7 @@ func (h *Handler) GetConsumer(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) CreateConsumer(ctx *fasthttp.RequestCtx) {
-	stream := routeParam(ctx, "name")
+	stream := httpctx.RouteParam(ctx, "name")
 	var req consumerConfigRequest
 	if err := parseJSONBody(ctx, &req); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
@@ -198,8 +198,8 @@ func (h *Handler) CreateConsumer(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) UpdateConsumer(ctx *fasthttp.RequestCtx) {
-	stream := routeParam(ctx, "name")
-	consumer := routeParam(ctx, "consumer")
+	stream := httpctx.RouteParam(ctx, "name")
+	consumer := httpctx.RouteParam(ctx, "consumer")
 	var req consumerConfigRequest
 	if err := parseJSONBody(ctx, &req); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
@@ -228,8 +228,8 @@ func (h *Handler) UpdateConsumer(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) DeleteConsumer(ctx *fasthttp.RequestCtx) {
-	stream := routeParam(ctx, "name")
-	consumer := routeParam(ctx, "consumer")
+	stream := httpctx.RouteParam(ctx, "name")
+	consumer := httpctx.RouteParam(ctx, "consumer")
 	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
 		if err := client.DeleteConsumer(c, stream, consumer); err != nil {
 			return err
@@ -240,8 +240,8 @@ func (h *Handler) DeleteConsumer(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) ReplayConsumer(ctx *fasthttp.RequestCtx) {
-	stream := routeParam(ctx, "name")
-	consumer := routeParam(ctx, "consumer")
+	stream := httpctx.RouteParam(ctx, "name")
+	consumer := httpctx.RouteParam(ctx, "consumer")
 	if err := validateResourceName(stream); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
@@ -271,7 +271,7 @@ func (h *Handler) ReplayConsumer(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) GetMessage(ctx *fasthttp.RequestCtx) {
-	stream := routeParam(ctx, "name")
+	stream := httpctx.RouteParam(ctx, "name")
 	seqStr := string(ctx.QueryArgs().Peek("seq"))
 	if seqStr == "" {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("seq"))
@@ -294,7 +294,7 @@ func (h *Handler) GetMessage(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) PublishMessage(ctx *fasthttp.RequestCtx) {
-	stream := routeParam(ctx, "name")
+	stream := httpctx.RouteParam(ctx, "name")
 	if err := validateResourceName(stream); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
@@ -375,7 +375,7 @@ func (h *Handler) UpdateKVBucket(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	bucket := routeParam(ctx, "bucket")
+	bucket := httpctx.RouteParam(ctx, "bucket")
 	if req.Bucket == "" {
 		req.Bucket = bucket
 	}
@@ -402,7 +402,7 @@ func (h *Handler) UpdateKVBucket(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) GetKVBucket(ctx *fasthttp.RequestCtx) {
-	bucket := routeParam(ctx, "bucket")
+	bucket := httpctx.RouteParam(ctx, "bucket")
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.GetKVBucket(c, bucket)
 		if err != nil {
@@ -413,14 +413,14 @@ func (h *Handler) GetKVBucket(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) DeleteKVBucket(ctx *fasthttp.RequestCtx) {
-	bucket := routeParam(ctx, "bucket")
+	bucket := httpctx.RouteParam(ctx, "bucket")
 	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
 		return client.DeleteKVBucket(c, bucket)
 	}, fasthttp.StatusBadRequest)
 }
 
 func (h *Handler) ListKVKeys(ctx *fasthttp.RequestCtx) {
-	bucket := routeParam(ctx, "bucket")
+	bucket := httpctx.RouteParam(ctx, "bucket")
 	offset, limit := parsePaginationParams(ctx, h.cfg)
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		keys, total, err := client.ListKVKeys(c, bucket, offset, limit)
@@ -432,8 +432,8 @@ func (h *Handler) ListKVKeys(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) GetKVEntry(ctx *fasthttp.RequestCtx) {
-	bucket := routeParam(ctx, "bucket")
-	key := routeParam(ctx, "key")
+	bucket := httpctx.RouteParam(ctx, "bucket")
+	key := httpctx.RouteParam(ctx, "key")
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		entry, err := client.GetKVEntry(c, bucket, key)
 		if err != nil {
@@ -448,8 +448,8 @@ type kvPutRequest struct {
 }
 
 func (h *Handler) PutKVEntry(ctx *fasthttp.RequestCtx) {
-	bucket := routeParam(ctx, "bucket")
-	key := routeParam(ctx, "key")
+	bucket := httpctx.RouteParam(ctx, "bucket")
+	key := httpctx.RouteParam(ctx, "key")
 	var req kvPutRequest
 	if err := serializer.UnmarshalRequest(ctx.PostBody(), &req); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
@@ -470,16 +470,16 @@ func (h *Handler) PutKVEntry(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) DeleteKVEntry(ctx *fasthttp.RequestCtx) {
-	bucket := routeParam(ctx, "bucket")
-	key := routeParam(ctx, "key")
+	bucket := httpctx.RouteParam(ctx, "bucket")
+	key := httpctx.RouteParam(ctx, "key")
 	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
 		return client.DeleteKVEntry(c, bucket, key)
 	}, fasthttp.StatusBadRequest)
 }
 
 func (h *Handler) KVHistory(ctx *fasthttp.RequestCtx) {
-	bucket := routeParam(ctx, "bucket")
-	key := routeParam(ctx, "key")
+	bucket := httpctx.RouteParam(ctx, "bucket")
+	key := httpctx.RouteParam(ctx, "key")
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		entries, err := client.KVHistory(c, bucket, key)
 		if err != nil {
@@ -529,7 +529,7 @@ func (h *Handler) UpdateObjectBucket(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	bucket := routeParam(ctx, "bucket")
+	bucket := httpctx.RouteParam(ctx, "bucket")
 	if req.Bucket == "" {
 		req.Bucket = bucket
 	}
@@ -552,7 +552,7 @@ func (h *Handler) UpdateObjectBucket(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) GetObjectBucket(ctx *fasthttp.RequestCtx) {
-	bucket := routeParam(ctx, "bucket")
+	bucket := httpctx.RouteParam(ctx, "bucket")
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.GetObjectBucket(c, bucket)
 		if err != nil {
@@ -563,14 +563,14 @@ func (h *Handler) GetObjectBucket(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) DeleteObjectBucket(ctx *fasthttp.RequestCtx) {
-	bucket := routeParam(ctx, "bucket")
+	bucket := httpctx.RouteParam(ctx, "bucket")
 	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
 		return client.DeleteObjectBucket(c, bucket)
 	}, fasthttp.StatusBadRequest)
 }
 
 func (h *Handler) ListObjects(ctx *fasthttp.RequestCtx) {
-	bucket := routeParam(ctx, "bucket")
+	bucket := httpctx.RouteParam(ctx, "bucket")
 	offset, limit := parsePaginationParams(ctx, h.cfg)
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		objects, total, err := client.ListObjects(c, bucket, offset, limit)
@@ -582,8 +582,8 @@ func (h *Handler) ListObjects(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) GetObject(ctx *fasthttp.RequestCtx) {
-	bucket := routeParam(ctx, "bucket")
-	name := routeParam(ctx, "objectName")
+	bucket := httpctx.RouteParam(ctx, "bucket")
+	name := httpctx.RouteParam(ctx, "objectName")
 	h.natsAction(ctx, func(c context.Context, client port.JetStreamExecutor) (any, int, error) {
 		info, err := client.GetObject(c, bucket, name)
 		if err != nil {
@@ -598,8 +598,8 @@ type objectPutRequest struct {
 }
 
 func (h *Handler) PutObject(ctx *fasthttp.RequestCtx) {
-	bucket := routeParam(ctx, "bucket")
-	name := routeParam(ctx, "objectName")
+	bucket := httpctx.RouteParam(ctx, "bucket")
+	name := httpctx.RouteParam(ctx, "objectName")
 	var req objectPutRequest
 	if err := serializer.UnmarshalRequest(ctx.PostBody(), &req); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
@@ -620,15 +620,15 @@ func (h *Handler) PutObject(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *Handler) DeleteObject(ctx *fasthttp.RequestCtx) {
-	bucket := routeParam(ctx, "bucket")
-	name := routeParam(ctx, "objectName")
+	bucket := httpctx.RouteParam(ctx, "bucket")
+	name := httpctx.RouteParam(ctx, "objectName")
 	h.natsVoid(ctx, func(c context.Context, client port.JetStreamExecutor) error {
 		return client.DeleteObject(c, bucket, name)
 	}, fasthttp.StatusBadRequest)
 }
 
 func (h *Handler) natsAction(ctx *fasthttp.RequestCtx, fn func(context.Context, port.JetStreamExecutor) (any, int, error)) {
-	c := requestContext(ctx)
+	c := httpctx.FromRequest(ctx)
 	var (
 		result any
 		status int
@@ -662,7 +662,7 @@ func (h *Handler) natsAction(ctx *fasthttp.RequestCtx, fn func(context.Context, 
 }
 
 func (h *Handler) natsVoid(ctx *fasthttp.RequestCtx, fn func(context.Context, port.JetStreamExecutor) error, badStatus int) {
-	c := requestContext(ctx)
+	c := httpctx.FromRequest(ctx)
 	err := h.svc.JetStream.WithExecutor(c, clusterID(ctx), func(client port.JetStreamExecutor) error {
 		return fn(c, client)
 	})
@@ -704,7 +704,7 @@ func isNATSNotFound(err error) bool {
 }
 
 func (h *Handler) natsRaw(ctx *fasthttp.RequestCtx, path string) {
-	c := requestContext(ctx)
+	c := httpctx.FromRequest(ctx)
 	cluster := clusterID(ctx)
 	fresh := string(ctx.QueryArgs().Peek("fresh")) == "1"
 
@@ -756,18 +756,6 @@ func (h *Handler) natsRaw(ctx *fasthttp.RequestCtx, path string) {
 }
 
 const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
-
-func routeParam(ctx *fasthttp.RequestCtx, key string) string {
-	value, ok := ctx.UserValue(key).(string)
-	if !ok {
-		return ""
-	}
-	return value
-}
-
-func requestContext(ctx *fasthttp.RequestCtx) context.Context {
-	return httpctx.FromRequest(ctx)
-}
 
 type missingFieldError string
 

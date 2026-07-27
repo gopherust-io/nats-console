@@ -3,11 +3,13 @@ package api
 import (
 	"errors"
 
+	"github.com/valyala/fasthttp"
+
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/store"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
-	"github.com/valyala/fasthttp"
 )
 
 type NATSAccountHandler struct {
@@ -23,7 +25,7 @@ func NewNATSAccountHandler(st *store.Store, authSvc *auth.Service, cfg config.Co
 func (h *NATSAccountHandler) accountFromCtx(ctx *fasthttp.RequestCtx) string {
 	account := string(ctx.QueryArgs().Peek("account"))
 	if account == "" {
-		account = routeParam(ctx, "account")
+		account = httpctx.RouteParam(ctx, "account")
 	}
 	if account == "" {
 		account = "Default"
@@ -34,7 +36,7 @@ func (h *NATSAccountHandler) accountFromCtx(ctx *fasthttp.RequestCtx) string {
 func (h *NATSAccountHandler) ListUsers(ctx *fasthttp.RequestCtx) {
 	clusterID := clusterID(ctx)
 	account := h.accountFromCtx(ctx)
-	users, err := h.store.ListNATSAccountUsers(requestContext(ctx), clusterID, account)
+	users, err := h.store.ListNATSAccountUsers(httpctx.FromRequest(ctx), clusterID, account)
 	if err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
 		return
@@ -47,7 +49,7 @@ func (h *NATSAccountHandler) ListUsers(ctx *fasthttp.RequestCtx) {
 
 func (h *NATSAccountHandler) GetUser(ctx *fasthttp.RequestCtx) {
 	account := h.accountFromCtx(ctx)
-	user, err := h.store.GetNATSAccountUser(requestContext(ctx), clusterID(ctx), account, routeParam(ctx, "userId"))
+	user, err := h.store.GetNATSAccountUser(httpctx.FromRequest(ctx), clusterID(ctx), account, httpctx.RouteParam(ctx, "userId"))
 	if errors.Is(err, store.ErrNotFound) {
 		serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
 		return
@@ -96,7 +98,7 @@ func (h *NATSAccountHandler) CreateUser(ctx *fasthttp.RequestCtx) {
 	if req.AccountName == "" {
 		req.AccountName = "Default"
 	}
-	user, err := h.store.CreateNATSAccountUserWithSeed(requestContext(ctx), store.NATSAccountUserCreate{
+	user, err := h.store.CreateNATSAccountUserWithSeed(httpctx.FromRequest(ctx), store.NATSAccountUserCreate{
 		ClusterID:              clusterID(ctx),
 		AccountName:            req.AccountName,
 		Name:                   req.Name,
@@ -133,7 +135,7 @@ func (h *NATSAccountHandler) UpdateUser(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	account := h.accountFromCtx(ctx)
-	user, err := h.store.UpdateNATSAccountUser(requestContext(ctx), clusterID(ctx), account, routeParam(ctx, "userId"), store.NATSAccountUserUpdate{
+	user, err := h.store.UpdateNATSAccountUser(httpctx.FromRequest(ctx), clusterID(ctx), account, httpctx.RouteParam(ctx, "userId"), store.NATSAccountUserUpdate{
 		SigningGroup:           req.SigningGroup,
 		Tags:                   req.Tags,
 		PubAllow:               req.PubAllow,
@@ -166,7 +168,7 @@ func (h *NATSAccountHandler) UpdateUser(ctx *fasthttp.RequestCtx) {
 
 func (h *NATSAccountHandler) DeleteUser(ctx *fasthttp.RequestCtx) {
 	account := h.accountFromCtx(ctx)
-	err := h.store.DeleteNATSAccountUser(requestContext(ctx), clusterID(ctx), account, routeParam(ctx, "userId"))
+	err := h.store.DeleteNATSAccountUser(httpctx.FromRequest(ctx), clusterID(ctx), account, httpctx.RouteParam(ctx, "userId"))
 	if errors.Is(err, store.ErrNotFound) {
 		serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
 		return
@@ -187,7 +189,7 @@ func (h *NATSAccountHandler) DownloadCreds(ctx *fasthttp.RequestCtx) {
 			return
 		}
 	}
-	creds, err := h.store.GetNATSAccountUserCreds(requestContext(ctx), clusterID(ctx), account, routeParam(ctx, "userId"))
+	creds, err := h.store.GetNATSAccountUserCreds(httpctx.FromRequest(ctx), clusterID(ctx), account, httpctx.RouteParam(ctx, "userId"))
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
@@ -201,7 +203,7 @@ func (h *NATSAccountHandler) DownloadCreds(ctx *fasthttp.RequestCtx) {
 
 func (h *NATSAccountHandler) RotateUser(ctx *fasthttp.RequestCtx) {
 	account := h.accountFromCtx(ctx)
-	creds, err := h.store.RotateNATSAccountUser(requestContext(ctx), clusterID(ctx), account, routeParam(ctx, "userId"), h.cfg.NATSAccountSeed)
+	creds, err := h.store.RotateNATSAccountUser(httpctx.FromRequest(ctx), clusterID(ctx), account, httpctx.RouteParam(ctx, "userId"), h.cfg.NATSAccountSeed)
 	if errors.Is(err, store.ErrNotFound) {
 		serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
 		return
@@ -215,7 +217,7 @@ func (h *NATSAccountHandler) RotateUser(ctx *fasthttp.RequestCtx) {
 
 func (h *NATSAccountHandler) MintJWT(ctx *fasthttp.RequestCtx) {
 	account := h.accountFromCtx(ctx)
-	creds, err := h.store.MintNATSAccountUserJWT(requestContext(ctx), clusterID(ctx), account, routeParam(ctx, "userId"), h.cfg.NATSAccountSeed)
+	creds, err := h.store.MintNATSAccountUserJWT(httpctx.FromRequest(ctx), clusterID(ctx), account, httpctx.RouteParam(ctx, "userId"), h.cfg.NATSAccountSeed)
 	if errors.Is(err, store.ErrNotFound) {
 		serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
 		return
@@ -236,7 +238,7 @@ func (h *NATSAccountHandler) AssignPerson(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	user, err := h.store.AssignNATSAccountUserPerson(requestContext(ctx), clusterID(ctx), account, routeParam(ctx, "userId"), req.UserID)
+	user, err := h.store.AssignNATSAccountUserPerson(httpctx.FromRequest(ctx), clusterID(ctx), account, httpctx.RouteParam(ctx, "userId"), req.UserID)
 	if errors.Is(err, store.ErrNotFound) {
 		serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
 		return
@@ -253,7 +255,7 @@ func (h *NATSAccountHandler) AssignPerson(ctx *fasthttp.RequestCtx) {
 
 func (h *NATSAccountHandler) ListSigningGroups(ctx *fasthttp.RequestCtx) {
 	account := h.accountFromCtx(ctx)
-	groups, err := h.store.ListSigningGroups(requestContext(ctx), clusterID(ctx), account)
+	groups, err := h.store.ListSigningGroups(httpctx.FromRequest(ctx), clusterID(ctx), account)
 	if err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
 		return
@@ -287,7 +289,7 @@ func (h *NATSAccountHandler) CreateSigningGroup(ctx *fasthttp.RequestCtx) {
 	if req.AccountName == "" {
 		req.AccountName = h.accountFromCtx(ctx)
 	}
-	group, err := h.store.CreateSigningGroup(requestContext(ctx), store.SigningGroupCreate{
+	group, err := h.store.CreateSigningGroup(httpctx.FromRequest(ctx), store.SigningGroupCreate{
 		ClusterID:   clusterID(ctx),
 		AccountName: req.AccountName,
 		Name:        req.Name,
@@ -314,7 +316,7 @@ func (h *NATSAccountHandler) UpdateSigningGroup(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	account := h.accountFromCtx(ctx)
-	group, err := h.store.UpdateSigningGroup(requestContext(ctx), clusterID(ctx), account, routeParam(ctx, "groupId"), store.SigningGroupUpdate{
+	group, err := h.store.UpdateSigningGroup(httpctx.FromRequest(ctx), clusterID(ctx), account, httpctx.RouteParam(ctx, "groupId"), store.SigningGroupUpdate{
 		Scoped:     req.Scoped,
 		PubAllow:   req.PubAllow,
 		PubDeny:    req.PubDeny,
@@ -337,7 +339,7 @@ func (h *NATSAccountHandler) UpdateSigningGroup(ctx *fasthttp.RequestCtx) {
 
 func (h *NATSAccountHandler) DeleteSigningGroup(ctx *fasthttp.RequestCtx) {
 	account := h.accountFromCtx(ctx)
-	err := h.store.DeleteSigningGroup(requestContext(ctx), clusterID(ctx), account, routeParam(ctx, "groupId"))
+	err := h.store.DeleteSigningGroup(httpctx.FromRequest(ctx), clusterID(ctx), account, httpctx.RouteParam(ctx, "groupId"))
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
@@ -353,7 +355,7 @@ func (h *NATSAccountHandler) DeleteSigningGroup(ctx *fasthttp.RequestCtx) {
 func (h *NATSAccountHandler) ListExports(ctx *fasthttp.RequestCtx) {
 	account := h.accountFromCtx(ctx)
 	kind := string(ctx.QueryArgs().Peek("kind"))
-	items, err := h.store.ListNATSAccountExports(requestContext(ctx), clusterID(ctx), account, kind)
+	items, err := h.store.ListNATSAccountExports(httpctx.FromRequest(ctx), clusterID(ctx), account, kind)
 	if err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
 		return
@@ -385,7 +387,7 @@ func (h *NATSAccountHandler) CreateExport(ctx *fasthttp.RequestCtx) {
 	if req.AccountName == "" {
 		req.AccountName = "Default"
 	}
-	item, err := h.store.CreateNATSAccountExport(requestContext(ctx), store.NATSAccountExportCreate{
+	item, err := h.store.CreateNATSAccountExport(httpctx.FromRequest(ctx), store.NATSAccountExportCreate{
 		ClusterID:   clusterID(ctx),
 		AccountName: req.AccountName,
 		Kind:        req.Kind,
@@ -411,7 +413,7 @@ func (h *NATSAccountHandler) UpdateExport(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	account := h.accountFromCtx(ctx)
-	item, err := h.store.UpdateNATSAccountExport(requestContext(ctx), clusterID(ctx), account, routeParam(ctx, "exportId"), store.NATSAccountExportUpdate{
+	item, err := h.store.UpdateNATSAccountExport(httpctx.FromRequest(ctx), clusterID(ctx), account, httpctx.RouteParam(ctx, "exportId"), store.NATSAccountExportUpdate{
 		Name:        req.Name,
 		Subject:     req.Subject,
 		Description: req.Description,
@@ -429,7 +431,7 @@ func (h *NATSAccountHandler) UpdateExport(ctx *fasthttp.RequestCtx) {
 
 func (h *NATSAccountHandler) DeleteExport(ctx *fasthttp.RequestCtx) {
 	account := h.accountFromCtx(ctx)
-	err := h.store.DeleteNATSAccountExport(requestContext(ctx), clusterID(ctx), account, routeParam(ctx, "exportId"))
+	err := h.store.DeleteNATSAccountExport(httpctx.FromRequest(ctx), clusterID(ctx), account, httpctx.RouteParam(ctx, "exportId"))
 	if errors.Is(err, store.ErrNotFound) {
 		serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
 		return

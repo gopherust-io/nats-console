@@ -8,7 +8,6 @@ import (
 
 const contextUserValueKey = "context"
 
-// FromRequest returns the context stored on the fasthttp request, or Background.
 func FromRequest(ctx *fasthttp.RequestCtx) context.Context {
 	if ctx == nil {
 		return context.Background()
@@ -17,4 +16,12 @@ func FromRequest(ctx *fasthttp.RequestCtx) context.Context {
 		return c
 	}
 	return context.Background()
+}
+
+func RouteParam(ctx *fasthttp.RequestCtx, key string) string {
+	value, ok := ctx.UserValue(key).(string)
+	if !ok {
+		return ""
+	}
+	return value
 }

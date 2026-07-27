@@ -4,10 +4,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/valyala/fasthttp"
+
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/store"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
-	"github.com/valyala/fasthttp"
 )
 
 type MetricsHistoryHandler struct {
@@ -19,7 +21,7 @@ func NewMetricsHistoryHandler(st *store.Store) *MetricsHistoryHandler {
 }
 
 func (h *MetricsHistoryHandler) History(ctx *fasthttp.RequestCtx) {
-	c := requestContext(ctx)
+	c := httpctx.FromRequest(ctx)
 	clusterID := clusterID(ctx)
 
 	to := time.Now().UTC()

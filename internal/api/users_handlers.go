@@ -11,6 +11,7 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 )
 
@@ -29,7 +30,7 @@ func (h *UsersHandler) List(ctx *fasthttp.RequestCtx) {
 		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
 		return
 	}
-	users, err := h.svc.Users.List(requestContext(ctx), actor)
+	users, err := h.svc.Users.List(httpctx.FromRequest(ctx), actor)
 	if err != nil {
 		writeUserMgmtError(ctx, err)
 		return
@@ -69,7 +70,7 @@ func (h *UsersHandler) Create(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("roles"))
 		return
 	}
-	user, err := h.svc.Users.Create(requestContext(ctx), actor, domain.UserCreate{
+	user, err := h.svc.Users.Create(httpctx.FromRequest(ctx), actor, domain.UserCreate{
 		Username:    req.Username,
 		Email:       req.Email,
 		Password:    req.Password,
@@ -89,7 +90,7 @@ func (h *UsersHandler) Update(ctx *fasthttp.RequestCtx) {
 		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
 		return
 	}
-	userID := routeParam(ctx, "userId")
+	userID := httpctx.RouteParam(ctx, "userId")
 	if err := validateUUID(userID); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
@@ -132,7 +133,7 @@ func (h *UsersHandler) Update(ctx *fasthttp.RequestCtx) {
 			update.AccessRules = &rules
 		}
 	}
-	user, err := h.svc.Users.Update(requestContext(ctx), actor, userID, update)
+	user, err := h.svc.Users.Update(httpctx.FromRequest(ctx), actor, userID, update)
 	if err != nil {
 		writeUserMgmtError(ctx, err)
 		return
@@ -147,12 +148,12 @@ func (h *UsersHandler) Delete(ctx *fasthttp.RequestCtx) {
 		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
 		return
 	}
-	userID := routeParam(ctx, "userId")
+	userID := httpctx.RouteParam(ctx, "userId")
 	if err := validateUUID(userID); err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if err := h.svc.Users.Delete(requestContext(ctx), actor, userID); err != nil {
+	if err := h.svc.Users.Delete(httpctx.FromRequest(ctx), actor, userID); err != nil {
 		writeUserMgmtError(ctx, err)
 		return
 	}
@@ -166,7 +167,7 @@ func (h *UsersHandler) SetRoles(ctx *fasthttp.RequestCtx) {
 		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
 		return
 	}
-	userID := routeParam(ctx, "userId")
+	userID := httpctx.RouteParam(ctx, "userId")
 	var req struct {
 		Roles []string `json:"roles"`
 	}
@@ -182,7 +183,7 @@ func (h *UsersHandler) SetRoles(ctx *fasthttp.RequestCtx) {
 		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	user, err := h.svc.Users.SetRoles(requestContext(ctx), actor, userID, req.Roles)
+	user, err := h.svc.Users.SetRoles(httpctx.FromRequest(ctx), actor, userID, req.Roles)
 	if err != nil {
 		writeUserMgmtError(ctx, err)
 		return
@@ -192,7 +193,7 @@ func (h *UsersHandler) SetRoles(ctx *fasthttp.RequestCtx) {
 }
 
 func actorFromContext(ctx *fasthttp.RequestCtx) (domain.User, bool) {
-	c := requestContext(ctx)
+	c := httpctx.FromRequest(ctx)
 	user, ok := auth.UserFromContext(c)
 	if !ok {
 		return domain.User{}, false
@@ -243,7 +244,7 @@ func (h *AuditHandler) List(ctx *fasthttp.RequestCtx) {
 	scope.Limit = limit
 	scope.Offset = offset
 
-	entries, total, err := h.svc.Audit.List(requestContext(ctx), scope)
+	entries, total, err := h.svc.Audit.List(httpctx.FromRequest(ctx), scope)
 	if err != nil {
 		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
 		return

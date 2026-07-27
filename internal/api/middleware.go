@@ -12,13 +12,15 @@ import (
 
 	"github.com/valyala/fasthttp"
 
+	"github.com/gopherust-io/tel"
+
 	"github.com/gopherust-io/nats-consol/internal/audit"
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/metrics"
 	"github.com/gopherust-io/nats-consol/internal/store"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
-	"github.com/gopherust-io/tel"
 )
 
 const (
@@ -179,7 +181,7 @@ func authMiddleware(cfg config.Config, authSvc *auth.Service) middleware {
 			}
 
 			if user.ID != "" {
-				loaded, err := authSvc.LoadUserForSession(requestContext(ctx), user)
+				loaded, err := authSvc.LoadUserForSession(httpctx.FromRequest(ctx), user)
 				if err != nil {
 					ctx.SetStatusCode(fasthttp.StatusUnauthorized)
 					ctx.SetContentType("application/json")
@@ -189,7 +191,7 @@ func authMiddleware(cfg config.Config, authSvc *auth.Service) middleware {
 				user = loaded
 			}
 
-			c := requestContext(ctx)
+			c := httpctx.FromRequest(ctx)
 			c = auth.ContextWithUser(c, user)
 			ctx.SetUserValue("context", c)
 			next(ctx)
@@ -205,7 +207,7 @@ func rbacMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 			return
 		}
 
-		c := requestContext(ctx)
+		c := httpctx.FromRequest(ctx)
 		user, ok := auth.UserFromContext(c)
 		if !ok {
 			ctx.SetStatusCode(fasthttp.StatusUnauthorized)
@@ -333,7 +335,7 @@ func auditMiddleware(auditWriter *audit.Writer) middleware {
 				return
 			}
 
-			c := requestContext(ctx)
+			c := httpctx.FromRequest(ctx)
 			user, _ := auth.UserFromContext(c)
 			resourceType, resourceName := audit.ParseResource(path)
 			details := store.AuditRequestDetails{
@@ -374,7 +376,7 @@ func authenticate(ctx *fasthttp.RequestCtx, authSvc *auth.Service) (store.User, 
 		if !ok {
 			return store.User{}, false
 		}
-		user, err := authSvc.AuthenticateBasic(requestContext(ctx), username, password)
+		user, err := authSvc.AuthenticateBasic(httpctx.FromRequest(ctx), username, password)
 		return user, err == nil
 	}
 

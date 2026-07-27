@@ -7,9 +7,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/valyala/fasthttp"
+
+	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/snapshot"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
-	"github.com/valyala/fasthttp"
 )
 
 var errMonitoringTooLarge = errors.New("monitoring payload too large")
@@ -30,7 +32,7 @@ func (h *Handler) Topology(ctx *fasthttp.RequestCtx) {
 		}
 	}
 	if raw == nil {
-		c := requestContext(ctx)
+		c := httpctx.FromRequest(ctx)
 		client, err := h.svc.JetStream.GetExecutor(c, clusterID)
 		if err != nil {
 			writeDomainError(ctx, err)

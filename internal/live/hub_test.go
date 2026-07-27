@@ -5,10 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
+
+	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/httpctx"
 )
 
 func TestHubConfigDefaults(t *testing.T) {
@@ -36,8 +38,8 @@ func TestRequestContext(t *testing.T) {
 	bg := context.WithValue(context.Background(), ctxKey{}, "scoped")
 	ctx := &fasthttp.RequestCtx{}
 	ctx.SetUserValue("context", bg)
-	require.Equal(t, bg, requestContext(ctx))
+	require.Equal(t, bg, httpctx.FromRequest(ctx))
 
 	empty := &fasthttp.RequestCtx{}
-	require.Equal(t, context.Background(), requestContext(empty))
+	require.Equal(t, context.Background(), httpctx.FromRequest(empty))
 }
