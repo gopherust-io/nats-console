@@ -13,6 +13,9 @@ concurrency:
 # Deny by default; each job declares least privilege below.
 permissions: {}
 
+env:
+  GOWORK: off
+
 jobs:
   go:
     name: Go
@@ -22,10 +25,7 @@ jobs:
       actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
+      - uses: ./.github/actions/setup-go
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: latest
@@ -96,10 +96,7 @@ jobs:
         suite: [integration, contract, security]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
+      - uses: ./.github/actions/setup-go
       - name: Run ${{ matrix.suite }} tests
         run: make test-${{ matrix.suite }}
 
@@ -111,10 +108,7 @@ jobs:
       actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
+      - uses: ./.github/actions/setup-go
       - name: Race detector (live WebSocket)
         run: go test -race -count=1 -tags=integration ./internal/live/... ./tests/integration/... -run TestLiveWS
 
@@ -126,17 +120,22 @@ jobs:
       actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
+      - uses: ./.github/actions/setup-go
       - name: Prepare compose env
         run: |
           cp .env.example .env
-          # Match smoke/load AUTH=admin:admin used by CI scripts.
           sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1 # v6.16.0
+        with:
+          context: .
+          push: false
+          load: true
+          tags: nats-consol:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Start stack
-        run: docker compose up --build -d
+        run: docker compose up -d
       - name: Wait for health
         run: |
           for i in $(seq 1 60); do
@@ -160,11 +159,15 @@ jobs:
       actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: ./.github/actions/setup-go
+      - name: Cache vegeta
+        id: vegeta-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          go-version-file: go.mod
-          cache: true
+          path: ~/go/bin/vegeta
+          key: vegeta-v12.13.0-${{ runner.os }}
       - name: Install vegeta
+        if: steps.vegeta-cache.outputs.cache-hit != 'true'
         run: go install github.com/tsenart/vegeta/v12@v12.13.0
       - name: Add Go bin to PATH
         run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
@@ -172,8 +175,17 @@ jobs:
         run: |
           cp .env.example .env
           sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1 # v6.16.0
+        with:
+          context: .
+          push: false
+          load: true
+          tags: nats-consol:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Start stack
-        run: docker compose up --build -d
+        run: docker compose up -d
       - name: Wait for health
         run: |
           for i in $(seq 1 60); do
@@ -194,11 +206,15 @@ jobs:
       actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: ./.github/actions/setup-go
+      - name: Cache vegeta
+        id: vegeta-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          go-version-file: go.mod
-          cache: true
+          path: ~/go/bin/vegeta
+          key: vegeta-v12.13.0-${{ runner.os }}
       - name: Install vegeta
+        if: steps.vegeta-cache.outputs.cache-hit != 'true'
         run: go install github.com/tsenart/vegeta/v12@v12.13.0
       - name: Add Go bin to PATH
         run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
@@ -206,8 +222,17 @@ jobs:
         run: |
           cp .env.example .env
           sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1 # v6.16.0
+        with:
+          context: .
+          push: false
+          load: true
+          tags: nats-consol:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Start stack
-        run: docker compose up --build -d
+        run: docker compose up -d
       - name: Wait for health
         run: |
           for i in $(seq 1 60); do

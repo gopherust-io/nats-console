@@ -29,6 +29,7 @@ services:
       - nats-data:/data
 
   console:
+    image: nats-consol:ci
     build: .
     expose:
       - "8080"
