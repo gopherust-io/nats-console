@@ -6,6 +6,8 @@ Open-source, self-hosted admin console for **NATS JetStream** — [github.com/go
 
 Manage streams, consumers, browse messages, tail live traffic, manage KV/Object stores, and monitor multi-cluster deployments from a modern web UI — without exposing NATS monitoring ports to the public internet.
 
+Latest stable release: **[v0.11.0](https://github.com/gopherust-io/nats-console/releases/tag/v0.11.0)** · [all releases](https://github.com/gopherust-io/nats-console/releases)
+
 **📖 Documentation:** friendly guides for everyone — [docs/README.md](docs/README.md)
 - [Getting started](docs/getting-started.md) · [User guide](docs/user-guide.md) · [DevOps setup](docs/devops-setup.md) · [Developer setup](docs/developer-setup.md)
 
@@ -33,8 +35,9 @@ Manage streams, consumers, browse messages, tail live traffic, manage KV/Object 
 ## Quick Start
 
 ```bash
-git clone https://github.com/gopherust-io/nats-consol.git
-cd nats-consol
+git clone https://github.com/gopherust-io/nats-console.git
+cd nats-console
+cp .env.example .env   # set ADMIN_PASSWORD and other secrets
 docker compose up --build
 ```
 
