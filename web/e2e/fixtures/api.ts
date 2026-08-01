@@ -13,15 +13,19 @@ export const emptyAccount = {
   },
 };
 
-export const emptyStreams = { streams: [], total: 0 };
-export const emptyBuckets = { buckets: [], total: 0 };
-export const emptyConsumers = { consumers: [], total: 0, offset: 0, limit: 50 };
-export const emptyKeys = { keys: [], total: 0, offset: 0, limit: 50 };
-export const emptyObjects = { objects: [], total: 0, offset: 0, limit: 50 };
-export const emptyGrants = { grants: [] };
-export const emptyPeople = { users: [], total: 0 };
-export const emptyAlerts = { alerts: [], total: 0 };
+export const emptyStreams = { data: [], meta: { total: 0 } };
+export const emptyBuckets = { data: [], meta: { total: 0 } };
+export const emptyConsumers = { data: [], meta: { total: 0, offset: 0, limit: 50 } };
+export const emptyKeys = { data: [], meta: { total: 0, offset: 0, limit: 50 } };
+export const emptyObjects = { data: [], meta: { total: 0, offset: 0, limit: 50 } };
+export const emptyGrants = { data: { grants: [] } };
+export const emptyPeople = { data: [], meta: { total: 0 } };
+export const emptyAlerts = { data: [], meta: { total: 0 } };
 export const emptyAudit = { data: [], meta: { total: 0 } };
+export const emptyRules = { data: [], meta: { total: 0 } };
+export const emptyExports = { data: { exports: [] } };
+export const emptyNatsUsers = { data: [], meta: { total: 0 } };
+export const emptySigningGroups = { data: { groups: [] } };
 export const emptyTopology = {
   data: {
     id: "cluster:root",
@@ -30,10 +34,7 @@ export const emptyTopology = {
     children: [],
   },
 };
-export const emptyRules = { rules: [], total: 0 };
-export const emptyExports = { exports: [], total: 0 };
-export const emptyNatsUsers = { users: [], total: 0 };
-export const emptySigningGroups = { groups: [], total: 0 };
+export const emptyUsers = { data: [], meta: { total: 0 } };
 
 export const alertRuleMetrics = {
   metrics: ["server.cpu_percent", "server.connections"],

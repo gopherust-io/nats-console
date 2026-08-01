@@ -19,7 +19,7 @@ async function mockApiCatchAll(page: Page) {
 /** Logged-out session: config ok, me unauthorized. */
 export async function mockLoggedOut(page: Page) {
   await mockApiCatchAll(page);
-  await mockJson(page, "**/api/v1/auth/config", { basicEnabled: true, authEnabled: true });
+  await mockJson(page, "**/api/v1/auth/config", { data: { basicEnabled: true, authEnabled: true } });
   await mockJson(page, "**/api/v1/auth/me", { error: "unauthorized" }, 401);
 }
 
@@ -31,8 +31,8 @@ export async function mockLoginSuccess(page: Page, user: AuthUserFixture = ADMIN
   let loggedIn = false;
 
   await mockApiCatchAll(page);
-  await mockJson(page, "**/api/v1/auth/config", { basicEnabled: true, authEnabled: true });
-  await mockJson(page, "**/api/v1/alerts/open-summary", { count: 0, alerts: [] });
+  await mockJson(page, "**/api/v1/auth/config", { data: { basicEnabled: true, authEnabled: true } });
+  await mockJson(page, "**/api/v1/alerts/open-summary", { data: { count: 0, alerts: [] } });
 
   await page.route("**/api/v1/auth/me", async (route) => {
     if (!loggedIn) {
@@ -46,7 +46,7 @@ export async function mockLoginSuccess(page: Page, user: AuthUserFixture = ADMIN
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(user),
+      body: JSON.stringify({ data: user }),
     });
   });
 
@@ -59,7 +59,7 @@ export async function mockLoginSuccess(page: Page, user: AuthUserFixture = ADMIN
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(user),
+      body: JSON.stringify({ data: user }),
     });
   });
 }
@@ -68,8 +68,8 @@ export async function mockInvite(page: Page, token: string, user: AuthUserFixtur
   let accepted = false;
 
   await mockApiCatchAll(page);
-  await mockJson(page, "**/api/v1/auth/config", { basicEnabled: true, authEnabled: true });
-  await mockJson(page, "**/api/v1/alerts/open-summary", { count: 0, alerts: [] });
+  await mockJson(page, "**/api/v1/auth/config", { data: { basicEnabled: true, authEnabled: true } });
+  await mockJson(page, "**/api/v1/alerts/open-summary", { data: { count: 0, alerts: [] } });
 
   await page.route("**/api/v1/auth/me", async (route) => {
     if (!accepted) {
@@ -84,14 +84,16 @@ export async function mockInvite(page: Page, token: string, user: AuthUserFixtur
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(user),
+      body: JSON.stringify({ data: user }),
     });
   });
 
   await mockJson(page, `**/api/v1/auth/invite/${encodeURIComponent(token)}`, {
-    username: "invited",
-    email: "invited@example.com",
-    expiresAt: "2099-01-01T00:00:00Z",
+    data: {
+      username: "invited",
+      email: "invited@example.com",
+      expiresAt: "2099-01-01T00:00:00Z",
+    },
   });
 
   await page.route("**/api/v1/auth/invite/accept", async (route) => {
@@ -103,7 +105,7 @@ export async function mockInvite(page: Page, token: string, user: AuthUserFixtur
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ ok: true }),
+      body: JSON.stringify({ data: { ok: true } }),
     });
   });
 }

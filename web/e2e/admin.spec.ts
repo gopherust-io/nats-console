@@ -49,12 +49,12 @@ test.describe("admin", () => {
   });
 
   test("console users invite person", async ({ page }) => {
-    await mockJson(page, "**/api/v1/users**", { users: [], total: 0 });
+    await mockJson(page, "**/api/v1/users**", { data: [], meta: { total: 0 } });
     await page.route("**/api/v1/people/invite", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ inviteUrl: "http://127.0.0.1:4173/invite/abc" }),
+        body: JSON.stringify({ data: { inviteUrl: "http://127.0.0.1:4173/invite/abc" } }),
       });
     });
 
@@ -86,7 +86,7 @@ test.describe("admin", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ count: current.acknowledgedAt ? 0 : 1, alerts: current.acknowledgedAt ? [] : [current] }),
+        body: JSON.stringify({ data: { count: current.acknowledgedAt ? 0 : 1, alerts: current.acknowledgedAt ? [] : [current] } }),
       });
     });
 
@@ -101,7 +101,7 @@ test.describe("admin", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(current),
+          body: JSON.stringify({ data: current }),
         });
         return;
       }
@@ -113,8 +113,8 @@ test.describe("admin", () => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          alerts: [current],
-          total: 1,
+          data: [current],
+          meta: { total: 1 },
         }),
       });
     });
@@ -128,7 +128,7 @@ test.describe("admin", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ alerts: [current], total: 1 }),
+        body: JSON.stringify({ data: [current], meta: { total: 1 } }),
       });
     });
 
@@ -152,7 +152,7 @@ test.describe("admin", () => {
       updatedAt: string;
     }> = [];
 
-    await mockJson(page, "**/api/v1/alert-rules/metrics", alertRuleMetrics);
+    await mockJson(page, "**/api/v1/alert-rules/metrics", { data: alertRuleMetrics });
     await page.route("**/api/v1/alert-rules**", async (route) => {
       const method = route.request().method();
       const path = new URL(route.request().url()).pathname;
@@ -160,7 +160,7 @@ test.describe("admin", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(alertRuleMetrics),
+          body: JSON.stringify({ data: alertRuleMetrics }),
         });
         return;
       }
@@ -184,14 +184,14 @@ test.describe("admin", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(created),
+          body: JSON.stringify({ data: created }),
         });
         return;
       }
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ rules, total: rules.length }),
+        body: JSON.stringify({ data: rules, meta: { total: rules.length } }),
       });
     });
 

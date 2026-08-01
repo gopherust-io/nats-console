@@ -52,16 +52,16 @@ export async function mockShell(page: Page, user: AuthUserFixture = ADMIN) {
     await route.fallback();
   });
 
-  await mockJson(page, "**/api/v1/alerts/open-summary", { count: 0, alerts: [] });
-  await mockJson(page, "**/api/v1/auth/config", { basicEnabled: true, authEnabled: true });
-  await mockJson(page, "**/api/v1/auth/me", user);
-  await mockJson(page, "**/api/v1/clusters**", { clusters: [CLUSTER], total: 1 });
+  await mockJson(page, "**/api/v1/alerts/open-summary", { data: { count: 0, alerts: [] } });
+  await mockJson(page, "**/api/v1/auth/config", { data: { basicEnabled: true, authEnabled: true } });
+  await mockJson(page, "**/api/v1/auth/me", { data: user });
+  await mockJson(page, "**/api/v1/clusters**", { data: [CLUSTER], meta: { total: 1 } });
 }
 
 /** Common cluster-scoped GETs so account/jetstream pages render cleanly. */
 export async function mockClusterApis(page: Page) {
-  await mockJson(page, "**/api/v1/clusters/connections", connectedStatus);
-  await mockJson(page, "**/api/v1/clusters/*/account", emptyAccount);
+  await mockJson(page, "**/api/v1/clusters/connections", { data: connectedStatus });
+  await mockJson(page, "**/api/v1/clusters/*/account", { data: emptyAccount });
   await mockJson(page, "**/api/v1/clusters/*/streams**", emptyStreams);
   await mockJson(page, "**/api/v1/clusters/*/kv/buckets**", emptyBuckets);
   await mockJson(page, "**/api/v1/clusters/*/objects/buckets**", emptyBuckets);

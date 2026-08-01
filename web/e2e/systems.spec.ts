@@ -45,7 +45,7 @@ test.describe("systems and accounts", () => {
       role: string;
     }> = [];
 
-    await mockJson(page, "**/api/v1/people**", { users: [person], total: 1 });
+    await mockJson(page, "**/api/v1/people**", { data: [person], meta: { total: 1 } });
     await page.route(`**/api/v1/clusters/${CLUSTER.id}/access**`, async (route) => {
       const method = route.request().method();
       if (method === "GET") {
