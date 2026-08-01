@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { emptyBuckets, sampleKVBucket, sampleKVEntry } from "./fixtures/api";
+import { sampleKVBucket, sampleKVEntry } from "./fixtures/api";
 import { accountBase } from "./fixtures/cluster";
 import { mockClusterApis, mockJson, mockKVBucket, mockShell } from "./helpers/mockApi";
 
@@ -19,7 +19,7 @@ test.describe("kv", () => {
   });
 
   test("create kv bucket", async ({ page }) => {
-    let buckets = [...emptyBuckets.buckets];
+    let buckets: any[] = [];
 
     await page.route("**/api/v1/clusters/*/kv/buckets**", async (route) => {
       const method = route.request().method();
@@ -32,7 +32,7 @@ test.describe("kv", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(created),
+          body: JSON.stringify({ data: created }),
         });
         return;
       }
@@ -40,7 +40,7 @@ test.describe("kv", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ buckets, total: buckets.length }),
+          body: JSON.stringify({ data: buckets, meta: { total: buckets.length } }),
         });
         return;
       }
@@ -96,7 +96,7 @@ test.describe("kv", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ buckets, total: buckets.length }),
+          body: JSON.stringify({ data: buckets, meta: { total: buckets.length } }),
         });
         return;
       }

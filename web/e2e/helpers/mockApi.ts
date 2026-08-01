@@ -83,11 +83,10 @@ export async function mockStreamDetail(
   stream: ReturnType<typeof import("../fixtures/api").sampleStream>,
   consumers: unknown[] = [],
 ) {
-  await mockJson(page, `**/api/v1/clusters/*/streams/${encodeURIComponent(stream.config.name)}`, stream);
+  await mockJson(page, `**/api/v1/clusters/*/streams/${encodeURIComponent(stream.config.name)}`, { data: stream });
   await mockJson(page, `**/api/v1/clusters/*/streams/${encodeURIComponent(stream.config.name)}/consumers**`, {
-    ...emptyConsumers,
-    consumers,
-    total: consumers.length,
+    data: consumers,
+    meta: { total: consumers.length, offset: 0, limit: 50 },
   });
 }
 
@@ -96,11 +95,10 @@ export async function mockKVBucket(
   bucket: ReturnType<typeof import("../fixtures/api").sampleKVBucket>,
   keys: string[] = [],
 ) {
-  await mockJson(page, `**/api/v1/clusters/*/kv/buckets/${encodeURIComponent(bucket.bucket)}`, bucket);
+  await mockJson(page, `**/api/v1/clusters/*/kv/buckets/${encodeURIComponent(bucket.bucket)}`, { data: bucket });
   await mockJson(page, `**/api/v1/clusters/*/kv/buckets/${encodeURIComponent(bucket.bucket)}/keys**`, {
-    ...emptyKeys,
-    keys,
-    total: keys.length,
+    data: keys,
+    meta: { total: keys.length, offset: 0, limit: 50 },
   });
 }
 
@@ -109,11 +107,10 @@ export async function mockObjectBucket(
   bucket: ReturnType<typeof import("../fixtures/api").sampleObjectBucket>,
   objects: string[] = [],
 ) {
-  await mockJson(page, `**/api/v1/clusters/*/objects/buckets/${encodeURIComponent(bucket.bucket)}`, bucket);
+  await mockJson(page, `**/api/v1/clusters/*/objects/buckets/${encodeURIComponent(bucket.bucket)}`, { data: bucket });
   await mockJson(page, `**/api/v1/clusters/*/objects/buckets/${encodeURIComponent(bucket.bucket)}/objects**`, {
-    ...emptyObjects,
-    objects,
-    total: objects.length,
+    data: objects,
+    meta: { total: objects.length, offset: 0, limit: 50 },
   });
 }
 
