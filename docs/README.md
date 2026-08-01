@@ -23,8 +23,18 @@ The browser talks only to the Consol API. The API talks to PostgreSQL (settings 
 ## What you can do in the UI
 
 - **Dashboard** — JetStream usage and server health at a glance  
-- **Clusters** — view devops-registered NATS clusters; switch between them in the sidebar  
-- **Topology** — visual map of streams and consumers  
+- **Clusters** — view devops-registered NATS clusters; open from the Clusters card on Systems  
+- **Systems** — open a registered system and work inside it  
+- **Replicas** — view-only NATS server peers (routes + JetStream meta) for the selected system  
+- **Topology** — visual map of streams and consumers
+- **Event Catalog** — Swagger-style docs for events (owner, description, JSON Schema, consumers)  
+- **Live Architecture** — animated deploy / DDD-layer painting (Docs)  
+- **Architecture Review** — event-architecture problems and suggestions (Docs)
+- **Architecture Score** — daily 0–100 score, +/- factors, multi-month trend (Docs)
+- **Architecture Refactor** — reduce coupling: before/after graphs and migration steps (Docs)
+- **Hidden Bottlenecks** — recurring schedule × payload correlations (Docs; not lag/CPU alerts)
+- **Chaos Story Generator** — AI invents realistic multi-failure disasters; one-click narrative simulate (Docs; cluster untouched)
+- **Architecture Generator** — one-click C4 / Mermaid / PlantUML / Excalidraw / Draw.io / Markdown / ADRs zip (Docs + Topology)
 - **Streams & consumers** — create, edit, purge, browse messages, live tail  
 - **KV & Object stores** — buckets, keys, and objects  
 - **Audit log** — who changed what (admins)  
@@ -35,6 +45,8 @@ The browser talks only to the Consol API. The API talks to PostgreSQL (settings 
 ---
 
 ## Architecture (30-second version)
+
+In the console UI, open **Docs → Live Architecture** (`/docs/live-architecture`) for a living view of services, traffic pulses, and failure ripples. Press **F** for fullscreen; `?scene=layers` shows the DDD package map.
 
 ```mermaid
 flowchart LR
@@ -55,6 +67,7 @@ flowchart LR
 - [Main README](../README.md) — feature list, env reference, API summary  
 - [OpenAPI spec](../api/openapi.yaml) — full REST API  
 - [Docker Compose](../docker-compose.yml) — local full stack  
+- [Local NATS Docker labs](./local-docker.md) — single / cluster / supercluster / auth  
 - [Helm chart](../deploy/helm/nats-consol/) — Kubernetes deployment  
 
 Questions or bugs? Open an issue on [GitHub](https://github.com/gopherust-io/nats-consol).

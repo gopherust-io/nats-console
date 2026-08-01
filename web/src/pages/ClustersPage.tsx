@@ -1,6 +1,7 @@
-import { FormEvent, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import Alert from "../components/ui/Alert";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { api, Cluster } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
@@ -19,125 +20,57 @@ type AvailabilityState = {
   nonce: number;
 };
 
-type FormState = {
-  name: string;
-  natsUrl: string;
-  monitoringUrl: string;
-  token: string;
-  credsFilePath: string;
-  isDefault: boolean;
-};
+/** Comma-separated NATS / monitoring URLs → one line each (avoids blowing out the table). */
+function endpointLines(value: string): string[] {
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
 
-const emptyForm = (): FormState => ({
-  name: "",
-  natsUrl: "",
-  monitoringUrl: "",
-  token: "",
-  credsFilePath: "",
-  isDefault: false,
-});
+function EndpointCell({ value, empty = "-" }: { value: string; empty?: string }) {
+  const lines = endpointLines(value);
+  if (lines.length === 0) return <td className="mono">{empty}</td>;
+  return (
+    <td className="mono">
+      <div className="clusters-endpoints">
+        {lines.map((line, i) => (
+          <div key={`${i}-${line}`} className="clusters-endpoints__item">
+            {line}
+          </div>
+        ))}
+      </div>
+    </td>
+  );
+}
 
 export default function ClustersPage() {
   const { t } = useTranslation();
-  const { canWrite, canDeleteClusters } = useAuth();
+  const { askConfirm, confirmDialog } = useConfirmDialog();
+  const { canDeleteClusters } = useAuth();
   const { clusters, reload, setClusterId, clusterId } = useCluster();
   const [availability, setAvailability] = useState<Record<string, AvailabilityState>>({});
-  const [showForm, setShowForm] = useState(false);
-  const [editItem, setEditItem] = useState<Cluster | null>(null);
-  const [form, setForm] = useState<FormState>(emptyForm);
   const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
+  const showDelete = canDeleteClusters && clusters.some((c) => !c.isDefault);
 
-  function resetForm() {
-    setShowForm(false);
-    setEditItem(null);
-    setForm(emptyForm());
-  }
-
-  function openCreate() {
-    setEditItem(null);
-    setForm(emptyForm());
-    setShowForm(true);
-    setError("");
-  }
-
-  function openEdit(cluster: Cluster) {
-    setEditItem(cluster);
-    setForm({
-      name: cluster.name,
-      natsUrl: cluster.natsUrl,
-      monitoringUrl: cluster.monitoringUrl || "",
-      token: "",
-      credsFilePath: "",
-      isDefault: cluster.isDefault,
+  function deleteCluster(cluster: Cluster) {
+    askConfirm({
+      title: t("clusters.confirmDeleteTitle"),
+      description: t("clusters.confirmDelete", { name: cluster.name }),
+      action: async () => {
+        setError("");
+        try {
+          await api(`/api/v1/clusters/${cluster.id}`, { method: "DELETE" });
+          if (clusterId === cluster.id) {
+            const next = clusters.find((c) => c.id !== cluster.id);
+            if (next) setClusterId(next.id);
+          }
+          await reload();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : t("clusters.deleteFailed"));
+        }
+      },
     });
-    setShowForm(true);
-    setError("");
-  }
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!form.name.trim() || !form.natsUrl.trim()) {
-      setError(t("clusters.nameRequired"));
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      if (editItem) {
-        const body: Record<string, unknown> = {
-          name: form.name.trim(),
-          natsUrl: form.natsUrl.trim(),
-          monitoringUrl: form.monitoringUrl.trim(),
-          isDefault: form.isDefault,
-        };
-        if (form.token.trim()) body.token = form.token.trim();
-        if (form.credsFilePath.trim()) body.credsFilePath = form.credsFilePath.trim();
-        await api(`/api/v1/clusters/${editItem.id}`, {
-          method: "PUT",
-          body: JSON.stringify(body),
-        });
-      } else {
-        await api("/api/v1/clusters", {
-          method: "POST",
-          body: JSON.stringify({
-            name: form.name.trim(),
-            natsUrl: form.natsUrl.trim(),
-            monitoringUrl: form.monitoringUrl.trim(),
-            token: form.token.trim(),
-            credsFilePath: form.credsFilePath.trim(),
-            isDefault: form.isDefault,
-          }),
-        });
-      }
-      resetForm();
-      await reload();
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : editItem
-            ? t("clusters.updateFailed")
-            : t("clusters.createFailed"),
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function deleteCluster(cluster: Cluster) {
-    if (!window.confirm(t("clusters.confirmDelete", { name: cluster.name }))) return;
-    setError("");
-    try {
-      await api(`/api/v1/clusters/${cluster.id}`, { method: "DELETE" });
-      if (clusterId === cluster.id) {
-        const next = clusters.find((c) => c.id !== cluster.id);
-        if (next) setClusterId(next.id);
-      }
-      await reload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("clusters.deleteFailed"));
-    }
   }
 
   async function testCluster(cluster: Cluster) {
@@ -150,7 +83,7 @@ export default function ClustersPage() {
     }));
 
     try {
-      const result = await api<TestResponse>(`/api/v1/clusters/${cluster.id}/test`, { method: "POST" });
+      const result = (await api<TestResponse>(`/api/v1/clusters/${cluster.id}/test`, { method: "POST" })).data;
       setAvailability((prev) => ({
         ...prev,
         [cluster.id]: {
@@ -175,85 +108,13 @@ export default function ClustersPage() {
   }
 
   return (
-    <div>
+    <div className="clusters-page">
+      {confirmDialog}
       <div className="page-header">
         <h1>{t("clusters.title")}</h1>
-        {canWrite && (
-          <button className="btn btn--primary" type="button" onClick={openCreate}>
-            {t("clusters.create")}
-          </button>
-        )}
       </div>
       <p className="text-muted mb-24">{t("clusters.help")}</p>
       {error && <Alert variant="error">{error}</Alert>}
-
-      {showForm && canWrite && (
-        <form className="card mb-24" onSubmit={onSubmit}>
-          <h2>{editItem ? t("clusters.edit") : t("clusters.create")}</h2>
-          <label>
-            {t("common.name")}
-            <input
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              required
-            />
-          </label>
-          <label>
-            {t("clusters.natsUrl")}
-            <input
-              className="mono"
-              value={form.natsUrl}
-              onChange={(e) => setForm((f) => ({ ...f, natsUrl: e.target.value }))}
-              placeholder="nats://localhost:4222"
-              required
-            />
-          </label>
-          <label>
-            {t("clusters.monitoringUrl")}
-            <input
-              className="mono"
-              value={form.monitoringUrl}
-              onChange={(e) => setForm((f) => ({ ...f, monitoringUrl: e.target.value }))}
-              placeholder="http://localhost:8222"
-            />
-          </label>
-          <label>
-            {t("clusters.token")}
-            <input
-              type="password"
-              value={form.token}
-              onChange={(e) => setForm((f) => ({ ...f, token: e.target.value }))}
-              placeholder={editItem?.hasToken ? "••••••••" : undefined}
-              autoComplete="off"
-            />
-          </label>
-          <label>
-            {t("clusters.credsPath")}
-            <input
-              className="mono"
-              value={form.credsFilePath}
-              onChange={(e) => setForm((f) => ({ ...f, credsFilePath: e.target.value }))}
-              placeholder={editItem?.hasCreds ? "(leave blank to keep)" : undefined}
-            />
-          </label>
-          <label className="role-chip">
-            <input
-              type="checkbox"
-              checked={form.isDefault}
-              onChange={(e) => setForm((f) => ({ ...f, isDefault: e.target.checked }))}
-            />
-            {t("clusters.isDefault")}
-          </label>
-          <div className="actions">
-            <button className="btn btn--primary" type="submit" disabled={saving}>
-              {saving ? t("common.saving") : editItem ? t("common.save") : t("clusters.create")}
-            </button>
-            <button className="btn secondary" type="button" onClick={resetForm}>
-              {t("common.cancel")}
-            </button>
-          </div>
-        </form>
-      )}
 
       <div className="table-wrap">
         <table>
@@ -264,7 +125,7 @@ export default function ClustersPage() {
               <th>{t("clusters.monitoring")}</th>
               <th>{t("clusters.default")}</th>
               <th>{t("clusters.availability")}</th>
-              {(canWrite || canDeleteClusters) && <th />}
+              {showDelete && <th />}
             </tr>
           </thead>
           <tbody>
@@ -273,10 +134,10 @@ export default function ClustersPage() {
               return (
                 <tr key={cluster.id}>
                   <td>{cluster.name}</td>
-                  <td className="mono">{cluster.natsUrl}</td>
-                  <td className="mono">{cluster.monitoringUrl || "-"}</td>
+                  <EndpointCell value={cluster.natsUrl} />
+                  <EndpointCell value={cluster.monitoringUrl || ""} />
                   <td>{cluster.isDefault ? t("common.yes") : t("common.no")}</td>
-                  <td>
+                  <td className="clusters-availability">
                     <button
                       className="btn secondary"
                       onClick={() => testCluster(cluster)}
@@ -321,24 +182,17 @@ export default function ClustersPage() {
                       </span>
                     )}
                   </td>
-                  {(canWrite || canDeleteClusters) && (
+                  {showDelete && (
                     <td>
-                      <div className="actions">
-                        {canWrite && (
-                          <button className="btn secondary btn--small" type="button" onClick={() => openEdit(cluster)}>
-                            {t("common.edit")}
-                          </button>
-                        )}
-                        {canDeleteClusters && !cluster.isDefault && (
-                          <button
-                            className="btn btn--ghost btn--small"
-                            type="button"
-                            onClick={() => deleteCluster(cluster)}
-                          >
-                            {t("common.delete")}
-                          </button>
-                        )}
-                      </div>
+                      {!cluster.isDefault && (
+                        <button
+                          className="btn btn--ghost btn--small"
+                          type="button"
+                          onClick={() => deleteCluster(cluster)}
+                        >
+                          {t("common.delete")}
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>

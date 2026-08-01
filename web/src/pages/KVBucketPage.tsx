@@ -5,17 +5,13 @@ import { useTranslation } from "react-i18next";
 import CreateKVBucketPanel, { KVBucketConfigPayload } from "../components/CreateKVBucketPanel";
 import Pager, { DEFAULT_PAGE_SIZE, pageQuery } from "../components/Pager";
 import VirtualTable from "../components/VirtualTable";
+import Alert from "../components/ui/Alert";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { api, clusterPath, jetStreamUIBase, KVBucketInfo } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
-import { clusterQueryKey } from "../lib/query";
-
-type KeyListResponse = {
-  keys: string[];
-  total: number;
-  offset: number;
-  limit: number;
-};
+import { HUB_LIST_POLL_MS } from "../lib/constants";
+import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
 
 function encodeValue(raw: string): string {
   return btoa(unescape(encodeURIComponent(raw)));
@@ -23,8 +19,10 @@ function encodeValue(raw: string): string {
 
 export default function KVBucketPage() {
   const { t } = useTranslation();
-  const { bucket = "", accountName } = useParams();
-  const { clusterId } = useCluster();
+  const { askConfirm, confirmDialog } = useConfirmDialog();
+  const { bucket = "", accountName, clusterId: routeCluster } = useParams();
+  const { clusterId: contextClusterId } = useCluster();
+  const clusterId = routeCluster ?? contextClusterId;
   const { canManageJetStream } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -41,18 +39,22 @@ export default function KVBucketPage() {
 
   const bucketQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, `kv-bucket:${bucket}`),
-    queryFn: () =>
-      api<KVBucketInfo>(clusterPath(clusterId!, `/kv/buckets/${encodeURIComponent(bucket)}`)),
+    queryFn: async () =>
+      (await api<KVBucketInfo>(clusterPath(clusterId!, `/kv/buckets/${encodeURIComponent(bucket)}`))).data,
     enabled: Boolean(clusterId && bucket),
+    refetchInterval: visibilityAwareInterval(HUB_LIST_POLL_MS),
   });
 
   const keysQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, `kv-keys:${bucket}:${offset}`),
-    queryFn: () =>
-      api<KeyListResponse>(
+    queryFn: async () => {
+      const r = await api<string[]>(
         clusterPath(clusterId!, `/kv/buckets/${encodeURIComponent(bucket)}/keys${pageQuery(offset, limit)}`),
-      ),
+      );
+      return { keys: r.data ?? [], total: r.meta?.total ?? 0 };
+    },
     enabled: Boolean(clusterId && bucket),
+    refetchInterval: visibilityAwareInterval(HUB_LIST_POLL_MS),
   });
 
   const updateMutation = useMutation({
@@ -117,6 +119,7 @@ export default function KVBucketPage() {
 
   return (
     <div>
+      {confirmDialog}
       <div className="page-header">
         <div>
           <Link to={`${jsBase}/kv`} className="link-back">
@@ -153,10 +156,13 @@ export default function KVBucketPage() {
               type="button"
               className="btn danger"
               disabled={deleteBucketMutation.isPending}
-              onClick={() => {
-                if (!window.confirm(t("kv.confirmDeleteBucket", { name: bucket }))) return;
-                deleteBucketMutation.mutate();
-              }}
+              onClick={() =>
+                askConfirm({
+                  title: t("kv.confirmDeleteBucketTitle"),
+                  description: t("kv.confirmDeleteBucket", { name: bucket }),
+                  action: () => deleteBucketMutation.mutate(),
+                })
+              }
             >
               {t("common.delete")}
             </button>
@@ -164,7 +170,7 @@ export default function KVBucketPage() {
         )}
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {error && <Alert variant="error">{error}</Alert>}
 
       {showPut && (
         <form className="nc-settings-section" onSubmit={onPutKey}>

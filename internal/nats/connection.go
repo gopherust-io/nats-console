@@ -83,7 +83,14 @@ func (m *Manager) markConnected(clusterID string, client *Client) {
 	alive := client.IsAlive()
 	jsOK := false
 	var jsErr string
-	if _, err := client.AccountInfo(context.Background()); err == nil {
+
+	timeout := m.cfg.HealthCheckTimeout
+	if timeout <= 0 {
+		timeout = 2 * time.Second
+	}
+	probeCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if _, err := client.AccountInfo(probeCtx); err == nil {
 		jsOK = true
 	} else if err != nil {
 		jsErr = err.Error()
@@ -215,17 +222,13 @@ func (m *Manager) sweepExpired() {
 	now := time.Now()
 	ttl := m.clientCacheTTL()
 	var expired []string
+	var toClose []*Client
 
 	m.mu.Lock()
 	for id, entry := range m.cache {
-		if now.Sub(entry.lastUsed()) >= ttl {
+		if now.Sub(entry.lastUsed()) >= ttl || !entry.client.IsAlive() {
 			expired = append(expired, id)
-			entry.client.Close()
-			delete(m.cache, id)
-			delete(m.status, id)
-		} else if !entry.client.IsAlive() {
-			expired = append(expired, id)
-			entry.client.Close()
+			toClose = append(toClose, entry.client)
 			delete(m.cache, id)
 			delete(m.status, id)
 		}
@@ -236,6 +239,10 @@ func (m *Manager) sweepExpired() {
 		}
 	}
 	m.mu.Unlock()
+
+	for _, client := range toClose {
+		client.Close()
+	}
 
 	if len(expired) > 0 {
 		metrics.SetNATSConnectionsActive(m.activeConnectionCount())

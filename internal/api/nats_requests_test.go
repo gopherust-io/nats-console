@@ -179,6 +179,72 @@ func TestConsumerConfigRequestRequiresStartFields(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestKVBucketConfigRequestToKVConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := (kvBucketConfigRequest{
+		Bucket:       "CONFIG",
+		Description:  "feature flags",
+		Storage:      "memory",
+		TTLNs:        int64(time.Hour),
+		MaxBytes:     1 << 20,
+		MaxValueSize: 4096,
+		History:      10,
+		Replicas:     3,
+		Compression:  true,
+		Placement: &streamPlacementRequest{
+			Cluster: "east",
+			Tags:    []string{"ssd"},
+		},
+		RePublish: &rePublishRequest{
+			Source:      "kv.CONFIG.>",
+			Destination: "mirror.>",
+			HeadersOnly: true,
+		},
+	}).toKVConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "CONFIG", cfg.Bucket)
+	assert.Equal(t, "feature flags", cfg.Description)
+	assert.Equal(t, nats.MemoryStorage, cfg.Storage)
+	assert.Equal(t, time.Hour, cfg.TTL)
+	assert.Equal(t, int64(1<<20), cfg.MaxBytes)
+	assert.Equal(t, int32(4096), cfg.MaxValueSize)
+	assert.Equal(t, uint8(10), cfg.History)
+	assert.Equal(t, 3, cfg.Replicas)
+	assert.True(t, cfg.Compression)
+	require.NotNil(t, cfg.Placement)
+	assert.Equal(t, "east", cfg.Placement.Cluster)
+	require.NotNil(t, cfg.RePublish)
+	assert.Equal(t, "mirror.>", cfg.RePublish.Destination)
+	assert.True(t, cfg.RePublish.HeadersOnly)
+}
+
+func TestKVBucketConfigRequestDefaults(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := (kvBucketConfigRequest{Bucket: "B"}).toKVConfig()
+	require.NoError(t, err)
+	assert.Equal(t, nats.FileStorage, cfg.Storage)
+	assert.Equal(t, 1, cfg.Replicas)
+	assert.Equal(t, uint8(1), cfg.History)
+	assert.Nil(t, cfg.Placement)
+	assert.False(t, cfg.Compression)
+}
+
+func TestKVBucketConfigRequestInvalidReplicas(t *testing.T) {
+	t.Parallel()
+
+	_, err := (kvBucketConfigRequest{Bucket: "B", Replicas: 2}).toKVConfig()
+	require.Error(t, err)
+}
+
+func TestKVBucketConfigRequestInvalidHistory(t *testing.T) {
+	t.Parallel()
+
+	_, err := (kvBucketConfigRequest{Bucket: "B", History: 65}).toKVConfig()
+	require.Error(t, err)
+}
+
 func TestObjectBucketConfigRequestToObjectConfig(t *testing.T) {
 	t.Parallel()
 

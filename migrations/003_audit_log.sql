@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS audit_log (
     id UUID PRIMARY KEY,
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -14,3 +16,9 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log (timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_log_cluster_id ON audit_log (cluster_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log (actor);
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+SELECT 1;
+-- +goose StatementEnd

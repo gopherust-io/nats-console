@@ -10,6 +10,9 @@ data:
   ADMIN_USERNAME: {{ .Values.config.adminUsername | quote }}
   DEFAULT_CLUSTER_NAME: {{ .Values.config.defaultClusterName | quote }}
   CORS_ALLOWED_ORIGINS: {{ .Values.config.corsAllowedOrigins | quote }}
+  {{- if .Values.config.publicBaseUrl }}
+  PUBLIC_BASE_URL: {{ .Values.config.publicBaseUrl | quote }}
+  {{- end }}
   {{- with .Values.config.natsTlsCaFile }}
   NATS_TLS_CA_FILE: {{ . | quote }}
   {{- end }}

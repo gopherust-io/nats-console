@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { emptyBuckets, sampleKVBucket, sampleKVEntry } from "./fixtures/api";
+import { sampleKVBucket, sampleKVEntry } from "./fixtures/api";
 import { accountBase } from "./fixtures/cluster";
 import { mockClusterApis, mockJson, mockKVBucket, mockShell } from "./helpers/mockApi";
 
@@ -19,7 +19,7 @@ test.describe("kv", () => {
   });
 
   test("create kv bucket", async ({ page }) => {
-    let buckets = [...emptyBuckets.buckets];
+    let buckets: any[] = [];
 
     await page.route("**/api/v1/clusters/*/kv/buckets**", async (route) => {
       const method = route.request().method();
@@ -32,7 +32,7 @@ test.describe("kv", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(created),
+          body: JSON.stringify({ data: created }),
         });
         return;
       }
@@ -40,7 +40,7 @@ test.describe("kv", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ buckets, total: buckets.length }),
+          body: JSON.stringify({ data: buckets, meta: { total: buckets.length } }),
         });
         return;
       }
@@ -67,10 +67,11 @@ test.describe("kv", () => {
 
   test("key page shows value and history", async ({ page }) => {
     const entry = sampleKVEntry("CONFIG", "feature.flag");
-    await mockJson(page, "**/api/v1/clusters/*/kv/buckets/CONFIG/keys/feature.flag", entry);
+    const history = [entry, { ...entry, revision: 2, value: btoa(JSON.stringify({ enabled: false })) }];
+    await mockJson(page, "**/api/v1/clusters/*/kv/buckets/CONFIG/keys/feature.flag", { data: entry });
     await mockJson(page, "**/api/v1/clusters/*/kv/buckets/CONFIG/keys/feature.flag/history", {
-      entries: [entry, { ...entry, revision: 2, value: btoa(JSON.stringify({ enabled: false })) }],
-      total: 2,
+      data: history,
+      meta: { total: history.length },
     });
 
     await page.goto(`${kvBase}/CONFIG/feature.flag`);
@@ -96,7 +97,7 @@ test.describe("kv", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ buckets, total: buckets.length }),
+          body: JSON.stringify({ data: buckets, meta: { total: buckets.length } }),
         });
         return;
       }
@@ -109,10 +110,9 @@ test.describe("kv", () => {
 
     await page.goto(kvBase);
     await expect(page.getByRole("link", { name: "CONFIG" })).toBeVisible();
-    page.once("dialog", (dialog) => {
-      void dialog.accept();
-    });
     await page.getByRole("button", { name: "Delete" }).click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Delete" }).click();
     await expect.poll(() => deleted).toBe(true);
     await expect(page.getByText("No KV buckets")).toBeVisible();
   });

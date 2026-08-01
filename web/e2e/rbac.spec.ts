@@ -9,10 +9,10 @@ test.describe("rbac and redirects", () => {
     await mockClusterApis(page);
     await page.goto("/systems");
     await page.getByRole("button", { name: "Open user menu" }).click();
-    await expect(page.getByRole("link", { name: "Audit Log" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Console Users" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Alert rules" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Alerts" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Audit Log" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Console Users" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Alert rules" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Alerts" })).toBeVisible();
   });
 
   test("viewer user menu hides admin-only links", async ({ page }) => {
@@ -20,10 +20,10 @@ test.describe("rbac and redirects", () => {
     await mockClusterApis(page);
     await page.goto("/systems");
     await page.getByRole("button", { name: "Open user menu" }).click();
-    await expect(page.getByRole("link", { name: "Alerts" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Audit Log" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Console Users" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Alert rules" })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Alerts" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Audit Log" })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Console Users" })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Alert rules" })).toHaveCount(0);
   });
 
   test("viewer is redirected from audit", async ({ page }) => {

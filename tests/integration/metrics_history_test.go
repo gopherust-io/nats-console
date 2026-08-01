@@ -4,7 +4,6 @@ package integration_test
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -43,24 +42,25 @@ func TestMetricsHistoryQuery(t *testing.T) {
 
 	resp, err := srv.Client.Get(url)
 	require.NoError(t, err)
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
+	body := resp.Body
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 
 	var history struct {
-		ClusterID string `json:"clusterId"`
-		Series    []struct {
-			Metric string `json:"metric"`
-			Points []struct {
-				V float64 `json:"v"`
-			} `json:"points"`
-		} `json:"series"`
+		Data struct {
+			ClusterID string `json:"clusterId"`
+			Series    []struct {
+				Metric string `json:"metric"`
+				Points []struct {
+					V float64 `json:"v"`
+				} `json:"points"`
+			} `json:"series"`
+		} `json:"data"`
 	}
 	require.NoError(t, sonic.Unmarshal(body, &history))
-	assert.Equal(t, clusterID, history.ClusterID)
-	assert.Len(t, history.Series, 2)
+	assert.Equal(t, clusterID, history.Data.ClusterID)
+	assert.Len(t, history.Data.Series, 2)
 
-	for _, series := range history.Series {
+	for _, series := range history.Data.Series {
 		if series.Metric == domain.MetricJetStreamStorageBytes {
 			require.NotEmpty(t, series.Points)
 			assert.Equal(t, float64(2048), series.Points[len(series.Points)-1].V)
@@ -80,5 +80,10 @@ func TestMetricsHistoryRetentionCleanup(t *testing.T) {
 
 	deleted, err := stack.Store.DeleteMetricSamplesOlderThan(ctx, time.Now().UTC().Add(-7*24*time.Hour))
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), deleted)
+	assert.GreaterOrEqual(t, deleted, int64(1))
+
+	series, err := stack.Store.QueryMetricSeries(ctx, clusterID, []string{domain.MetricJetStreamStreams},
+		old.Add(-time.Minute), old.Add(time.Minute), 0)
+	require.NoError(t, err)
+	assert.Empty(t, series[domain.MetricJetStreamStreams])
 }

@@ -8,6 +8,12 @@ Manage streams, consumers, browse messages, tail live traffic, manage KV/Object 
 
 Latest stable release: **[v0.11.0](https://github.com/gopherust-io/nats-console/releases/tag/v0.11.0)** · [all releases](https://github.com/gopherust-io/nats-console/releases)
 
+Latest stable release: see [GitHub Releases](https://github.com/gopherust-io/nats-console/releases).
+
+Quick links: [Architecture](ARCHITECTURE.md) · [Getting started](docs/getting-started.md) · [User guide](docs/user-guide.md) · [DevOps setup](docs/devops-setup.md) · [Security](SECURITY.md)
+
+---
+
 **📖 Documentation:** friendly guides for everyone — [docs/README.md](docs/README.md)
 - [Getting started](docs/getting-started.md) · [User guide](docs/user-guide.md) · [DevOps setup](docs/devops-setup.md) · [Developer setup](docs/developer-setup.md)
 
@@ -15,7 +21,7 @@ Latest stable release: **[v0.11.0](https://github.com/gopherust-io/nats-console/
 
 - **Multi-cluster registry** with PostgreSQL persistence
 - **Multi-tenant RBAC** — operator/viewer/admin scoped by `accessRules.clusterIds`
-- **HTTP/3 + QUIC** — Caddy edge termination (Compose/Helm) and optional outbound h3 for AI
+- **Slow consumer detection** — pending/lag/ack-pending thresholds, UI badges, Topology warnings, alert metrics
 - **Historical metrics** — Postgres snapshots + Dashboard trend charts
 - **Message publish** — publish to JetStream streams from UI and API
 - **Encryption key rotation** — root API to re-encrypt stored credentials
@@ -41,26 +47,47 @@ cp .env.example .env   # set ADMIN_PASSWORD and other secrets
 docker compose up --build
 ```
 
-Open http://localhost:8080 and sign in:
+Open **http://localhost:8080** and sign in:
 
-- **Basic auth:** `admin` / `admin`
+- **Basic auth:** `admin` / `admin` (or your `.env` `ADMIN_*` values)
 - **People invite:** Admin → People → create invite link → `/invite/<token>` sets password
+
+For production, terminate TLS on an external reverse proxy or Ingress in front of `:8080` (see [devops-setup.md](docs/devops-setup.md)).
 
 NATS is exposed locally on:
 
 - Client: `nats://localhost:4222`
 - Monitoring: `http://localhost:8222`
 
+Local JetStream labs (single / 5-node cluster / supercluster / auth): [`docker/nats/`](docker/nats/) — see [docs/local-docker.md](docs/local-docker.md). For the **Replicas** page use `make nats-cluster-up`. Stop the compose `nats` service first when ports clash.
+
 PostgreSQL: set `DATABASE_URL` in `.env` (see `.env.example`). Stock compose is a **local plaintext lab** only.
 
 On first startup, a **default cluster** is seeded from `NATS_URL` / `NATS_MONITORING_URL` (and optional `NATS_TOKEN` / `NATS_CREDS_FILE`) when the registry is empty.
 
+## Demo path (5 minutes)
+
+1. Start with `docker compose up --build`.
+2. Open `http://localhost:8080` and sign in as admin.
+3. Create a stream, publish a test message, then open Live mode.
+4. Verify dashboard counters and stream/consumer updates refresh immediately.
+
+If you want visuals in the repo page, add screenshots to `docs/images/` and link them from this section.
+
 ## Architecture
 
 ```
-Browser → NATS Consol (Go API + React UI) → PostgreSQL (cluster registry, users, audit)
-                                          → NATS JetStream (4222)
-                                          → NATS Monitoring (8222)
+Browser → NATS Consol fasthttp (:8080) → PostgreSQL
+                                       → NATS JetStream (4222)
+                                       → NATS Monitoring (8222)
+```
+
+```mermaid
+flowchart LR
+    Browser[BrowserUI] --> Api[NatsConsolAPI]
+    Api --> Pg[PostgreSQL]
+    Api --> Js[NatsJetStream]
+    Api --> Mon[NatsMonitoring]
 ```
 
 The UI never talks to NATS directly. The backend acts as a secure gateway. All JetStream operations are **cluster-scoped**:
@@ -71,6 +98,15 @@ The UI never talks to NATS directly. The backend acts as a secure gateway. All J
 /api/v1/clusters/{clusterId}/kv/buckets
 /api/v1/clusters/{clusterId}/objects/buckets
 ```
+
+## Production readiness checklist
+
+- [ ] `ENV=production`
+- [ ] Strong `ADMIN_PASSWORD`, `ENCRYPTION_KEY`, and RSA session key pair (`SESSION_PRIVATE_KEY` / `SESSION_PUBLIC_KEY`)
+- [ ] TLS configured end-to-end (`https://` base URL and secure NATS/monitoring endpoints)
+- [ ] PostgreSQL with backups, retention, and restricted network access
+- [ ] Audit log retention and alerting on auth failures / critical mutations
+- [ ] CI + regression suites passing before deployment
 
 ## Local Development
 
@@ -97,7 +133,10 @@ export NATS_URL=nats://localhost:4222
 export NATS_MONITORING_URL=http://localhost:8222
 export ADMIN_PASSWORD=change-me-local-admin
 export ENCRYPTION_KEY=dev-encryption-key-min-16-chars
-export SESSION_SECRET=dev-session-secret-min-16-chars
+# Generate once: openssl genrsa -out session.pem 2048 && openssl rsa -in session.pem -pubout -out session.pub.pem
+# Then set SESSION_PRIVATE_KEY / SESSION_PUBLIC_KEY (PEM; literal \n escapes OK)
+export SESSION_PRIVATE_KEY="$(awk 'NF {sub(/\r/,""); printf "%s\\n",$0}' session.pem)"
+export SESSION_PUBLIC_KEY="$(awk 'NF {sub(/\r/,""); printf "%s\\n",$0}' session.pub.pem)"
 go generate ./...      # after changing internal/config/config.go
 go run ./cmd/server
 ```
@@ -116,7 +155,7 @@ npm install
 npm run dev
 ```
 
-Frontend dev server: http://localhost:5173 (proxies `/api` to `:8080`)
+Frontend dev server: http://localhost:8080 (proxies `/api` to console on `:8081` when using `make dev-web-docker`; local `make dev-web` expects the Go API on `:8081`)
 
 ## Linting
 
@@ -151,12 +190,6 @@ make lint
 | `HTTP_READ_TIMEOUT` | `10s` | HTTP server read timeout |
 | `HTTP_WRITE_TIMEOUT` | `30s` | HTTP server write timeout |
 | `HTTP_IDLE_TIMEOUT` | `60s` | HTTP server idle timeout |
-| `HTTP3_OUTBOUND_ENABLED` | `true` | Use HTTP/3 transport for outbound AI/API calls when supported |
-| `HTTP3_OUTBOUND_FALLBACK` | `true` | Fall back to HTTP/2/1.1 when HTTP/3 fails |
-| `HTTP3_ENABLED` | `false` | In-process HTTP/3 listener (bare metal; use Caddy/Ingress when available) |
-| `HTTP3_ADDR` | `:443` | HTTP/3 listen address when `HTTP3_ENABLED=true` |
-| `HTTP3_CERT_FILE` / `HTTP3_KEY_FILE` | — | TLS cert for in-process HTTP/3 |
-| `HTTP3_BACKEND_ADDR` | `127.0.0.1:8080` | Upstream for in-process HTTP/3 reverse proxy |
 | `NATS_TOKEN` | — | NATS auth token for default cluster bootstrap |
 | `NATS_ACCOUNT_SEED` | — | Optional account NKey seed for minting NATS user JWTs |
 | `PUBLIC_BASE_URL` | `http://localhost:8080` | Public base URL for invite links |
@@ -167,9 +200,11 @@ make lint
 | `DB_MAX_CONN_LIFETIME` | `1h` | Max lifetime of a pooled connection |
 | `DB_MAX_CONN_IDLE_TIME` | `30m` | Max idle time before a connection is closed |
 | `DB_HEALTH_CHECK_PERIOD` | `1m` | Interval between pool health checks |
-| `ENCRYPTION_KEY` | — | AES-GCM key for cluster tokens (**required in production**) |
-| `SESSION_SECRET` | — | JWT session signing secret (**required in production**) |
-| `SESSION_TTL` | `8h` | Session cookie lifetime |
+| `ENCRYPTION_KEY` | — | AES-GCM key for cluster tokens (**required**) |
+| `SESSION_PRIVATE_KEY` | — | PEM RSA private key (≥2048-bit) for RS256 session JWTs (**required**) |
+| `SESSION_PUBLIC_KEY` | — | PEM RSA public key matching the private key (**required**) |
+| `SESSION_TTL` | `15m` | Access JWT / session cookie lifetime |
+| `REFRESH_TOKEN_TTL` | `168h` | Opaque refresh cookie lifetime (bound to User-Agent + client IP fingerprint) |
 | `DEFAULT_CLUSTER_NAME` | `default` | Name for env-seeded default cluster |
 | `NATS_URL` | — | NATS client URL for default cluster seed; production requires `tls://` or `wss://` |
 | `NATS_CLIENT_CACHE_TTL` | `5m` | How long to cache NATS client connections per cluster |
@@ -182,14 +217,12 @@ make lint
 | `NATS_TLS_SERVER_NAME` | — | Override TLS server name for NATS |
 | `NATS_TLS_INSECURE_SKIP_VERIFY` | `false` | Skip NATS cert verify (**forbidden in production**) |
 | `STATIC_DIR` | — | Path to built frontend (`web/dist`) |
-| `AUTH_ENABLED` | `true` | Enable authentication |
 | `ADMIN_USERNAME` | `admin` | Bootstrap admin username |
-| `ADMIN_PASSWORD` | — (**required** when auth on) | Bootstrap admin password (must not be `admin` in production) |
+| `ADMIN_PASSWORD` | — (**required**) | Bootstrap admin password (must not be `admin` in production) |
 | `CORS_ALLOWED_ORIGINS` | — | Comma-separated allowed origins |
-| `LOG_JSON` | `false` | Emit structured JSON logs |
+| `LOG_JSON` | `false` | `true` for JSON logs (prod); `false` for console (local) |
 | `LOG_LEVEL` | `info` | Log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal` |
-| `TEL_ENABLE` | (tel default) | Enable OTLP export (`github.com/gopherust-io/tel`); production uses `DefaultConfig`, local uses debug (export off) |
-| `TEL_COLLECTOR_GRPC_ADDR` | `127.0.0.1:4317` | OTLP/gRPC collector address when tel is enabled |
+| `TEL_COLLECTOR_GRPC_ADDR` | `127.0.0.1:4317` | OTLP/gRPC collector address for process metrics/traces (`github.com/gopherust-io/tel`) |
 | `PPROF_ENABLED` | `false` | Enable Go pprof on-demand endpoints (admin) |
 | `PPROF_AUTH_ENABLED` | `true` | Require admin auth for pprof |
 | `PPROF_CPU_MAX_SECONDS` | `120` | Max CPU profile duration |
@@ -205,6 +238,10 @@ make lint
 | `MAX_REQUEST_BODY_SIZE` | `1048576` | Maximum API request body size in bytes (1 MiB) |
 | `AUTH_RATE_LIMIT` | `10` | Max auth attempts per IP per window |
 | `AUTH_RATE_LIMIT_WINDOW` | `1m` | Window for auth rate limiting |
+| `SLOW_CONSUMER_PENDING_THRESHOLD` | `1000` | Pending msgs ≥ this → slow consumer |
+| `SLOW_CONSUMER_LAG_THRESHOLD` | `1000` | Stream lag ≥ this → slow consumer |
+| `SLOW_CONSUMER_ACK_PENDING_RATIO` | `0.9` | Ack-pending ≥ ratio × MaxAckPending → slow |
+| `BEHAVIOR_FINGERPRINT_KV_BUCKET` | `nats_consol_fingerprints` | KV bucket for consumer behavior fingerprints |
 | `AI_ENABLED` | `false` | Enable JetStream AI assistant (Gemini) |
 | `AI_API_KEY` | — | Google Gemini API key |
 | `AI_MODEL` | `gemini-2.5-flash` | Gemini model name |
@@ -259,8 +296,8 @@ NATS Consol applies defense-in-depth for browser and API traffic:
 - **CORS** — Cross-origin access is denied unless the origin is listed in `CORS_ALLOWED_ORIGINS` (no wildcard reflection).
 - **Rate limiting** — Login endpoints are limited per client IP (`AUTH_RATE_LIMIT`, `AUTH_RATE_LIMIT_WINDOW`).
 - **Request limits** — Body size capped via `MAX_REQUEST_BODY_SIZE`; server read/write/idle timeouts via `HTTP_*_TIMEOUT`.
-- **RBAC & audit** — All `/api/*` routes except health/auth config require authentication when `AUTH_ENABLED=true`. Mutations are audit-logged. Cluster tokens/creds are never returned in API JSON.
-- **Production** — Set `ENV=production`, `ENCRYPTION_KEY`, `SESSION_SECRET`, a strong `ADMIN_PASSWORD`, and `AUTH_ENABLED=true`. The server refuses to start if these are missing or weak.
+- **RBAC & audit** — All `/api/*` routes except health/auth config require authentication. Mutations are audit-logged. Cluster tokens/creds are never returned in API JSON.
+- **Production** — Set `ENV=production`, `ENCRYPTION_KEY`, `SESSION_PRIVATE_KEY` / `SESSION_PUBLIC_KEY`, and a strong `ADMIN_PASSWORD`. The server refuses to start if these are missing or weak.
 
 Run `make test-security` for automated checks (headers, cookies, CSRF, rate limits, RBAC, secret leakage).
 
@@ -324,10 +361,11 @@ Environment variables for smoke/performance/stress scripts:
 |----------|---------|-------------|
 | `BASE_URL` | `http://localhost:8080` | Running console URL |
 | `AUTH` | `admin:admin` | Basic auth for smoke/perf/stress |
+| `TLS_INSECURE` | — | Set `1` to skip TLS verify when `BASE_URL` is HTTPS with a lab cert |
 | `PERF_MIN_RPS` | load: `10` / stress: `50` | Minimum throughput |
 | `PERF_MAX_P99_MS` | load: `2000` / stress: `5000` | Max p99 latency (ms) |
 
-CI (`.github/workflows/test.yml`) on every pull request to `main`: Go lint/tests/build, web lint/typecheck/build/Playwright e2e, regression (integration/contract/security), race detector (live WebSocket), and compose **smoke**. The **All checks passed** job must succeed before merge. Performance and stress baselines run on pushes to `main` only (advisory, not merge-blocking).
+CI (`.github/workflows/test.yml`) on every pull request to `main`: Go lint/tests/build, web lint/typecheck/build/Playwright e2e, regression (integration/contract/security), race detector (live WebSocket), and compose **smoke** (`:8080`). The **All checks passed** job must succeed before merge. Performance and stress baselines run on pushes to `main` only (advisory, not merge-blocking).
 
 Post-deploy UI checks: see [docs/manual-test-checklist.md](docs/manual-test-checklist.md).
 

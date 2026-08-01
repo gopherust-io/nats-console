@@ -2,16 +2,16 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 const (
@@ -66,30 +66,8 @@ type UserUpdate struct {
 	ClearRules  bool
 }
 
-const userSelectWithRolesGrants = `
-	SELECT u.id, u.username, u.email, u.oidc_sub, u.is_root, u.access_rules, u.created_at,
-	       COALESCE((
-	         SELECT array_agg(r.name ORDER BY r.name)
-	         FROM user_roles ur
-	         JOIN roles r ON r.id = ur.role_id
-	         WHERE ur.user_id = u.id
-	       ), '{}'),
-	       COALESCE((
-	         SELECT json_agg(json_build_object(
-	           'id', g.id,
-	           'user_id', g.user_id,
-	           'resource_type', g.resource_type,
-	           'resource_key', g.resource_key,
-	           'role', g.role,
-	           'created_at', g.created_at,
-	           'updated_at', g.updated_at
-	         ) ORDER BY g.resource_type, g.resource_key)
-	         FROM access_grants g WHERE g.user_id = u.id
-	       ), '[]'::json)`
-
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, string, error) {
-	row := s.pool.QueryRow(ctx, userSelectWithRolesGrants+`, u.password_hash
-		FROM users u WHERE u.username = $1`, username)
+	row := s.pool.QueryRow(ctx, queryGetUserByUsername, username)
 
 	var u User
 	var passwordHash string
@@ -122,8 +100,7 @@ func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
 }
 
 func (s *Store) getUserWhere(ctx context.Context, where string, arg any) (User, error) {
-	row := s.pool.QueryRow(ctx, userSelectWithRolesGrants+`
-		FROM users u WHERE `+where, arg)
+	row := s.pool.QueryRow(ctx, userSelectWithRolesGrants+queryGetUserFromWhere+where, arg)
 
 	var u User
 	var rulesJSON, grantsJSON []byte
@@ -147,14 +124,7 @@ func (s *Store) getUserWhere(ctx context.Context, where string, arg any) (User, 
 }
 
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT u.id, u.username, u.email, u.oidc_sub, u.is_root, u.access_rules, u.created_at,
-		       COALESCE(array_agg(r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}')
-		FROM users u
-		LEFT JOIN user_roles ur ON ur.user_id = u.id
-		LEFT JOIN roles r ON r.id = ur.role_id
-		GROUP BY u.id, u.username, u.email, u.oidc_sub, u.is_root, u.access_rules, u.created_at
-		ORDER BY u.is_root DESC, u.username ASC`)
+	rows, err := s.pool.Query(ctx, queryListUsers)
 	if err != nil {
 		return nil, err
 	}
@@ -195,14 +165,14 @@ func (s *Store) CreateUser(ctx context.Context, in UserCreate) (User, error) {
 		}
 	}
 
-	id := uuid.New().String()
+	id := newID()
 	passwordHash := in.PasswordHash
-	if passwordHash == "" && in.Password != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
+	if strings.IsEmpty(passwordHash) && !strings.IsEmpty(in.Password) {
+		hash, err := bcrypt.GenerateFromPassword(strings.StringToBytes(in.Password), bcrypt.DefaultCost)
 		if err != nil {
 			return User{}, err
 		}
-		passwordHash = string(hash)
+		passwordHash = strings.BytesToString(hash)
 	}
 
 	rulesJSON, err := encodeAccessRules(in.AccessRules)
@@ -217,10 +187,7 @@ func (s *Store) CreateUser(ctx context.Context, in UserCreate) (User, error) {
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	now := time.Now().UTC()
-	row := tx.QueryRow(ctx, `
-		INSERT INTO users (id, username, email, password_hash, oidc_sub, is_root, access_rules, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id, username, email, oidc_sub, is_root, access_rules, created_at`,
+	row := tx.QueryRow(ctx, queryInsertUser,
 		id, in.Username, in.Email, passwordHash, in.OIDCSub, in.IsRoot, rulesJSON, now)
 
 	var u User
@@ -256,25 +223,24 @@ func (s *Store) UpdateUser(ctx context.Context, userID string, in UserUpdate) (U
 
 	if in.Email != nil || in.Password != nil {
 		if in.Email != nil && in.Password != nil {
-			hash, err := bcrypt.GenerateFromPassword([]byte(*in.Password), bcrypt.DefaultCost)
+			hash, err := bcrypt.GenerateFromPassword(strings.StringToBytes(*in.Password), bcrypt.DefaultCost)
 			if err != nil {
 				return User{}, err
 			}
-			if _, err := tx.Exec(ctx, `
-				UPDATE users SET email = $2, password_hash = $3 WHERE id = $1`,
-				userID, *in.Email, string(hash)); err != nil {
+			if _, err := tx.Exec(ctx, queryUpdateUserEmailPassword,
+				userID, *in.Email, strings.BytesToString(hash)); err != nil {
 				return User{}, err
 			}
 		} else if in.Email != nil {
-			if _, err := tx.Exec(ctx, `UPDATE users SET email = $2 WHERE id = $1`, userID, *in.Email); err != nil {
+			if _, err := tx.Exec(ctx, queryUpdateUserEmail, userID, *in.Email); err != nil {
 				return User{}, err
 			}
 		} else if in.Password != nil {
-			hash, err := bcrypt.GenerateFromPassword([]byte(*in.Password), bcrypt.DefaultCost)
+			hash, err := bcrypt.GenerateFromPassword(strings.StringToBytes(*in.Password), bcrypt.DefaultCost)
 			if err != nil {
 				return User{}, err
 			}
-			if _, err := tx.Exec(ctx, `UPDATE users SET password_hash = $2 WHERE id = $1`, userID, string(hash)); err != nil {
+			if _, err := tx.Exec(ctx, queryUpdateUserPassword, userID, strings.BytesToString(hash)); err != nil {
 				return User{}, err
 			}
 		}
@@ -291,7 +257,7 @@ func (s *Store) UpdateUser(ctx context.Context, userID string, in UserUpdate) (U
 				return User{}, err
 			}
 		}
-		if _, err := tx.Exec(ctx, `UPDATE users SET access_rules = $2 WHERE id = $1`, userID, rulesJSON); err != nil {
+		if _, err := tx.Exec(ctx, queryUpdateUserAccessRules, userID, rulesJSON); err != nil {
 			return User{}, err
 		}
 	}
@@ -316,7 +282,7 @@ func (s *Store) DeleteUser(ctx context.Context, userID string) error {
 	if user.IsRoot {
 		return ErrRootProtected
 	}
-	tag, err := s.pool.Exec(ctx, `DELETE FROM users WHERE id = $1 AND is_root = false`, userID)
+	tag, err := s.pool.Exec(ctx, queryDeleteUser, userID)
 	if err != nil {
 		return err
 	}
@@ -340,15 +306,15 @@ func (s *Store) SetUserRoles(ctx context.Context, userID string, roles []string)
 }
 
 func (s *Store) setUserRolesTx(ctx context.Context, tx pgx.Tx, userID string, roles []string) error {
-	if _, err := tx.Exec(ctx, `DELETE FROM user_roles WHERE user_id = $1`, userID); err != nil {
+	if _, err := tx.Exec(ctx, queryDeleteUserRoles, userID); err != nil {
 		return err
 	}
 	for _, role := range roles {
 		var roleID int
-		if err := tx.QueryRow(ctx, `SELECT id FROM roles WHERE name = $1`, role).Scan(&roleID); err != nil {
+		if err := tx.QueryRow(ctx, queryGetRoleIDByName, role).Scan(&roleID); err != nil {
 			return fmt.Errorf("unknown role %q: %w", role, err)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)`, userID, roleID); err != nil {
+		if _, err := tx.Exec(ctx, queryInsertUserRole, userID, roleID); err != nil {
 			return err
 		}
 	}
@@ -357,18 +323,18 @@ func (s *Store) setUserRolesTx(ctx context.Context, tx pgx.Tx, userID string, ro
 
 func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	var count int
-	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
+	err := s.pool.QueryRow(ctx, queryCountUsers).Scan(&count)
 	return count, err
 }
 
 func (s *Store) HasRootUser(ctx context.Context) (bool, error) {
 	var exists bool
-	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE is_root = true)`).Scan(&exists)
+	err := s.pool.QueryRow(ctx, queryHasRootUser).Scan(&exists)
 	return exists, err
 }
 
 func CheckPassword(hash, password string) bool {
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+	return bcrypt.CompareHashAndPassword(strings.StringToBytes(hash), strings.StringToBytes(password)) == nil
 }
 
 func HighestRole(roles []string) string {
@@ -379,7 +345,7 @@ func encodeAccessRules(rules *AccessRules) ([]byte, error) {
 	if rules == nil {
 		return nil, nil
 	}
-	return json.Marshal(rules)
+	return serializer.Marshal(rules)
 }
 
 func decodeAccessRules(data []byte, out **AccessRules) error {
@@ -388,7 +354,7 @@ func decodeAccessRules(data []byte, out **AccessRules) error {
 		return nil
 	}
 	var rules AccessRules
-	if err := json.Unmarshal(data, &rules); err != nil {
+	if err := serializer.Unmarshal(data, &rules); err != nil {
 		return err
 	}
 	*out = &rules
@@ -406,12 +372,12 @@ type grantJSON struct {
 }
 
 func decodeUserGrants(data []byte, out *[]AccessGrant) error {
-	if len(data) == 0 || string(data) == "[]" || string(data) == "null" {
+	if len(data) == 0 || strings.BytesToString(data) == "[]" || strings.BytesToString(data) == "null" {
 		*out = []AccessGrant{}
 		return nil
 	}
 	var rows []grantJSON
-	if err := json.Unmarshal(data, &rows); err != nil {
+	if err := serializer.Unmarshal(data, &rows); err != nil {
 		return err
 	}
 	grants := make([]AccessGrant, 0, len(rows))

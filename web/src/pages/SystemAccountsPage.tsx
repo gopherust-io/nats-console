@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAccount } from "../lib/account";
 import { AccountInfo, api, clusterPath } from "../lib/api";
 import { useCluster } from "../lib/cluster";
+import { MONITORING_POLL_MS } from "../lib/constants";
 import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
 
 export default function SystemAccountsPage() {
@@ -14,16 +15,16 @@ export default function SystemAccountsPage() {
 
   const accountQuery = useQuery({
     queryKey: clusterQueryKey(clusterId ?? null, "account"),
-    queryFn: () => api<AccountInfo>(clusterPath(clusterId!, "/account")),
+    queryFn: async () => (await api<AccountInfo>(clusterPath(clusterId!, "/account"))).data,
     enabled: Boolean(clusterId),
-    refetchInterval: visibilityAwareInterval(30_000),
+    refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
   });
 
   const varzQuery = useQuery({
     queryKey: clusterQueryKey(clusterId ?? null, "varz-lite"),
-    queryFn: () => api<Record<string, unknown>>(clusterPath(clusterId!, "/monitoring/varz")),
+    queryFn: async () => (await api<Record<string, unknown>>(clusterPath(clusterId!, "/monitoring/varz"))).data,
     enabled: Boolean(clusterId),
-    refetchInterval: visibilityAwareInterval(30_000),
+    refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
   });
 
   const connections = Number(varzQuery.data?.connections ?? 0);

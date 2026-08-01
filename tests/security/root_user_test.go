@@ -4,12 +4,10 @@ package security_test
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/store"
 	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/assert"
@@ -20,9 +18,7 @@ func TestRootUserSeededAtBootstrap(t *testing.T) {
 	stack := testutil.SetupStack(t)
 	ctx := context.Background()
 
-	srv := stack.NewServer(t, func(cfg *config.Config) {
-		cfg.AuthEnabled = true
-	})
+	srv := stack.NewServer(t, nil)
 
 	users, err := stack.Store.ListUsers(ctx)
 	require.NoError(t, err)
@@ -36,12 +32,15 @@ func TestRootUserSeededAtBootstrap(t *testing.T) {
 	require.NotNil(t, root, "expected seeded root user")
 	require.Equal(t, "admin", root.Username)
 
-	req, _ := http.NewRequest(http.MethodGet, "http://nats-consol.local/api/v1/auth/me", nil)
-	req.Header.Set("Authorization", basicAuth("admin", "admin"))
-	resp, err := srv.Client.Do(req)
+	resp, err := srv.Client.Do(&testutil.Request{
+		Method: http.MethodGet,
+		URL:    "http://nats-consol.local/api/v1/auth/me",
+		Header: http.Header{
+			"Authorization": {basicAuth("admin", "admin")},
+		},
+	})
 	require.NoError(t, err)
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
+	body := resp.Body
 	require.Equal(t, http.StatusOK, resp.StatusCode, "me status body = %s", string(body))
 	assert.Contains(t, string(body), `"isRoot":true`, "expected isRoot in response")
 }
@@ -50,9 +49,7 @@ func TestDelegatedAdminCannotModifyRoot(t *testing.T) {
 	stack := testutil.SetupStack(t)
 	ctx := context.Background()
 
-	srv := stack.NewServer(t, func(cfg *config.Config) {
-		cfg.AuthEnabled = true
-	})
+	srv := stack.NewServer(t, nil)
 
 	rootUsers, err := stack.Store.ListUsers(ctx)
 	require.NoError(t, err)
@@ -81,21 +78,21 @@ func TestDelegatedAdminCannotModifyRoot(t *testing.T) {
 	require.NoError(t, err)
 	_ = delegate
 
-	req, _ := http.NewRequest(http.MethodDelete,
-		"http://nats-consol.local/api/v1/users/"+rootID, nil)
-	req.Header.Set("Authorization", basicAuth("delegate-admin", "delegate-pass"))
-	resp, err := srv.Client.Do(req)
+	resp, err := srv.Client.Do(&testutil.Request{
+		Method: http.MethodDelete,
+		URL:    "http://nats-consol.local/api/v1/users/"+rootID,
+		Header: http.Header{
+			"Authorization": {basicAuth("delegate-admin", "delegate-pass")},
+		},
+	})
 	require.NoError(t, err)
-	_ = resp.Body.Close()
 	require.Equal(t, http.StatusForbidden, resp.StatusCode, "delete root status")
 }
 
 func TestRootCanCreateDelegatedAdmin(t *testing.T) {
 	stack := testutil.SetupStack(t)
 
-	srv := stack.NewServer(t, func(cfg *config.Config) {
-		cfg.AuthEnabled = true
-	})
+	srv := stack.NewServer(t, nil)
 
 	body := `{
 		"username":"scoped-admin",
@@ -110,13 +107,17 @@ func TestRootCanCreateDelegatedAdmin(t *testing.T) {
 			"assignableRoles":["operator","viewer"]
 		}
 	}`
-	req, _ := http.NewRequest(http.MethodPost, "http://nats-consol.local/api/v1/users", strings.NewReader(body))
-	req.Header.Set("Authorization", basicAuth("admin", "admin"))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := srv.Client.Do(req)
+	resp, err := srv.Client.Do(&testutil.Request{
+		Method: http.MethodPost,
+		URL:    "http://nats-consol.local/api/v1/users",
+		Body:   strings.NewReader(body),
+		Header: http.Header{
+			"Authorization": {basicAuth("admin", "admin")},
+			"Content-Type": {"application/json"},
+		},
+	})
 	require.NoError(t, err)
-	respBody, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
+	respBody := resp.Body
 	require.Equal(t, http.StatusCreated, resp.StatusCode, "create admin body = %s", string(respBody))
 	assert.Contains(t, string(respBody), `"username":"scoped-admin"`)
 }
@@ -147,17 +148,17 @@ func TestDelegatedAdminCannotEscalateRoles(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	srv := stack.NewServer(t, func(cfg *config.Config) {
-		cfg.AuthEnabled = true
-	})
+	srv := stack.NewServer(t, nil)
 
-	req, _ := http.NewRequest(http.MethodPut,
-		"http://nats-consol.local/api/v1/users/"+target.ID+"/roles",
-		strings.NewReader(`{"roles":["admin"]}`))
-	req.Header.Set("Authorization", basicAuth("delegate-admin", "delegate-pass"))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := srv.Client.Do(req)
+	resp, err := srv.Client.Do(&testutil.Request{
+		Method: http.MethodPut,
+		URL:    "http://nats-consol.local/api/v1/users/"+target.ID+"/roles",
+		Body:   strings.NewReader(`{"roles":["admin"]}`),
+		Header: http.Header{
+			"Authorization": {basicAuth("delegate-admin", "delegate-pass")},
+			"Content-Type": {"application/json"},
+		},
+	})
 	require.NoError(t, err)
-	_ = resp.Body.Close()
 	require.Equal(t, http.StatusForbidden, resp.StatusCode, "escalate roles status")
 }

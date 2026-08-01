@@ -43,12 +43,12 @@ func MustLoadConfig() Config {
 
 func (c Config) Masked() Config {
 	out := c
-	out.AIAPIKey = env.SensitiveMask
+	out.NATS.AccountSeed = env.SensitiveMask
+	out.AI.APIKey = env.SensitiveMask
+	out.SMTP.Password = env.SensitiveMask
+	out.Auth.SessionPrivateKey = env.SensitiveMask
 	out.EncryptionKey = env.SensitiveMask
-	out.NATSAccountSeed = env.SensitiveMask
 	out.AdminPassword = env.SensitiveMask
-	out.SessionSecret = env.SensitiveMask
-	out.SMTPPassword = env.SensitiveMask
 	return out
 }
 
@@ -58,35 +58,317 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		key := "HTTP_ADDR"
 		raw, ok := snap.Lookup(key)
 		if !ok || raw == "" {
-			cfg.HTTPAddr = ":8080"
+			cfg.HTTP.Addr = ":8080"
 		} else {
-			cfg.HTTPAddr = raw
+			cfg.HTTP.Addr = raw
 		}
 	}
 	{
-		key := "AI_GEMINI_API_BASE"
+		key := "HTTP_WRITE_TIMEOUT"
 		raw, ok := snap.Lookup(key)
 		if !ok || raw == "" {
-			cfg.AIGeminiAPIBase = "https://generativelanguage.googleapis.com/v1beta"
+			v, err := env.ParseDuration("30s")
+			if err != nil {
+				env.AppendParse(&errs, "HTTP.WriteTimeout", key, "30s", err)
+			} else {
+				cfg.HTTP.WriteTimeout = v
+			}
 		} else {
-			cfg.AIGeminiAPIBase = raw
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "HTTP.WriteTimeout", key, raw, err)
+			} else {
+				cfg.HTTP.WriteTimeout = v
+			}
 		}
 	}
 	{
-		key := "AI_MODEL"
+		key := "HTTP_READ_TIMEOUT"
 		raw, ok := snap.Lookup(key)
 		if !ok || raw == "" {
-			cfg.AIModel = "gemini-2.5-flash"
+			v, err := env.ParseDuration("10s")
+			if err != nil {
+				env.AppendParse(&errs, "HTTP.ReadTimeout", key, "10s", err)
+			} else {
+				cfg.HTTP.ReadTimeout = v
+			}
 		} else {
-			cfg.AIModel = raw
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "HTTP.ReadTimeout", key, raw, err)
+			} else {
+				cfg.HTTP.ReadTimeout = v
+			}
+		}
+	}
+	{
+		key := "HTTP_IDLE_TIMEOUT"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("60s")
+			if err != nil {
+				env.AppendParse(&errs, "HTTP.IdleTimeout", key, "60s", err)
+			} else {
+				cfg.HTTP.IdleTimeout = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "HTTP.IdleTimeout", key, raw, err)
+			} else {
+				cfg.HTTP.IdleTimeout = v
+			}
+		}
+	}
+	{
+		key := "MAX_REQUEST_BODY_SIZE"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseInt64("1048576")
+			if err != nil {
+				env.AppendParse(&errs, "HTTP.MaxRequestBodySize", key, "1048576", err)
+			} else {
+				cfg.HTTP.MaxRequestBodySize = v
+			}
+		} else {
+			v, err := env.ParseInt64(raw)
+			if err != nil {
+				env.AppendParse(&errs, "HTTP.MaxRequestBodySize", key, raw, err)
+			} else {
+				cfg.HTTP.MaxRequestBodySize = v
+			}
 		}
 	}
 	{
 		key := "DATABASE_URL"
 		raw, ok := snap.Lookup(key)
 		if !ok || raw == "" {
+			env.AppendRequired(&errs, "DB.URL", key)
 		} else {
-			cfg.DatabaseURL = raw
+			cfg.DB.URL = raw
+		}
+	}
+	{
+		key := "DB_MAX_CONN_LIFETIME"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("1h")
+			if err != nil {
+				env.AppendParse(&errs, "DB.MaxConnLifetime", key, "1h", err)
+			} else {
+				cfg.DB.MaxConnLifetime = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "DB.MaxConnLifetime", key, raw, err)
+			} else {
+				cfg.DB.MaxConnLifetime = v
+			}
+		}
+	}
+	{
+		key := "DB_HEALTH_CHECK_PERIOD"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("1m")
+			if err != nil {
+				env.AppendParse(&errs, "DB.HealthCheckPeriod", key, "1m", err)
+			} else {
+				cfg.DB.HealthCheckPeriod = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "DB.HealthCheckPeriod", key, raw, err)
+			} else {
+				cfg.DB.HealthCheckPeriod = v
+			}
+		}
+	}
+	{
+		key := "DB_MAX_CONN_IDLE_TIME"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("30m")
+			if err != nil {
+				env.AppendParse(&errs, "DB.MaxConnIdleTime", key, "30m", err)
+			} else {
+				cfg.DB.MaxConnIdleTime = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "DB.MaxConnIdleTime", key, raw, err)
+			} else {
+				cfg.DB.MaxConnIdleTime = v
+			}
+		}
+	}
+	{
+		key := "DB_MAX_CONNS"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseInt("25")
+			if err != nil {
+				env.AppendParse(&errs, "DB.MaxConns", key, "25", err)
+			} else {
+				cfg.DB.MaxConns = v
+			}
+		} else {
+			v, err := env.ParseInt(raw)
+			if err != nil {
+				env.AppendParse(&errs, "DB.MaxConns", key, raw, err)
+			} else {
+				cfg.DB.MaxConns = v
+			}
+		}
+	}
+	{
+		key := "DB_MIN_CONNS"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseInt("2")
+			if err != nil {
+				env.AppendParse(&errs, "DB.MinConns", key, "2", err)
+			} else {
+				cfg.DB.MinConns = v
+			}
+		} else {
+			v, err := env.ParseInt(raw)
+			if err != nil {
+				env.AppendParse(&errs, "DB.MinConns", key, raw, err)
+			} else {
+				cfg.DB.MinConns = v
+			}
+		}
+	}
+	{
+		key := "NATS_URL"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.NATS.URL = raw
+		}
+	}
+	{
+		key := "NATS_CREDS_FILE"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.NATS.CredsFile = raw
+		}
+	}
+	{
+		key := "NATS_TOKEN"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.NATS.Token = raw
+		}
+	}
+	{
+		key := "NATS_ACCOUNT_SEED"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.NATS.AccountSeed = raw
+		}
+	}
+	{
+		key := "NATS_MONITORING_URL"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.NATS.MonitoringURL = raw
+		}
+	}
+	{
+		key := "NATS_TLS_CA_FILE"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.NATS.TlsCAFile = raw
+		}
+	}
+	{
+		key := "NATS_TLS_CERT_FILE"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.NATS.TlsCertFile = raw
+		}
+	}
+	{
+		key := "NATS_TLS_KEY_FILE"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.NATS.TlsKeyFile = raw
+		}
+	}
+	{
+		key := "NATS_TLS_SERVER_NAME"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.NATS.TlsServerName = raw
+		}
+	}
+	{
+		key := "NATS_CLIENT_CACHE_TTL"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("5m")
+			if err != nil {
+				env.AppendParse(&errs, "NATS.ClientCacheTTL", key, "5m", err)
+			} else {
+				cfg.NATS.ClientCacheTTL = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "NATS.ClientCacheTTL", key, raw, err)
+			} else {
+				cfg.NATS.ClientCacheTTL = v
+			}
+		}
+	}
+	{
+		key := "NATS_TLS_INSECURE_SKIP_VERIFY"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseBool("false")
+			if err != nil {
+				env.AppendParse(&errs, "NATS.TlsInsecureSkipVerify", key, "false", err)
+			} else {
+				cfg.NATS.TlsInsecureSkipVerify = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "NATS.TlsInsecureSkipVerify", key, raw, err)
+			} else {
+				cfg.NATS.TlsInsecureSkipVerify = v
+			}
+		}
+	}
+	{
+		key := "AI_GEMINI_API_BASE"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			cfg.AI.GeminiAPIBase = "https://generativelanguage.googleapis.com/v1beta"
+		} else {
+			cfg.AI.GeminiAPIBase = raw
+		}
+	}
+	{
+		key := "AI_MODEL"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			cfg.AI.Model = "gemini-2.5-flash"
+		} else {
+			cfg.AI.Model = raw
 		}
 	}
 	{
@@ -94,7 +376,589 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		raw, ok := snap.Lookup(key)
 		if !ok || raw == "" {
 		} else {
-			cfg.AIAPIKey = raw
+			cfg.AI.APIKey = raw
+		}
+	}
+	{
+		key := "AI_CONTEXT_CACHE_TTL"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("45s")
+			if err != nil {
+				env.AppendParse(&errs, "AI.ContextCacheTTL", key, "45s", err)
+			} else {
+				cfg.AI.ContextCacheTTL = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "AI.ContextCacheTTL", key, raw, err)
+			} else {
+				cfg.AI.ContextCacheTTL = v
+			}
+		}
+	}
+	{
+		key := "AI_REQUEST_TIMEOUT"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("60s")
+			if err != nil {
+				env.AppendParse(&errs, "AI.RequestTimeout", key, "60s", err)
+			} else {
+				cfg.AI.RequestTimeout = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "AI.RequestTimeout", key, raw, err)
+			} else {
+				cfg.AI.RequestTimeout = v
+			}
+		}
+	}
+	{
+		key := "AI_MAX_TOKENS"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseInt("4096")
+			if err != nil {
+				env.AppendParse(&errs, "AI.MaxTokens", key, "4096", err)
+			} else {
+				cfg.AI.MaxTokens = v
+			}
+		} else {
+			v, err := env.ParseInt(raw)
+			if err != nil {
+				env.AppendParse(&errs, "AI.MaxTokens", key, raw, err)
+			} else {
+				cfg.AI.MaxTokens = v
+			}
+		}
+	}
+	{
+		key := "AI_ENABLED"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseBool("false")
+			if err != nil {
+				env.AppendParse(&errs, "AI.Enabled", key, "false", err)
+			} else {
+				cfg.AI.Enabled = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "AI.Enabled", key, raw, err)
+			} else {
+				cfg.AI.Enabled = v
+			}
+		}
+	}
+	{
+		key := "SMTP_FROM"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.SMTP.From = raw
+		}
+	}
+	{
+		key := "SMTP_PASSWORD"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.SMTP.Password = raw
+		}
+	}
+	{
+		key := "SMTP_USERNAME"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.SMTP.Username = raw
+		}
+	}
+	{
+		key := "SMTP_HOST"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+		} else {
+			cfg.SMTP.Host = raw
+		}
+	}
+	{
+		key := "SMTP_PORT"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseInt("587")
+			if err != nil {
+				env.AppendParse(&errs, "SMTP.Port", key, "587", err)
+			} else {
+				cfg.SMTP.Port = v
+			}
+		} else {
+			v, err := env.ParseInt(raw)
+			if err != nil {
+				env.AppendParse(&errs, "SMTP.Port", key, raw, err)
+			} else {
+				cfg.SMTP.Port = v
+			}
+		}
+	}
+	{
+		key := "SMTP_ENABLED"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseBool("false")
+			if err != nil {
+				env.AppendParse(&errs, "SMTP.Enabled", key, "false", err)
+			} else {
+				cfg.SMTP.Enabled = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "SMTP.Enabled", key, raw, err)
+			} else {
+				cfg.SMTP.Enabled = v
+			}
+		}
+	}
+	{
+		key := "SMTP_TLS"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseBool("true")
+			if err != nil {
+				env.AppendParse(&errs, "SMTP.TLS", key, "true", err)
+			} else {
+				cfg.SMTP.TLS = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "SMTP.TLS", key, raw, err)
+			} else {
+				cfg.SMTP.TLS = v
+			}
+		}
+	}
+	{
+		key := "SESSION_PRIVATE_KEY"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			env.AppendRequired(&errs, "Auth.SessionPrivateKey", key)
+		} else {
+			cfg.Auth.SessionPrivateKey = raw
+		}
+	}
+	{
+		key := "SESSION_PUBLIC_KEY"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			env.AppendRequired(&errs, "Auth.SessionPublicKey", key)
+		} else {
+			cfg.Auth.SessionPublicKey = raw
+		}
+	}
+	{
+		key := "SESSION_TTL"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("15m")
+			if err != nil {
+				env.AppendParse(&errs, "Auth.SessionTTL", key, "15m", err)
+			} else {
+				cfg.Auth.SessionTTL = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "Auth.SessionTTL", key, raw, err)
+			} else {
+				cfg.Auth.SessionTTL = v
+			}
+		}
+	}
+	{
+		key := "REFRESH_TOKEN_TTL"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("168h")
+			if err != nil {
+				env.AppendParse(&errs, "Auth.RefreshTokenTTL", key, "168h", err)
+			} else {
+				cfg.Auth.RefreshTokenTTL = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "Auth.RefreshTokenTTL", key, raw, err)
+			} else {
+				cfg.Auth.RefreshTokenTTL = v
+			}
+		}
+	}
+	{
+		key := "AUTH_RATE_LIMIT_WINDOW"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("1m")
+			if err != nil {
+				env.AppendParse(&errs, "Auth.RateLimitWindow", key, "1m", err)
+			} else {
+				cfg.Auth.RateLimitWindow = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "Auth.RateLimitWindow", key, raw, err)
+			} else {
+				cfg.Auth.RateLimitWindow = v
+			}
+		}
+	}
+	{
+		key := "AUTH_RATE_LIMIT"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseInt("10")
+			if err != nil {
+				env.AppendParse(&errs, "Auth.RateLimit", key, "10", err)
+			} else {
+				cfg.Auth.RateLimit = v
+			}
+		} else {
+			v, err := env.ParseInt(raw)
+			if err != nil {
+				env.AppendParse(&errs, "Auth.RateLimit", key, raw, err)
+			} else {
+				cfg.Auth.RateLimit = v
+			}
+		}
+	}
+	{
+		key := "LIVE_WS_IDLE_TIMEOUT"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("5m")
+			if err != nil {
+				env.AppendParse(&errs, "LiveWS.IdleTimeout", key, "5m", err)
+			} else {
+				cfg.LiveWS.IdleTimeout = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "LiveWS.IdleTimeout", key, raw, err)
+			} else {
+				cfg.LiveWS.IdleTimeout = v
+			}
+		}
+	}
+	{
+		key := "LIVE_WS_RATE_LIMIT"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("100ms")
+			if err != nil {
+				env.AppendParse(&errs, "LiveWS.RateLimit", key, "100ms", err)
+			} else {
+				cfg.LiveWS.RateLimit = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "LiveWS.RateLimit", key, raw, err)
+			} else {
+				cfg.LiveWS.RateLimit = v
+			}
+		}
+	}
+	{
+		key := "LIVE_WS_MAX_MESSAGES"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseInt("1000")
+			if err != nil {
+				env.AppendParse(&errs, "LiveWS.MaxMessages", key, "1000", err)
+			} else {
+				cfg.LiveWS.MaxMessages = v
+			}
+		} else {
+			v, err := env.ParseInt(raw)
+			if err != nil {
+				env.AppendParse(&errs, "LiveWS.MaxMessages", key, raw, err)
+			} else {
+				cfg.LiveWS.MaxMessages = v
+			}
+		}
+	}
+	{
+		key := "LIVE_WS_PAYLOAD_TRUNCATE_BYTES"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseInt("4096")
+			if err != nil {
+				env.AppendParse(&errs, "LiveWS.PayloadTruncateBytes", key, "4096", err)
+			} else {
+				cfg.LiveWS.PayloadTruncateBytes = v
+			}
+		} else {
+			v, err := env.ParseInt(raw)
+			if err != nil {
+				env.AppendParse(&errs, "LiveWS.PayloadTruncateBytes", key, raw, err)
+			} else {
+				cfg.LiveWS.PayloadTruncateBytes = v
+			}
+		}
+	}
+	{
+		key := "METRICS_SNAPSHOT_INTERVAL"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("60s")
+			if err != nil {
+				env.AppendParse(&errs, "MetricsSnapshot.Interval", key, "60s", err)
+			} else {
+				cfg.MetricsSnapshot.Interval = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "MetricsSnapshot.Interval", key, raw, err)
+			} else {
+				cfg.MetricsSnapshot.Interval = v
+			}
+		}
+	}
+	{
+		key := "METRICS_SNAPSHOT_RETENTION"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("168h")
+			if err != nil {
+				env.AppendParse(&errs, "MetricsSnapshot.Retention", key, "168h", err)
+			} else {
+				cfg.MetricsSnapshot.Retention = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "MetricsSnapshot.Retention", key, raw, err)
+			} else {
+				cfg.MetricsSnapshot.Retention = v
+			}
+		}
+	}
+	{
+		key := "METRICS_SNAPSHOT_BOTTLENECK_RETENTION"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("672h")
+			if err != nil {
+				env.AppendParse(&errs, "MetricsSnapshot.BottleneckRetention", key, "672h", err)
+			} else {
+				cfg.MetricsSnapshot.BottleneckRetention = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "MetricsSnapshot.BottleneckRetention", key, raw, err)
+			} else {
+				cfg.MetricsSnapshot.BottleneckRetention = v
+			}
+		}
+	}
+	{
+		key := "METRICS_SNAPSHOT_CLEANUP_INTERVAL"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseDuration("1h")
+			if err != nil {
+				env.AppendParse(&errs, "MetricsSnapshot.CleanupInterval", key, "1h", err)
+			} else {
+				cfg.MetricsSnapshot.CleanupInterval = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "MetricsSnapshot.CleanupInterval", key, raw, err)
+			} else {
+				cfg.MetricsSnapshot.CleanupInterval = v
+			}
+		}
+	}
+	{
+		key := "METRICS_SNAPSHOT_ENABLED"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseBool("true")
+			if err != nil {
+				env.AppendParse(&errs, "MetricsSnapshot.Enabled", key, "true", err)
+			} else {
+				cfg.MetricsSnapshot.Enabled = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "MetricsSnapshot.Enabled", key, raw, err)
+			} else {
+				cfg.MetricsSnapshot.Enabled = v
+			}
+		}
+	}
+	{
+		key := "PPROF_CPU_MAX_SECONDS"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseInt("120")
+			if err != nil {
+				env.AppendParse(&errs, "Pprof.CPUMaxSeconds", key, "120", err)
+			} else {
+				cfg.Pprof.CPUMaxSeconds = v
+			}
+		} else {
+			v, err := env.ParseInt(raw)
+			if err != nil {
+				env.AppendParse(&errs, "Pprof.CPUMaxSeconds", key, raw, err)
+			} else {
+				cfg.Pprof.CPUMaxSeconds = v
+			}
+		}
+	}
+	{
+		key := "PPROF_AUTH_ENABLED"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseBool("true")
+			if err != nil {
+				env.AppendParse(&errs, "Pprof.AuthEnabled", key, "true", err)
+			} else {
+				cfg.Pprof.AuthEnabled = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "Pprof.AuthEnabled", key, raw, err)
+			} else {
+				cfg.Pprof.AuthEnabled = v
+			}
+		}
+	}
+	{
+		key := "PPROF_ENABLED"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseBool("false")
+			if err != nil {
+				env.AppendParse(&errs, "Pprof.Enabled", key, "false", err)
+			} else {
+				cfg.Pprof.Enabled = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "Pprof.Enabled", key, raw, err)
+			} else {
+				cfg.Pprof.Enabled = v
+			}
+		}
+	}
+	{
+		key := "SLOW_CONSUMER_PENDING_THRESHOLD"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseUint64("1000")
+			if err != nil {
+				env.AppendParse(&errs, "SlowConsumer.PendingThreshold", key, "1000", err)
+			} else {
+				cfg.SlowConsumer.PendingThreshold = v
+			}
+		} else {
+			v, err := env.ParseUint64(raw)
+			if err != nil {
+				env.AppendParse(&errs, "SlowConsumer.PendingThreshold", key, raw, err)
+			} else {
+				cfg.SlowConsumer.PendingThreshold = v
+			}
+		}
+	}
+	{
+		key := "SLOW_CONSUMER_LAG_THRESHOLD"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseUint64("1000")
+			if err != nil {
+				env.AppendParse(&errs, "SlowConsumer.LagThreshold", key, "1000", err)
+			} else {
+				cfg.SlowConsumer.LagThreshold = v
+			}
+		} else {
+			v, err := env.ParseUint64(raw)
+			if err != nil {
+				env.AppendParse(&errs, "SlowConsumer.LagThreshold", key, raw, err)
+			} else {
+				cfg.SlowConsumer.LagThreshold = v
+			}
+		}
+	}
+	{
+		key := "SLOW_CONSUMER_ACK_PENDING_RATIO"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseFloat64("0.9")
+			if err != nil {
+				env.AppendParse(&errs, "SlowConsumer.AckPendingRatio", key, "0.9", err)
+			} else {
+				cfg.SlowConsumer.AckPendingRatio = v
+			}
+		} else {
+			v, err := env.ParseFloat64(raw)
+			if err != nil {
+				env.AppendParse(&errs, "SlowConsumer.AckPendingRatio", key, raw, err)
+			} else {
+				cfg.SlowConsumer.AckPendingRatio = v
+			}
+		}
+	}
+	{
+		key := "PAGINATION_MAX_LIMIT"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseInt("500")
+			if err != nil {
+				env.AppendParse(&errs, "Pagination.MaxLimit", key, "500", err)
+			} else {
+				cfg.Pagination.MaxLimit = v
+			}
+		} else {
+			v, err := env.ParseInt(raw)
+			if err != nil {
+				env.AppendParse(&errs, "Pagination.MaxLimit", key, raw, err)
+			} else {
+				cfg.Pagination.MaxLimit = v
+			}
+		}
+	}
+	{
+		key := "PAGINATION_DEFAULT_LIMIT"
+		raw, ok := snap.Lookup(key)
+		if !ok || raw == "" {
+			v, err := env.ParseInt("100")
+			if err != nil {
+				env.AppendParse(&errs, "Pagination.DefaultLimit", key, "100", err)
+			} else {
+				cfg.Pagination.DefaultLimit = v
+			}
+		} else {
+			v, err := env.ParseInt(raw)
+			if err != nil {
+				env.AppendParse(&errs, "Pagination.DefaultLimit", key, raw, err)
+			} else {
+				cfg.Pagination.DefaultLimit = v
+			}
 		}
 	}
 	{
@@ -107,92 +971,12 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		}
 	}
 	{
-		key := "LOG_LEVEL"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			cfg.LogLevel = "info"
-		} else {
-			cfg.LogLevel = raw
-		}
-	}
-	{
 		key := "ENCRYPTION_KEY"
 		raw, ok := snap.Lookup(key)
 		if !ok || raw == "" {
+			env.AppendRequired(&errs, "EncryptionKey", key)
 		} else {
 			cfg.EncryptionKey = raw
-		}
-	}
-	{
-		key := "NATS_URL"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-		} else {
-			cfg.NATSURL = raw
-		}
-	}
-	{
-		key := "NATS_CREDS_FILE"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-		} else {
-			cfg.NATSCredsFile = raw
-		}
-	}
-	{
-		key := "NATS_TOKEN"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-		} else {
-			cfg.NATSToken = raw
-		}
-	}
-	{
-		key := "NATS_ACCOUNT_SEED"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-		} else {
-			cfg.NATSAccountSeed = raw
-		}
-	}
-	{
-		key := "NATS_TLS_CA_FILE"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-		} else {
-			cfg.NATSTlsCAFile = raw
-		}
-	}
-	{
-		key := "NATS_TLS_CERT_FILE"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-		} else {
-			cfg.NATSTlsCertFile = raw
-		}
-	}
-	{
-		key := "NATS_TLS_KEY_FILE"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-		} else {
-			cfg.NATSTlsKeyFile = raw
-		}
-	}
-	{
-		key := "NATS_TLS_SERVER_NAME"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-		} else {
-			cfg.NATSTlsServerName = raw
-		}
-	}
-	{
-		key := "NATS_MONITORING_URL"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-		} else {
-			cfg.MonitoringURL = raw
 		}
 	}
 	{
@@ -216,6 +1000,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		key := "ADMIN_PASSWORD"
 		raw, ok := snap.Lookup(key)
 		if !ok || raw == "" {
+			env.AppendRequired(&errs, "AdminPassword", key)
 		} else {
 			cfg.AdminPassword = raw
 		}
@@ -239,15 +1024,6 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		}
 	}
 	{
-		key := "ENV"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			cfg.Env = "development"
-		} else {
-			cfg.Env = raw
-		}
-	}
-	{
 		key := "CORS_ALLOWED_ORIGINS"
 		raw, ok := snap.Lookup(key)
 		if !ok || raw == "" {
@@ -256,277 +1032,20 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		}
 	}
 	{
-		key := "SESSION_SECRET"
+		key := "TRUSTED_PROXIES"
 		raw, ok := snap.Lookup(key)
 		if !ok || raw == "" {
 		} else {
-			cfg.SessionSecret = raw
+			cfg.TrustedProxies = raw
 		}
 	}
 	{
-		key := "DB_HEALTH_CHECK_PERIOD"
+		key := "BEHAVIOR_FINGERPRINT_KV_BUCKET"
 		raw, ok := snap.Lookup(key)
 		if !ok || raw == "" {
-			v, err := env.ParseDuration("1m")
-			if err != nil {
-				env.AppendParse(&errs, "DBHealthCheckPeriod", key, "1m", err)
-			} else {
-				cfg.DBHealthCheckPeriod = v
-			}
+			cfg.BehaviorFingerprintKVBucket = "nats_consol_fingerprints"
 		} else {
-			v, err := env.ParseDuration(raw)
-			if err != nil {
-				env.AppendParse(&errs, "DBHealthCheckPeriod", key, raw, err)
-			} else {
-				cfg.DBHealthCheckPeriod = v
-			}
-		}
-	}
-	{
-		key := "AUDIT_DEFAULT_LIMIT"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseInt("50")
-			if err != nil {
-				env.AppendParse(&errs, "AuditDefaultLimit", key, "50", err)
-			} else {
-				cfg.AuditDefaultLimit = v
-			}
-		} else {
-			v, err := env.ParseInt(raw)
-			if err != nil {
-				env.AppendParse(&errs, "AuditDefaultLimit", key, raw, err)
-			} else {
-				cfg.AuditDefaultLimit = v
-			}
-		}
-	}
-	{
-		key := "SESSION_TTL"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseDuration("8h")
-			if err != nil {
-				env.AppendParse(&errs, "SessionTTL", key, "8h", err)
-			} else {
-				cfg.SessionTTL = v
-			}
-		} else {
-			v, err := env.ParseDuration(raw)
-			if err != nil {
-				env.AppendParse(&errs, "SessionTTL", key, raw, err)
-			} else {
-				cfg.SessionTTL = v
-			}
-		}
-	}
-	{
-		key := "AUTH_RATE_LIMIT_WINDOW"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseDuration("1m")
-			if err != nil {
-				env.AppendParse(&errs, "AuthRateLimitWindow", key, "1m", err)
-			} else {
-				cfg.AuthRateLimitWindow = v
-			}
-		} else {
-			v, err := env.ParseDuration(raw)
-			if err != nil {
-				env.AppendParse(&errs, "AuthRateLimitWindow", key, raw, err)
-			} else {
-				cfg.AuthRateLimitWindow = v
-			}
-		}
-	}
-	{
-		key := "AUTH_RATE_LIMIT"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseInt("10")
-			if err != nil {
-				env.AppendParse(&errs, "AuthRateLimit", key, "10", err)
-			} else {
-				cfg.AuthRateLimit = v
-			}
-		} else {
-			v, err := env.ParseInt(raw)
-			if err != nil {
-				env.AppendParse(&errs, "AuthRateLimit", key, raw, err)
-			} else {
-				cfg.AuthRateLimit = v
-			}
-		}
-	}
-	{
-		key := "LIVE_WS_RATE_LIMIT"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseDuration("100ms")
-			if err != nil {
-				env.AppendParse(&errs, "LiveWSRateLimit", key, "100ms", err)
-			} else {
-				cfg.LiveWSRateLimit = v
-			}
-		} else {
-			v, err := env.ParseDuration(raw)
-			if err != nil {
-				env.AppendParse(&errs, "LiveWSRateLimit", key, raw, err)
-			} else {
-				cfg.LiveWSRateLimit = v
-			}
-		}
-	}
-	{
-		key := "LIVE_WS_IDLE_TIMEOUT"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseDuration("5m")
-			if err != nil {
-				env.AppendParse(&errs, "LiveWSIdleTimeout", key, "5m", err)
-			} else {
-				cfg.LiveWSIdleTimeout = v
-			}
-		} else {
-			v, err := env.ParseDuration(raw)
-			if err != nil {
-				env.AppendParse(&errs, "LiveWSIdleTimeout", key, raw, err)
-			} else {
-				cfg.LiveWSIdleTimeout = v
-			}
-		}
-	}
-	{
-		key := "MAX_REQUEST_BODY_SIZE"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseInt64("1048576")
-			if err != nil {
-				env.AppendParse(&errs, "MaxRequestBodySize", key, "1048576", err)
-			} else {
-				cfg.MaxRequestBodySize = v
-			}
-		} else {
-			v, err := env.ParseInt64(raw)
-			if err != nil {
-				env.AppendParse(&errs, "MaxRequestBodySize", key, raw, err)
-			} else {
-				cfg.MaxRequestBodySize = v
-			}
-		}
-	}
-	{
-		key := "LIVE_WS_MAX_MESSAGES"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseInt("1000")
-			if err != nil {
-				env.AppendParse(&errs, "LiveWSMaxMessages", key, "1000", err)
-			} else {
-				cfg.LiveWSMaxMessages = v
-			}
-		} else {
-			v, err := env.ParseInt(raw)
-			if err != nil {
-				env.AppendParse(&errs, "LiveWSMaxMessages", key, raw, err)
-			} else {
-				cfg.LiveWSMaxMessages = v
-			}
-		}
-	}
-	{
-		key := "DB_MAX_CONN_IDLE_TIME"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseDuration("30m")
-			if err != nil {
-				env.AppendParse(&errs, "DBMaxConnIdleTime", key, "30m", err)
-			} else {
-				cfg.DBMaxConnIdleTime = v
-			}
-		} else {
-			v, err := env.ParseDuration(raw)
-			if err != nil {
-				env.AppendParse(&errs, "DBMaxConnIdleTime", key, raw, err)
-			} else {
-				cfg.DBMaxConnIdleTime = v
-			}
-		}
-	}
-	{
-		key := "HTTP_WRITE_TIMEOUT"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseDuration("30s")
-			if err != nil {
-				env.AppendParse(&errs, "HTTPWriteTimeout", key, "30s", err)
-			} else {
-				cfg.HTTPWriteTimeout = v
-			}
-		} else {
-			v, err := env.ParseDuration(raw)
-			if err != nil {
-				env.AppendParse(&errs, "HTTPWriteTimeout", key, raw, err)
-			} else {
-				cfg.HTTPWriteTimeout = v
-			}
-		}
-	}
-	{
-		key := "PAGINATION_MAX_LIMIT"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseInt("500")
-			if err != nil {
-				env.AppendParse(&errs, "PaginationMaxLimit", key, "500", err)
-			} else {
-				cfg.PaginationMaxLimit = v
-			}
-		} else {
-			v, err := env.ParseInt(raw)
-			if err != nil {
-				env.AppendParse(&errs, "PaginationMaxLimit", key, raw, err)
-			} else {
-				cfg.PaginationMaxLimit = v
-			}
-		}
-	}
-	{
-		key := "PAGINATION_DEFAULT_LIMIT"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseInt("100")
-			if err != nil {
-				env.AppendParse(&errs, "PaginationDefaultLimit", key, "100", err)
-			} else {
-				cfg.PaginationDefaultLimit = v
-			}
-		} else {
-			v, err := env.ParseInt(raw)
-			if err != nil {
-				env.AppendParse(&errs, "PaginationDefaultLimit", key, raw, err)
-			} else {
-				cfg.PaginationDefaultLimit = v
-			}
-		}
-	}
-	{
-		key := "PPROF_CPU_MAX_SECONDS"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseInt("120")
-			if err != nil {
-				env.AppendParse(&errs, "PprofCPUMaxSeconds", key, "120", err)
-			} else {
-				cfg.PprofCPUMaxSeconds = v
-			}
-		} else {
-			v, err := env.ParseInt(raw)
-			if err != nil {
-				env.AppendParse(&errs, "PprofCPUMaxSeconds", key, raw, err)
-			} else {
-				cfg.PprofCPUMaxSeconds = v
-			}
+			cfg.BehaviorFingerprintKVBucket = raw
 		}
 	}
 	{
@@ -549,97 +1068,21 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		}
 	}
 	{
-		key := "AI_CONTEXT_CACHE_TTL"
+		key := "HEALTH_CHECK_TIMEOUT"
 		raw, ok := snap.Lookup(key)
 		if !ok || raw == "" {
-			v, err := env.ParseDuration("45s")
+			v, err := env.ParseDuration("2s")
 			if err != nil {
-				env.AppendParse(&errs, "AIContextCacheTTL", key, "45s", err)
+				env.AppendParse(&errs, "HealthCheckTimeout", key, "2s", err)
 			} else {
-				cfg.AIContextCacheTTL = v
+				cfg.HealthCheckTimeout = v
 			}
 		} else {
 			v, err := env.ParseDuration(raw)
 			if err != nil {
-				env.AppendParse(&errs, "AIContextCacheTTL", key, raw, err)
+				env.AppendParse(&errs, "HealthCheckTimeout", key, raw, err)
 			} else {
-				cfg.AIContextCacheTTL = v
-			}
-		}
-	}
-	{
-		key := "HTTP_READ_TIMEOUT"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseDuration("10s")
-			if err != nil {
-				env.AppendParse(&errs, "HTTPReadTimeout", key, "10s", err)
-			} else {
-				cfg.HTTPReadTimeout = v
-			}
-		} else {
-			v, err := env.ParseDuration(raw)
-			if err != nil {
-				env.AppendParse(&errs, "HTTPReadTimeout", key, raw, err)
-			} else {
-				cfg.HTTPReadTimeout = v
-			}
-		}
-	}
-	{
-		key := "AI_REQUEST_TIMEOUT"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseDuration("60s")
-			if err != nil {
-				env.AppendParse(&errs, "AIRequestTimeout", key, "60s", err)
-			} else {
-				cfg.AIRequestTimeout = v
-			}
-		} else {
-			v, err := env.ParseDuration(raw)
-			if err != nil {
-				env.AppendParse(&errs, "AIRequestTimeout", key, raw, err)
-			} else {
-				cfg.AIRequestTimeout = v
-			}
-		}
-	}
-	{
-		key := "AI_MAX_TOKENS"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseInt("4096")
-			if err != nil {
-				env.AppendParse(&errs, "AIMaxTokens", key, "4096", err)
-			} else {
-				cfg.AIMaxTokens = v
-			}
-		} else {
-			v, err := env.ParseInt(raw)
-			if err != nil {
-				env.AppendParse(&errs, "AIMaxTokens", key, raw, err)
-			} else {
-				cfg.AIMaxTokens = v
-			}
-		}
-	}
-	{
-		key := "NATS_CLIENT_CACHE_TTL"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseDuration("5m")
-			if err != nil {
-				env.AppendParse(&errs, "NATSClientCacheTTL", key, "5m", err)
-			} else {
-				cfg.NATSClientCacheTTL = v
-			}
-		} else {
-			v, err := env.ParseDuration(raw)
-			if err != nil {
-				env.AppendParse(&errs, "NATSClientCacheTTL", key, raw, err)
-			} else {
-				cfg.NATSClientCacheTTL = v
+				cfg.HealthCheckTimeout = v
 			}
 		}
 	}
@@ -682,135 +1125,21 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		}
 	}
 	{
-		key := "LIVE_WS_PAYLOAD_TRUNCATE_BYTES"
+		key := "AUDIT_DEFAULT_LIMIT"
 		raw, ok := snap.Lookup(key)
 		if !ok || raw == "" {
-			v, err := env.ParseInt("4096")
+			v, err := env.ParseInt("50")
 			if err != nil {
-				env.AppendParse(&errs, "LiveWSPayloadTruncateBytes", key, "4096", err)
+				env.AppendParse(&errs, "AuditDefaultLimit", key, "50", err)
 			} else {
-				cfg.LiveWSPayloadTruncateBytes = v
+				cfg.AuditDefaultLimit = v
 			}
 		} else {
 			v, err := env.ParseInt(raw)
 			if err != nil {
-				env.AppendParse(&errs, "LiveWSPayloadTruncateBytes", key, raw, err)
+				env.AppendParse(&errs, "AuditDefaultLimit", key, raw, err)
 			} else {
-				cfg.LiveWSPayloadTruncateBytes = v
-			}
-		}
-	}
-	{
-		key := "HTTP_IDLE_TIMEOUT"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseDuration("60s")
-			if err != nil {
-				env.AppendParse(&errs, "HTTPIdleTimeout", key, "60s", err)
-			} else {
-				cfg.HTTPIdleTimeout = v
-			}
-		} else {
-			v, err := env.ParseDuration(raw)
-			if err != nil {
-				env.AppendParse(&errs, "HTTPIdleTimeout", key, raw, err)
-			} else {
-				cfg.HTTPIdleTimeout = v
-			}
-		}
-	}
-	{
-		key := "DB_MAX_CONNS"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseInt("25")
-			if err != nil {
-				env.AppendParse(&errs, "DBMaxConns", key, "25", err)
-			} else {
-				cfg.DBMaxConns = v
-			}
-		} else {
-			v, err := env.ParseInt(raw)
-			if err != nil {
-				env.AppendParse(&errs, "DBMaxConns", key, raw, err)
-			} else {
-				cfg.DBMaxConns = v
-			}
-		}
-	}
-	{
-		key := "DB_MAX_CONN_LIFETIME"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseDuration("1h")
-			if err != nil {
-				env.AppendParse(&errs, "DBMaxConnLifetime", key, "1h", err)
-			} else {
-				cfg.DBMaxConnLifetime = v
-			}
-		} else {
-			v, err := env.ParseDuration(raw)
-			if err != nil {
-				env.AppendParse(&errs, "DBMaxConnLifetime", key, raw, err)
-			} else {
-				cfg.DBMaxConnLifetime = v
-			}
-		}
-	}
-	{
-		key := "DB_MIN_CONNS"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseInt("2")
-			if err != nil {
-				env.AppendParse(&errs, "DBMinConns", key, "2", err)
-			} else {
-				cfg.DBMinConns = v
-			}
-		} else {
-			v, err := env.ParseInt(raw)
-			if err != nil {
-				env.AppendParse(&errs, "DBMinConns", key, raw, err)
-			} else {
-				cfg.DBMinConns = v
-			}
-		}
-	}
-	{
-		key := "AI_ENABLED"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseBool("false")
-			if err != nil {
-				env.AppendParse(&errs, "AIEnabled", key, "false", err)
-			} else {
-				cfg.AIEnabled = v
-			}
-		} else {
-			v, err := env.ParseBool(raw)
-			if err != nil {
-				env.AppendParse(&errs, "AIEnabled", key, raw, err)
-			} else {
-				cfg.AIEnabled = v
-			}
-		}
-	}
-	{
-		key := "LOG_JSON"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseBool("false")
-			if err != nil {
-				env.AppendParse(&errs, "LogJSON", key, "false", err)
-			} else {
-				cfg.LogJSON = v
-			}
-		} else {
-			v, err := env.ParseBool(raw)
-			if err != nil {
-				env.AppendParse(&errs, "LogJSON", key, raw, err)
-			} else {
-				cfg.LogJSON = v
+				cfg.AuditDefaultLimit = v
 			}
 		}
 	}
@@ -830,338 +1159,6 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 				env.AppendParse(&errs, "MetricsAuthEnabled", key, raw, err)
 			} else {
 				cfg.MetricsAuthEnabled = v
-			}
-		}
-	}
-	{
-		key := "PPROF_ENABLED"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseBool("false")
-			if err != nil {
-				env.AppendParse(&errs, "PprofEnabled", key, "false", err)
-			} else {
-				cfg.PprofEnabled = v
-			}
-		} else {
-			v, err := env.ParseBool(raw)
-			if err != nil {
-				env.AppendParse(&errs, "PprofEnabled", key, raw, err)
-			} else {
-				cfg.PprofEnabled = v
-			}
-		}
-	}
-	{
-		key := "PPROF_AUTH_ENABLED"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseBool("true")
-			if err != nil {
-				env.AppendParse(&errs, "PprofAuthEnabled", key, "true", err)
-			} else {
-				cfg.PprofAuthEnabled = v
-			}
-		} else {
-			v, err := env.ParseBool(raw)
-			if err != nil {
-				env.AppendParse(&errs, "PprofAuthEnabled", key, raw, err)
-			} else {
-				cfg.PprofAuthEnabled = v
-			}
-		}
-	}
-	{
-		key := "METRICS_SNAPSHOT_INTERVAL"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseDuration("60s")
-			if err != nil {
-				env.AppendParse(&errs, "MetricsSnapshotInterval", key, "60s", err)
-			} else {
-				cfg.MetricsSnapshotInterval = v
-			}
-		} else {
-			v, err := env.ParseDuration(raw)
-			if err != nil {
-				env.AppendParse(&errs, "MetricsSnapshotInterval", key, raw, err)
-			} else {
-				cfg.MetricsSnapshotInterval = v
-			}
-		}
-	}
-	{
-		key := "METRICS_SNAPSHOT_RETENTION"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseDuration("168h")
-			if err != nil {
-				env.AppendParse(&errs, "MetricsSnapshotRetention", key, "168h", err)
-			} else {
-				cfg.MetricsSnapshotRetention = v
-			}
-		} else {
-			v, err := env.ParseDuration(raw)
-			if err != nil {
-				env.AppendParse(&errs, "MetricsSnapshotRetention", key, raw, err)
-			} else {
-				cfg.MetricsSnapshotRetention = v
-			}
-		}
-	}
-	{
-		key := "METRICS_SNAPSHOT_CLEANUP_INTERVAL"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseDuration("1h")
-			if err != nil {
-				env.AppendParse(&errs, "MetricsSnapshotCleanupInterval", key, "1h", err)
-			} else {
-				cfg.MetricsSnapshotCleanupInterval = v
-			}
-		} else {
-			v, err := env.ParseDuration(raw)
-			if err != nil {
-				env.AppendParse(&errs, "MetricsSnapshotCleanupInterval", key, raw, err)
-			} else {
-				cfg.MetricsSnapshotCleanupInterval = v
-			}
-		}
-	}
-	{
-		key := "AUTH_ENABLED"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseBool("true")
-			if err != nil {
-				env.AppendParse(&errs, "AuthEnabled", key, "true", err)
-			} else {
-				cfg.AuthEnabled = v
-			}
-		} else {
-			v, err := env.ParseBool(raw)
-			if err != nil {
-				env.AppendParse(&errs, "AuthEnabled", key, raw, err)
-			} else {
-				cfg.AuthEnabled = v
-			}
-		}
-	}
-	{
-		key := "METRICS_SNAPSHOT_ENABLED"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseBool("true")
-			if err != nil {
-				env.AppendParse(&errs, "MetricsSnapshotEnabled", key, "true", err)
-			} else {
-				cfg.MetricsSnapshotEnabled = v
-			}
-		} else {
-			v, err := env.ParseBool(raw)
-			if err != nil {
-				env.AppendParse(&errs, "MetricsSnapshotEnabled", key, raw, err)
-			} else {
-				cfg.MetricsSnapshotEnabled = v
-			}
-		}
-	}
-	{
-		key := "NATS_TLS_INSECURE_SKIP_VERIFY"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseBool("false")
-			if err != nil {
-				env.AppendParse(&errs, "NATSTlsInsecureSkipVerify", key, "false", err)
-			} else {
-				cfg.NATSTlsInsecureSkipVerify = v
-			}
-		} else {
-			v, err := env.ParseBool(raw)
-			if err != nil {
-				env.AppendParse(&errs, "NATSTlsInsecureSkipVerify", key, raw, err)
-			} else {
-				cfg.NATSTlsInsecureSkipVerify = v
-			}
-		}
-	}
-	{
-		key := "HTTP3_CERT_FILE"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-		} else {
-			cfg.HTTP3CertFile = raw
-		}
-	}
-	{
-		key := "HTTP3_KEY_FILE"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-		} else {
-			cfg.HTTP3KeyFile = raw
-		}
-	}
-	{
-		key := "HTTP3_BACKEND_ADDR"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			cfg.HTTP3BackendAddrRaw = "127.0.0.1:8080"
-		} else {
-			cfg.HTTP3BackendAddrRaw = raw
-		}
-	}
-	{
-		key := "HTTP3_ADDR"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			cfg.HTTP3Addr = ":443"
-		} else {
-			cfg.HTTP3Addr = raw
-		}
-	}
-	{
-		key := "HTTP3_OUTBOUND_ENABLED"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseBool("true")
-			if err != nil {
-				env.AppendParse(&errs, "HTTP3OutboundEnabled", key, "true", err)
-			} else {
-				cfg.HTTP3OutboundEnabled = v
-			}
-		} else {
-			v, err := env.ParseBool(raw)
-			if err != nil {
-				env.AppendParse(&errs, "HTTP3OutboundEnabled", key, raw, err)
-			} else {
-				cfg.HTTP3OutboundEnabled = v
-			}
-		}
-	}
-	{
-		key := "HTTP3_OUTBOUND_FALLBACK"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseBool("true")
-			if err != nil {
-				env.AppendParse(&errs, "HTTP3OutboundFallback", key, "true", err)
-			} else {
-				cfg.HTTP3OutboundFallback = v
-			}
-		} else {
-			v, err := env.ParseBool(raw)
-			if err != nil {
-				env.AppendParse(&errs, "HTTP3OutboundFallback", key, raw, err)
-			} else {
-				cfg.HTTP3OutboundFallback = v
-			}
-		}
-	}
-	{
-		key := "HTTP3_ENABLED"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseBool("false")
-			if err != nil {
-				env.AppendParse(&errs, "HTTP3Enabled", key, "false", err)
-			} else {
-				cfg.HTTP3Enabled = v
-			}
-		} else {
-			v, err := env.ParseBool(raw)
-			if err != nil {
-				env.AppendParse(&errs, "HTTP3Enabled", key, raw, err)
-			} else {
-				cfg.HTTP3Enabled = v
-			}
-		}
-	}
-	{
-		key := "SMTP_ENABLED"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseBool("false")
-			if err != nil {
-				env.AppendParse(&errs, "SMTPEnabled", key, "false", err)
-			} else {
-				cfg.SMTPEnabled = v
-			}
-		} else {
-			v, err := env.ParseBool(raw)
-			if err != nil {
-				env.AppendParse(&errs, "SMTPEnabled", key, raw, err)
-			} else {
-				cfg.SMTPEnabled = v
-			}
-		}
-	}
-	{
-		key := "SMTP_HOST"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-		} else {
-			cfg.SMTPHost = raw
-		}
-	}
-	{
-		key := "SMTP_USERNAME"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-		} else {
-			cfg.SMTPUsername = raw
-		}
-	}
-	{
-		key := "SMTP_PASSWORD"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-		} else {
-			cfg.SMTPPassword = raw
-		}
-	}
-	{
-		key := "SMTP_FROM"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-		} else {
-			cfg.SMTPFrom = raw
-		}
-	}
-	{
-		key := "SMTP_PORT"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseInt("587")
-			if err != nil {
-				env.AppendParse(&errs, "SMTPPort", key, "587", err)
-			} else {
-				cfg.SMTPPort = v
-			}
-		} else {
-			v, err := env.ParseInt(raw)
-			if err != nil {
-				env.AppendParse(&errs, "SMTPPort", key, raw, err)
-			} else {
-				cfg.SMTPPort = v
-			}
-		}
-	}
-	{
-		key := "SMTP_TLS"
-		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			v, err := env.ParseBool("true")
-			if err != nil {
-				env.AppendParse(&errs, "SMTPTLS", key, "true", err)
-			} else {
-				cfg.SMTPTLS = v
-			}
-		} else {
-			v, err := env.ParseBool(raw)
-			if err != nil {
-				env.AppendParse(&errs, "SMTPTLS", key, raw, err)
-			} else {
-				cfg.SMTPTLS = v
 			}
 		}
 	}

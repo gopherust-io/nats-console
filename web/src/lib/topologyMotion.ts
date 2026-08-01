@@ -2,7 +2,7 @@ import { useReducedMotion, type Transition, type Variants } from "motion/react";
 
 const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
-export const TOPOLOGY_FLOW_VISIBLE = 6;
+export const TOPOLOGY_FLOW_VISIBLE = 8;
 
 export function useTopologyMotion() {
   const reduceMotion = Boolean(useReducedMotion());

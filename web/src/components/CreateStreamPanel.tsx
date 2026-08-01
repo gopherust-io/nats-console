@@ -527,7 +527,7 @@ export default function CreateStreamPanel({
     try {
       await onSubmit(body);
     } catch {
-      // Parent surfaces API error via error prop.
+      // onSubmit surfaces errors to the panel
     }
   }
 

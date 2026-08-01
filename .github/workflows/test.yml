@@ -36,15 +36,13 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/go/bin/goalign
-          key: goalign-v1.1.0-${{ runner.os }}
+          key: goalign-v1.3.0-${{ runner.os }}
       - name: Install goalign
         if: steps.goalign-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          ver=v1.1.0
           mkdir -p "${HOME}/go/bin"
-          curl -fsSL "https://github.com/gopherust-io/goalign/archive/refs/tags/${ver}.tar.gz" | tar -xz -C /tmp
-          (cd "/tmp/goalign-${ver#v}" && go build -o "${HOME}/go/bin/goalign" .)
+          go install github.com/gopherust-io/goalign@v1.3.0
       - name: Run goalign
         run: |
           echo "${HOME}/go/bin" >> "${GITHUB_PATH}"
@@ -52,7 +50,7 @@ jobs:
       - name: Unit tests
         run: make test-unit
       - name: Build server
-        run: go build -o /dev/null ./cmd/server
+        run: go build -o /dev/null ./cmd
 
   web:
     name: Web
@@ -124,7 +122,9 @@ jobs:
       - name: Prepare compose env
         run: |
           cp .env.example .env
-          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env
+          sed -i 's|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=http://localhost:8080|' .env
+          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=ci-admin-password/' .env
+          sed -i 's/^PPROF_ENABLED=.*/PPROF_ENABLED=false/' .env
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -148,7 +148,7 @@ jobs:
         run: make test-smoke
         env:
           BASE_URL: http://localhost:8080
-          AUTH: admin:admin
+          AUTH: admin:ci-admin-password
 
   performance:
     name: Performance baseline
@@ -174,7 +174,9 @@ jobs:
       - name: Prepare compose env
         run: |
           cp .env.example .env
-          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env
+          sed -i 's|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=http://localhost:8080|' .env
+          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=ci-admin-password/' .env
+          sed -i 's/^PPROF_ENABLED=.*/PPROF_ENABLED=false/' .env
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -221,7 +223,9 @@ jobs:
       - name: Prepare compose env
         run: |
           cp .env.example .env
-          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env
+          sed -i 's|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=http://localhost:8080|' .env
+          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=ci-admin-password/' .env
+          sed -i 's/^PPROF_ENABLED=.*/PPROF_ENABLED=false/' .env
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:

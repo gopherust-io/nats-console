@@ -23,6 +23,7 @@ type StreamInfo struct {
 	Created time.Time       `json:"created"`
 	Config  StreamConfigDTO `json:"config"`
 	State   StreamStateDTO  `json:"state"`
+	IsDLQ   bool            `json:"isDlq"`
 }
 
 type StreamPlacementDTO struct {
@@ -111,11 +112,13 @@ type ConsumerInfo struct {
 	AckFloor       *SequenceInfoDTO  `json:"ackFloor,omitempty"`
 	Name           string            `json:"name"`
 	StreamName     string            `json:"streamName"`
+	SlowReasons    []string          `json:"slowReasons,omitempty"`
 	Config         ConsumerConfigDTO `json:"config"`
 	NumPending     uint64            `json:"numPending"`
 	NumAckPending  int               `json:"numAckPending"`
 	NumRedelivered int               `json:"numRedelivered,omitempty"`
 	NumWaiting     int               `json:"numWaiting,omitempty"`
+	SlowConsumer   bool              `json:"slowConsumer"`
 }
 
 // goalign:ignore

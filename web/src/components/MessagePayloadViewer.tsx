@@ -1,80 +1,80 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { decodeBase64, tryParseJSON } from "../lib/api";
+import {
+  compactPayloadPreview,
+  decodeMessagePayload,
+  payloadFormatLabel,
+  type DecodedMessagePayload,
+} from "../lib/messagePayloadDecode";
 
 const PREVIEW_LIMIT = 8192;
 
 export type MessagePayloadViewerProps = {
   /** Base64-encoded payload (preferred when coming from the API). */
   data?: string;
-  /** Already-decoded payload; used when `data` is omitted. */
+  /** Already-decoded payload text; used when `data` is omitted (no format sniffing). */
   payload?: string;
   headers?: Record<string, string>;
-  /** Start in raw mode (default: pretty-print JSON when possible). */
-  defaultRaw?: boolean;
-  /** Controlled raw mode; when set, internal toggle is hidden unless onRawChange is provided. */
-  rawMode?: boolean;
-  onRawChange?: (raw: boolean) => void;
   /** Compact layout for live-tail rows (smaller controls, no header list by default). */
   compact?: boolean;
   showHeaders?: boolean;
+  /** Optional host object to cache a full decode (e.g. live message row). */
+  cacheHost?: object;
 };
 
 export default function MessagePayloadViewer({
   data,
   payload: payloadProp,
   headers,
-  defaultRaw = false,
-  rawMode: rawModeProp,
-  onRawChange,
   compact = false,
   showHeaders = true,
+  cacheHost,
 }: MessagePayloadViewerProps) {
   const { t } = useTranslation();
-  const [internalRaw, setInternalRaw] = useState(defaultRaw);
+  const [expanded, setExpanded] = useState(!compact);
   const [showFull, setShowFull] = useState(false);
+  const [decoded, setDecoded] = useState<DecodedMessagePayload | null>(null);
+  const [decoding, setDecoding] = useState(false);
 
-  const rawMode = rawModeProp ?? internalRaw;
-  const isControlled = rawModeProp !== undefined;
+  useEffect(() => {
+    if (payloadProp !== undefined || data === undefined || !expanded) {
+      return;
+    }
+    let cancelled = false;
+    setDecoding(true);
+    void decodeMessagePayload(data, headers, cacheHost).then((result) => {
+      if (!cancelled) {
+        setDecoded(result);
+        setDecoding(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, data, headers, payloadProp, cacheHost]);
 
-  function setRawMode(next: boolean) {
-    if (onRawChange) onRawChange(next);
-    else setInternalRaw(next);
-  }
-
-  const payload = useMemo(() => {
-    if (payloadProp !== undefined) return payloadProp;
-    if (data !== undefined) return decodeBase64(data);
-    return "";
-  }, [data, payloadProp]);
-
-  const parsed = useMemo(() => tryParseJSON(payload), [payload]);
-  const truncated = !showFull && payload.length > PREVIEW_LIMIT;
-  const displaySource = truncated ? `${payload.slice(0, PREVIEW_LIMIT)}\n…` : payload;
-  const display =
-    !rawMode && parsed.isJSON && !truncated
-      ? JSON.stringify(parsed.parsed, null, 2)
-      : displaySource;
+  const preview = payloadProp ?? (data !== undefined ? compactPayloadPreview(data) : "");
+  const formatted = payloadProp !== undefined ? payloadProp : (decoded?.text ?? preview);
+  const truncated = expanded && !showFull && formatted.length > PREVIEW_LIMIT;
+  const display = truncated ? `${formatted.slice(0, PREVIEW_LIMIT)}\n…` : formatted;
+  const formatBadge =
+    payloadProp === undefined && decoded ? payloadFormatLabel(decoded.format) : null;
 
   const headerEntries = headers ? Object.entries(headers) : [];
-  const showRawToggle = (parsed.isJSON || rawMode) && (!isControlled || Boolean(onRawChange));
 
   return (
     <div className={`message-payload${compact ? " message-payload--compact" : ""}`}>
       {!compact && (
         <div className="message-payload__toolbar">
-          <span className="message-payload__title">{t("streams.payload")}</span>
-          <div className="message-payload__actions">
-            {showRawToggle && (
-              <button
-                type="button"
-                className="btn btn--secondary btn--small"
-                aria-pressed={rawMode}
-                onClick={() => setRawMode(!rawMode)}
-              >
-                {rawMode ? t("streams.showJson") : t("streams.showRaw")}
-              </button>
+          <span className="message-payload__title">
+            {t("streams.payload")}
+            {formatBadge && (
+              <span className="message-payload__format" title={t("streams.detectedFormat")}>
+                {formatBadge}
+              </span>
             )}
+          </span>
+          <div className="message-payload__actions">
             {truncated && (
               <button type="button" className="btn btn--secondary btn--small" onClick={() => setShowFull(true)}>
                 {t("streams.showFullPayload")}
@@ -84,11 +84,26 @@ export default function MessagePayloadViewer({
         </div>
       )}
 
-      {compact && truncated && (
+      {compact && (
         <div className="message-payload__toolbar">
-          <button type="button" className="btn btn--secondary btn--small" onClick={() => setShowFull(true)}>
-            {t("streams.showFullPayload")}
-          </button>
+          {formatBadge && (
+            <span className="message-payload__format" title={t("streams.detectedFormat")}>
+              {formatBadge}
+            </span>
+          )}
+          {!expanded ? (
+            <button
+              type="button"
+              className="btn btn--secondary btn--small"
+              onClick={() => setExpanded(true)}
+            >
+              {t("streams.showFullPayload")}
+            </button>
+          ) : truncated ? (
+            <button type="button" className="btn btn--secondary btn--small" onClick={() => setShowFull(true)}>
+              {t("streams.showFullPayload")}
+            </button>
+          ) : null}
         </div>
       )}
 
@@ -103,7 +118,9 @@ export default function MessagePayloadViewer({
         </dl>
       )}
 
-      <pre className="mono message-payload__body">{display}</pre>
+      <pre className="mono message-payload__body">
+        {decoding && expanded && !decoded ? "…" : display}
+      </pre>
     </div>
   );
 }

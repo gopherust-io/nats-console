@@ -6,6 +6,7 @@ import (
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/store"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 func StoreUserToDomain(user store.User) domain.User {
@@ -21,17 +22,7 @@ func StoreUserToDomain(user store.User) domain.User {
 	}
 	grants := make([]domain.AccessGrant, 0, len(user.Grants))
 	for _, g := range user.Grants {
-		grants = append(grants, domain.AccessGrant{
-			ID:           g.ID,
-			UserID:       g.UserID,
-			ResourceType: g.ResourceType,
-			ResourceKey:  g.ResourceKey,
-			Role:         g.Role,
-			CreatedAt:    g.CreatedAt,
-			UpdatedAt:    g.UpdatedAt,
-			Username:     g.Username,
-			Email:        g.Email,
-		})
+		grants = append(grants, domain.AccessGrant(g))
 	}
 	return domain.User{
 		ID:          user.ID,
@@ -66,14 +57,6 @@ func CanWrite(user store.User) bool {
 	}
 	role := store.HighestRole(user.Roles)
 	return role == store.RoleAdmin || role == store.RoleOperator
-}
-
-// CanCreateCluster allows registering new clusters for root and legacy unscoped admins only.
-func CanCreateCluster(user store.User) bool {
-	if user.IsRoot {
-		return true
-	}
-	return store.HighestRole(user.Roles) == store.RoleAdmin && user.AccessRules == nil
 }
 
 // CanDeleteCluster allows deleting clusters for root, unscoped admins, or scoped admins with DeleteClusters.
@@ -122,20 +105,76 @@ func CanManageAlertRules(user store.User) bool {
 	return store.HighestRole(user.Roles) == store.RoleAdmin || CanManageUsers(user)
 }
 
+// CanAccessCluster reports whether the user has cluster-wide (system-level)
+// access to clusterID. Only root, legacy unscoped admins, access-rule scoped
+// users, and holders of a system resource grant qualify. Account- or
+// NATS-user-scoped grants intentionally do NOT satisfy this check: such
+// grants authorize access to one account within the cluster, not the whole
+// cluster (its JetStream data, server monitoring, topology, etc.). Callers
+// that only need "does this user have some presence in the cluster" (for
+// example, listing clusters to display) should use
+// CanAccessClusterOrAccount instead.
 func CanAccessCluster(user store.User, clusterID string) bool {
 	if allowsClusterRules(user, clusterID) {
 		return true
 	}
+	return hasAdminOrObserverGrant(user, store.ResourceSystem, clusterID)
+}
+
+// CanAccessClusterOrAccount reports whether the user has any grant touching
+// clusterID: full cluster-wide access (see CanAccessCluster) OR an
+// account/NATS-user scoped grant within that cluster. Use this for coarse
+// "does the user have any business seeing this cluster" checks (e.g. listing
+// clusters, or gating account-management routes) - it must never be used to
+// authorize cluster-wide capabilities like JetStream data, monitoring, or
+// topology. Handlers that take an account name must further narrow with
+// CanAccessAccount.
+func CanAccessClusterOrAccount(user store.User, clusterID string) bool {
+	if CanAccessCluster(user, clusterID) {
+		return true
+	}
 	for _, g := range user.Grants {
 		switch g.ResourceType {
-		case store.ResourceSystem:
-			if g.ResourceKey == clusterID {
-				return true
-			}
 		case store.ResourceAccount, store.ResourceNATSUser:
 			if g.ResourceKey == clusterID || strings.HasPrefix(g.ResourceKey, clusterID+":") {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// CanAccessAccount reports whether the user may read/mutate resources scoped
+// to a specific NATS account within clusterID. Cluster-wide access implies
+// all accounts. Otherwise the user needs an account grant for that account
+// or a nats_user grant under that account key prefix.
+func CanAccessAccount(user store.User, clusterID, accountName string) bool {
+	if CanAccessCluster(user, clusterID) {
+		return true
+	}
+	accountKey := domain.AccountResourceKey(clusterID, accountName)
+	for _, g := range user.Grants {
+		switch g.ResourceType {
+		case store.ResourceAccount:
+			if g.ResourceKey == accountKey {
+				return true
+			}
+		case store.ResourceNATSUser:
+			if g.ResourceKey == accountKey || strings.HasPrefix(g.ResourceKey, accountKey+":") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasAdminOrObserverGrant reports whether the user holds any grant (of any
+// role) for the given resource type/key. Unlike hasAdminGrant, this is not
+// limited to admin-role grants.
+func hasAdminOrObserverGrant(user store.User, resourceType, resourceKey string) bool {
+	for _, g := range user.Grants {
+		if g.ResourceType == resourceType && g.ResourceKey == resourceKey {
+			return true
 		}
 	}
 	return false
@@ -176,7 +215,11 @@ func CanManageJetStreamAccount(user store.User, clusterID, accountName string) b
 	return hasAdminGrant(user, store.ResourceAccount, domain.AccountResourceKey(clusterID, accountName))
 }
 
-func CanDownloadCreds(user store.User, clusterID, accountName string) bool {
+// CanDownloadCreds reports whether the user may download/rotate/mint credentials
+// for natsUserID in accountName. Account-level Admin/CredentialDownloader grants
+// authorize every user in that account. A nats_user grant only authorizes that
+// exact NATS user (prefix matching is intentionally rejected).
+func CanDownloadCreds(user store.User, clusterID, accountName, natsUserID string) bool {
 	if user.IsRoot {
 		return true
 	}
@@ -184,13 +227,25 @@ func CanDownloadCreds(user store.User, clusterID, accountName string) bool {
 		return true
 	}
 	accountKey := domain.AccountResourceKey(clusterID, accountName)
+	natsUserKey := ""
+	if !commonstrings.IsEmpty(natsUserID) {
+		natsUserKey = domain.NATSUserResourceKey(clusterID, accountName, natsUserID)
+	}
 	for _, g := range user.Grants {
-		if g.ResourceKey != accountKey && !strings.HasPrefix(g.ResourceKey, accountKey+":") {
-			continue
-		}
 		switch g.Role {
 		case store.GrantAdmin, store.GrantCredentialDownloader:
-			return true
+		default:
+			continue
+		}
+		switch g.ResourceType {
+		case store.ResourceAccount:
+			if g.ResourceKey == accountKey {
+				return true
+			}
+		case store.ResourceNATSUser:
+			if !commonstrings.IsEmpty(natsUserKey) && g.ResourceKey == natsUserKey {
+				return true
+			}
 		}
 	}
 	// Global admins with explicit cluster access may download; operators cannot

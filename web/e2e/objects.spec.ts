@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { emptyBuckets, sampleObjectBucket } from "./fixtures/api";
+import { sampleObjectBucket } from "./fixtures/api";
 import { accountBase } from "./fixtures/cluster";
 import { mockClusterApis, mockObjectBucket, mockShell } from "./helpers/mockApi";
 
@@ -19,7 +19,7 @@ test.describe("objects", () => {
   });
 
   test("create object bucket", async ({ page }) => {
-    let buckets = [...emptyBuckets.buckets];
+    let buckets: any[] = [];
 
     await page.route("**/api/v1/clusters/*/objects/buckets**", async (route) => {
       const method = route.request().method();
@@ -31,7 +31,7 @@ test.describe("objects", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(created),
+          body: JSON.stringify({ data: created }),
         });
         return;
       }
@@ -39,7 +39,7 @@ test.describe("objects", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ buckets, total: buckets.length }),
+          body: JSON.stringify({ data: buckets, meta: { total: buckets.length } }),
         });
         return;
       }
@@ -81,7 +81,7 @@ test.describe("objects", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ buckets, total: buckets.length }),
+          body: JSON.stringify({ data: buckets, meta: { total: buckets.length } }),
         });
         return;
       }
@@ -94,10 +94,9 @@ test.describe("objects", () => {
 
     await page.goto(objectsBase);
     await expect(page.getByRole("link", { name: "BLOBS" })).toBeVisible();
-    page.once("dialog", (dialog) => {
-      void dialog.accept();
-    });
     await page.getByRole("button", { name: "Delete" }).click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Delete" }).click();
     await expect.poll(() => deleted).toBe(true);
     await expect(page.getByRole("heading", { name: "No object buckets yet" })).toBeVisible();
   });

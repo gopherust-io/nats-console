@@ -19,7 +19,7 @@ func TestClientIsAlive(t *testing.T) {
 func TestManagerTouchRefreshesLastUsed(t *testing.T) {
 	t.Parallel()
 
-	m := NewManager(nil, config.Config{NATSClientCacheTTL: time.Minute})
+	m := NewManager(nil, config.Config{NATS: config.NATSConfig{ClientCacheTTL: time.Minute}})
 	old := time.Now().Add(-30 * time.Second)
 	entry := &cachedClient{client: &Client{}}
 	entry.setLastUsed(old)
@@ -33,7 +33,7 @@ func TestManagerTouchRefreshesLastUsed(t *testing.T) {
 func TestManagerSweepExpiredRemovesStaleEntry(t *testing.T) {
 	t.Parallel()
 
-	m := NewManager(nil, config.Config{NATSClientCacheTTL: time.Millisecond})
+	m := NewManager(nil, config.Config{NATS: config.NATSConfig{ClientCacheTTL: time.Millisecond}})
 	entry := &cachedClient{client: &Client{}}
 	entry.setLastUsed(time.Now().Add(-time.Second))
 	m.cache["cluster-1"] = entry
@@ -49,7 +49,7 @@ func TestManagerSweepExpiredRemovesStaleEntry(t *testing.T) {
 func TestManagerSweepExpiredRemovesDeadConnection(t *testing.T) {
 	t.Parallel()
 
-	m := NewManager(nil, config.Config{NATSClientCacheTTL: time.Minute})
+	m := NewManager(nil, config.Config{NATS: config.NATSConfig{ClientCacheTTL: time.Minute}})
 	entry := &cachedClient{client: &Client{}}
 	entry.touch()
 	m.cache["cluster-1"] = entry

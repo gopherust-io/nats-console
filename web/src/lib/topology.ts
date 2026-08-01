@@ -1,7 +1,27 @@
 import { api, clusterPath, jetStreamUIBase, type ConsumerInfo, type StreamInfo } from "./api";
+import { consumerLag, isSlowConsumer } from "./consumerMetrics";
 import { TOPOLOGY_PAGE_SIZE } from "./constants";
 
 export type TopologyNodeKind = "cluster" | "stream" | "subject" | "consumer";
+
+export type TopologyNodeStatus = "healthy" | "warning" | "idle" | "unhealthy";
+
+export type TopologyNodeRole = "leader" | "replica" | "standalone";
+
+export type TopologyPeer = {
+  name: string;
+  current: boolean;
+  offline?: boolean;
+  lag?: number;
+  active?: number;
+};
+
+export type TopologyRaft = {
+  group?: string;
+  leader?: string;
+  clusterSize?: number;
+  peers?: TopologyPeer[];
+};
 
 export type TopologyNode = {
   id: string;
@@ -9,7 +29,9 @@ export type TopologyNode = {
   name: string;
   meta?: string[];
   href?: string;
-  status?: "healthy" | "warning" | "idle";
+  status?: TopologyNodeStatus;
+  role?: TopologyNodeRole;
+  raft?: TopologyRaft;
   children: TopologyNode[];
 };
 
@@ -48,19 +70,9 @@ export function withJetStreamHrefs(
   return walk(root);
 }
 
-type StreamListResponse = {
-  streams: StreamInfo[];
-  total: number;
-  offset: number;
-  limit: number;
-};
+type StreamListResponse = StreamInfo[];
 
-type ConsumerListResponse = {
-  consumers: ConsumerInfo[];
-  total: number;
-  offset: number;
-  limit: number;
-};
+type ConsumerListResponse = ConsumerInfo[];
 
 const PAGE_SIZE = TOPOLOGY_PAGE_SIZE;
 const CONSUMER_FETCH_CONCURRENCY = 6;
@@ -83,8 +95,22 @@ async function mapConcurrent<T, R>(items: T[], limit: number, fn: (item: T) => P
   return results;
 }
 
-function consumerHealthStatus(pending: number, ackPending: number): TopologyNode["status"] {
-  if (pending > 0 || ackPending > 0) return "warning";
+function consumerHealthStatus(
+  pending: number,
+  ackPending: number,
+  lag = 0,
+  maxAckPending = 0,
+): TopologyNode["status"] {
+  if (
+    isSlowConsumer({
+      pending,
+      lag,
+      ackPending,
+      maxAckPending,
+    })
+  ) {
+    return "warning";
+  }
   return "healthy";
 }
 
@@ -94,6 +120,7 @@ function createStreamTopologyNode(
     subjects: string[];
     messages: number;
     consumerCount: number;
+    lastSeq?: number;
     storage?: string;
     retention?: string;
   },
@@ -102,7 +129,11 @@ function createStreamTopologyNode(
     filterSubject?: string;
     pending: number;
     ackPending: number;
+    waiting?: number;
+    redelivered?: number;
+    deliveredStreamSeq?: number;
     deliverPolicy?: string;
+    maxAckPending?: number;
   }>,
 ): TopologyNode {
   const subjectNodes: TopologyNode[] = (stream.subjects ?? []).map((subject) => ({
@@ -113,16 +144,33 @@ function createStreamTopologyNode(
   }));
 
   const consumerNodes: TopologyNode[] = consumers.map((consumer) => {
+    const waiting = consumer.waiting ?? 0;
+    const redelivered = consumer.redelivered ?? 0;
+    const lag = consumerLag(stream.lastSeq ?? 0, consumer.deliveredStreamSeq);
+    const maxAckPending = consumer.maxAckPending ?? 0;
+    const slow = isSlowConsumer({
+      pending: consumer.pending,
+      lag,
+      ackPending: consumer.ackPending,
+      maxAckPending,
+    });
     const meta: string[] = [];
     if (consumer.filterSubject) meta.push(`filter ${consumer.filterSubject}`);
     if (consumer.deliverPolicy) meta.push(consumer.deliverPolicy);
-    if (consumer.pending > 0) meta.push("pending");
+    if (slow) meta.push("slow");
+    if (consumer.pending >= 1000) meta.push("pending");
+    if (maxAckPending > 0 && consumer.ackPending >= Math.max(1, Math.floor(maxAckPending * 0.9))) {
+      meta.push("ack pending");
+    }
+    if (waiting > 0) meta.push("waiting");
+    if (redelivered > 0) meta.push("redelivered");
+    if (lag >= 1000) meta.push(`lag ${lag}`);
     return {
       id: `consumer:${stream.name}:${consumer.name}`,
       kind: "consumer" as const,
       name: consumer.name,
       meta,
-      status: consumerHealthStatus(consumer.pending, consumer.ackPending),
+      status: consumerHealthStatus(consumer.pending, consumer.ackPending, lag, maxAckPending),
       href: `/streams/${stream.name}/consumers/${consumer.name}`,
       children: [],
     };
@@ -151,12 +199,12 @@ async function fetchAllStreams(clusterId: string): Promise<StreamInfo[]> {
     const page = await api<StreamListResponse>(
       clusterPath(clusterId, `/streams?offset=${offset}&limit=${PAGE_SIZE}`),
     );
-    const streams = page.streams ?? [];
+    const streams = page.data ?? [];
     all.push(...streams);
-    if (offset + streams.length >= page.total || streams.length === 0) {
+    if (offset + streams.length >= (page.meta?.total ?? 0) || streams.length === 0) {
       break;
     }
-    offset += PAGE_SIZE;
+    offset += streams.length;
   }
 
   return all;
@@ -173,12 +221,12 @@ async function fetchAllConsumers(clusterId: string, streamName: string): Promise
         `/streams/${encodeURIComponent(streamName)}/consumers?offset=${offset}&limit=${PAGE_SIZE}`,
       ),
     );
-    const consumers = page.consumers ?? [];
+    const consumers = page.data ?? [];
     all.push(...consumers);
-    if (offset + consumers.length >= page.total || consumers.length === 0) {
+    if (offset + consumers.length >= (page.meta?.total ?? 0) || consumers.length === 0) {
       break;
     }
-    offset += PAGE_SIZE;
+    offset += consumers.length;
   }
 
   return all;
@@ -198,6 +246,7 @@ async function buildTopologyFromAPI(clusterId: string, clusterName: string): Pro
         subjects: stream.config.subjects ?? [],
         messages: stream.state.messages,
         consumerCount: stream.state.consumerCount,
+        lastSeq: stream.state.lastSeq,
         storage: stream.config.storage,
         retention: stream.config.retention,
       },
@@ -206,7 +255,11 @@ async function buildTopologyFromAPI(clusterId: string, clusterName: string): Pro
         filterSubject: consumer.config.filterSubject,
         pending: consumer.numPending,
         ackPending: consumer.numAckPending,
+        waiting: consumer.numWaiting,
+        redelivered: consumer.numRedelivered,
+        deliveredStreamSeq: consumer.delivered?.streamSeq,
         deliverPolicy: consumer.config.deliverPolicy,
+        maxAckPending: consumer.config.maxAckPending,
       })),
     );
   });
@@ -234,8 +287,8 @@ export async function fetchTopology(
     const tree = await api<TopologyNode>(
       clusterPath(clusterId, `/topology?name=${encodeURIComponent(clusterName)}${fresh}`),
     );
-    if (tree?.kind === "cluster") {
-      return normalizeTopologyNode(tree);
+    if (tree.data?.kind === "cluster") {
+      return normalizeTopologyNode(tree.data);
     }
   } catch {
     // Fall back to REST aggregation below.
@@ -278,6 +331,8 @@ export function filterTopology(node: TopologyNode, filterQuery: string): Topolog
   if (selfMatch || filteredChildren.length > 0) {
     return {
       ...node,
+      // Self-match expands full children so filtering by a stream name still
+      // reveals its subjects/consumers (including slow-consumer nodes).
       children: selfMatch ? nodeChildren(node) : filteredChildren,
     };
   }

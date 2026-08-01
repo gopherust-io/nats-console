@@ -13,19 +13,28 @@ export const emptyAccount = {
   },
 };
 
-export const emptyStreams = { streams: [], total: 0 };
-export const emptyBuckets = { buckets: [], total: 0 };
-export const emptyConsumers = { consumers: [], total: 0, offset: 0, limit: 50 };
-export const emptyKeys = { keys: [], total: 0, offset: 0, limit: 50 };
-export const emptyObjects = { objects: [], total: 0, offset: 0, limit: 50 };
-export const emptyGrants = { grants: [] };
-export const emptyPeople = { users: [], total: 0 };
-export const emptyAlerts = { alerts: [], total: 0 };
-export const emptyAudit = { entries: [], total: 0 };
-export const emptyRules = { rules: [], total: 0 };
-export const emptyExports = { exports: [], total: 0 };
-export const emptyNatsUsers = { users: [], total: 0 };
-export const emptySigningGroups = { groups: [], total: 0 };
+export const emptyStreams = { data: [], meta: { total: 0 } };
+export const emptyBuckets = { data: [], meta: { total: 0 } };
+export const emptyConsumers = { data: [], meta: { total: 0, offset: 0, limit: 50 } };
+export const emptyKeys = { data: [], meta: { total: 0, offset: 0, limit: 50 } };
+export const emptyObjects = { data: [], meta: { total: 0, offset: 0, limit: 50 } };
+export const emptyGrants = { data: [], meta: { total: 0 } };
+export const emptyPeople = { data: [], meta: { total: 0 } };
+export const emptyAlerts = { data: [], meta: { total: 0 } };
+export const emptyAudit = { data: [], meta: { total: 0 } };
+export const emptyRules = { data: [], meta: { total: 0 } };
+export const emptyExports = { data: [], meta: { total: 0 } };
+export const emptyNatsUsers = { data: [], meta: { total: 0 } };
+export const emptySigningGroups = { data: [], meta: { total: 0 } };
+export const emptyTopology = {
+  data: {
+    id: "cluster:root",
+    kind: "cluster",
+    name: "Cluster",
+    children: [],
+  },
+};
+export const emptyUsers = { data: [], meta: { total: 0 } };
 
 export const alertRuleMetrics = {
   metrics: ["server.cpu_percent", "server.connections"],
@@ -46,6 +55,13 @@ export const emptyConnz = {
   num_connections: 0,
 };
 
+export const emptyRequestReply = {
+  patterns: [],
+  connections: [],
+  requesters: 0,
+  responders: 0,
+};
+
 export const emptyJsz = {
   account_details: [],
   total: { streams: 0, consumers: 0 },
@@ -58,10 +74,7 @@ export const emptyMetricsHistory = {
   series: [],
 };
 
-export const connectedStatus = {
-  connections: [{ clusterId: CLUSTER.id, connected: true }],
-  total: 1,
-};
+export const connectedStatus = [{ clusterId: CLUSTER.id, connected: true }];
 
 export function sampleStream(name = "ORDERS") {
   return {
@@ -92,9 +105,20 @@ export function sampleConsumer(name = "worker", streamName = "ORDERS") {
       deliverPolicy: "all",
       ackPolicy: "explicit",
       replayPolicy: "instant",
+      ackWaitNs: 30_000_000_000,
     },
-    numPending: 0,
-    numAckPending: 0,
+    numPending: 3,
+    numAckPending: 1,
+    numWaiting: 0,
+    numRedelivered: 2,
+    delivered: {
+      consumerSeq: 10,
+      streamSeq: 97,
+    },
+    ackFloor: {
+      consumerSeq: 9,
+      streamSeq: 96,
+    },
   };
 }
 

@@ -8,93 +8,93 @@ import (
 
 	"github.com/valyala/fasthttp"
 
+	"github.com/gopherust-io/nats-consol/internal/app"
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
+	"github.com/gopherust-io/nats-consol/internal/httpctx/httpstatus"
 	"github.com/gopherust-io/nats-consol/internal/store"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 type AlertsHandler struct {
-	store *store.Store
-	cfg   config.Config
+	alerts *app.AlertService
+	cfg    config.Config
 }
 
-func NewAlertsHandler(st *store.Store, cfg config.Config) *AlertsHandler {
-	return &AlertsHandler{store: st, cfg: cfg}
+func NewAlertsHandler(alerts *app.AlertService, cfg config.Config) *AlertsHandler {
+	return &AlertsHandler{alerts: alerts, cfg: cfg}
 }
 
 func (h *AlertsHandler) List(ctx *fasthttp.RequestCtx) {
 	actor, storeUser, ok := actorStoreFromContext(ctx)
 	if !ok {
-		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 
 	filter := domain.AlertFilter{
-		Status:    string(ctx.QueryArgs().Peek("status")),
-		ClusterID: string(ctx.QueryArgs().Peek("clusterId")),
-		Severity:  string(ctx.QueryArgs().Peek("severity")),
+		Status:    commonstrings.BytesToString(ctx.QueryArgs().Peek("status")),
+		ClusterID: commonstrings.BytesToString(ctx.QueryArgs().Peek("clusterId")),
+		Severity:  commonstrings.BytesToString(ctx.QueryArgs().Peek("severity")),
 		Limit:     queryInt(ctx, "limit", h.cfg.AuditDefaultLimit),
 		Offset:    queryInt(ctx, "offset", 0),
 	}
-	if filter.Status != "" && filter.Status != domain.AlertStatusOpen && filter.Status != domain.AlertStatusClosed {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("invalid status"))
+	if !commonstrings.IsEmpty(filter.Status) && filter.Status != domain.AlertStatusOpen && filter.Status != domain.AlertStatusClosed {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("invalid status"))
 		return
 	}
-	if filter.Severity != "" && !domain.ValidAlertSeverity(filter.Severity) {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("invalid severity"))
+	if !commonstrings.IsEmpty(filter.Severity) && !domain.ValidAlertSeverity(filter.Severity) {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("invalid severity"))
 		return
 	}
-	if filter.ClusterID != "" {
+	if !commonstrings.IsEmpty(filter.ClusterID) {
 		if err := validateUUID(filter.ClusterID); err != nil {
-			serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+			httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 			return
 		}
-		if !auth.CanAccessCluster(storeUser, filter.ClusterID) {
-			ctx.SetStatusCode(fasthttp.StatusForbidden)
+		if !auth.CanAccessClusterOrAccount(storeUser, filter.ClusterID) {
+			httpstatus.WriteForbidden(ctx)
 			return
 		}
 	} else if clusterIDs := accessibleClusterIDs(actor, storeUser); clusterIDs != nil {
 		filter.ClusterIDs = clusterIDs
 		if len(clusterIDs) == 0 {
-			serializer.WriteJSON(ctx, fasthttp.StatusOK, map[string]any{"alerts": []domain.Alert{}, "total": 0})
+			httpstatus.WriteDataMeta(ctx, fasthttp.StatusOK, []domain.Alert{}, totalMeta(0))
 			return
 		}
 	}
 
-	alerts, total, err := h.store.ListAlerts(httpctx.FromRequest(ctx), filter)
+	alerts, total, err := h.alerts.List(httpctx.FromRequest(ctx), filter)
 	if err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, map[string]any{
-		"alerts": nonNilSlice(alerts),
-		"total":  total,
-	})
+	httpstatus.WriteDataMeta(ctx, fasthttp.StatusOK, nonNilSlice(alerts), totalMeta(total))
 }
 
 func (h *AlertsHandler) OpenSummary(ctx *fasthttp.RequestCtx) {
 	actor, storeUser, ok := actorStoreFromContext(ctx)
 	if !ok {
-		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 	var clusterIDs []string
 	if ids := accessibleClusterIDs(actor, storeUser); ids != nil {
 		clusterIDs = ids
 		if len(clusterIDs) == 0 {
-			serializer.WriteJSON(ctx, fasthttp.StatusOK, domain.AlertOpenSummary{Count: 0, Alerts: []domain.Alert{}})
+			httpstatus.WriteData(ctx, fasthttp.StatusOK, domain.AlertOpenSummary{Count: 0, Alerts: []domain.Alert{}})
 			return
 		}
 	}
-	alerts, total, err := h.store.ListOpenUnacknowledged(httpctx.FromRequest(ctx), clusterIDs, 8)
+	alerts, total, err := h.alerts.OpenUnacknowledged(httpctx.FromRequest(ctx), clusterIDs, 8)
 	if err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, domain.AlertOpenSummary{
+	httpstatus.WriteData(ctx, fasthttp.StatusOK, domain.AlertOpenSummary{
 		Count:  total,
 		Alerts: nonNilSlice(alerts),
 	})
@@ -103,81 +103,78 @@ func (h *AlertsHandler) OpenSummary(ctx *fasthttp.RequestCtx) {
 func (h *AlertsHandler) Get(ctx *fasthttp.RequestCtx) {
 	_, storeUser, ok := actorStoreFromContext(ctx)
 	if !ok {
-		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 	id := httpctx.RouteParam(ctx, "alertId")
 	if err := validateUUID(id); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	alert, err := h.store.GetAlert(httpctx.FromRequest(ctx), id)
+	alert, err := h.alerts.Get(httpctx.FromRequest(ctx), id)
 	if err != nil {
-		writeAlertStoreError(ctx, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	if !auth.CanAccessCluster(storeUser, alert.ClusterID) {
-		ctx.SetStatusCode(fasthttp.StatusForbidden)
+	if !auth.CanAccessClusterOrAccount(storeUser, alert.ClusterID) {
+		httpstatus.WriteForbidden(ctx)
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, alert)
+	httpstatus.WriteData(ctx, fasthttp.StatusOK, alert)
 }
 
 func (h *AlertsHandler) Acknowledge(ctx *fasthttp.RequestCtx) {
 	actor, storeUser, ok := actorStoreFromContext(ctx)
 	if !ok {
-		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 	id := httpctx.RouteParam(ctx, "alertId")
 	if err := validateUUID(id); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	existing, err := h.store.GetAlert(httpctx.FromRequest(ctx), id)
+	existing, err := h.alerts.Get(httpctx.FromRequest(ctx), id)
 	if err != nil {
-		writeAlertStoreError(ctx, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	if !auth.CanAccessCluster(storeUser, existing.ClusterID) {
-		ctx.SetStatusCode(fasthttp.StatusForbidden)
+	if !auth.CanAccessClusterOrAccount(storeUser, existing.ClusterID) {
+		httpstatus.WriteForbidden(ctx)
 		return
 	}
-	alert, err := h.store.AcknowledgeAlert(httpctx.FromRequest(ctx), id, actor.Username)
+	alert, err := h.alerts.Acknowledge(httpctx.FromRequest(ctx), id, actor.Username)
 	if err != nil {
-		writeAlertStoreError(ctx, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, alert)
+	httpstatus.WriteData(ctx, fasthttp.StatusOK, alert)
 }
 
 func (h *AlertsHandler) ListRules(ctx *fasthttp.RequestCtx) {
 	if _, _, ok := requireManageAlertRules(ctx); !ok {
 		return
 	}
-	clusterID := string(ctx.QueryArgs().Peek("clusterId"))
-	if clusterID != "" {
+	clusterID := commonstrings.BytesToString(ctx.QueryArgs().Peek("clusterId"))
+	if !commonstrings.IsEmpty(clusterID) {
 		if err := validateUUID(clusterID); err != nil {
-			serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+			httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 			return
 		}
 	}
-	rules, err := h.store.ListAlertRules(httpctx.FromRequest(ctx), clusterID, false)
+	rules, err := h.alerts.ListRules(httpctx.FromRequest(ctx), clusterID, false)
 	if err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, map[string]any{
-		"rules": nonNilSlice(rules),
-		"total": len(rules),
-	})
+	httpstatus.WriteDataMeta(ctx, fasthttp.StatusOK, nonNilSlice(rules), totalMeta(len(rules)))
 }
 
 func (h *AlertsHandler) Metrics(ctx *fasthttp.RequestCtx) {
 	if _, _, ok := requireManageAlertRules(ctx); !ok {
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, map[string]any{
+	httpstatus.WriteData(ctx, fasthttp.StatusOK, map[string]any{
 		"metrics":     append([]string(nil), domain.DefaultDashboardMetrics...),
 		"comparators": append([]string(nil), domain.AlertComparators...),
 		"severities":  append([]string(nil), domain.AlertSeverities...),
@@ -190,69 +187,78 @@ func (h *AlertsHandler) GetRule(ctx *fasthttp.RequestCtx) {
 	}
 	id := httpctx.RouteParam(ctx, "ruleId")
 	if err := validateUUID(id); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	rule, err := h.store.GetAlertRule(httpctx.FromRequest(ctx), id)
+	rule, err := h.alerts.GetRule(httpctx.FromRequest(ctx), id)
 	if err != nil {
-		writeAlertStoreError(ctx, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, rule)
+	httpstatus.WriteData(ctx, fasthttp.StatusOK, rule)
 }
 
 func (h *AlertsHandler) CreateRule(ctx *fasthttp.RequestCtx) {
-	actor, _, ok := requireManageAlertRules(ctx)
+	actor, storeUser, ok := requireManageAlertRules(ctx)
 	if !ok {
 		return
 	}
 	var req domain.AlertRuleCreate
-	if err := parseJSONBody(ctx, &req); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.Unmarshal(ctx.PostBody(), &req); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if req.Severity == "" {
+	if commonstrings.IsEmpty(req.Severity) {
 		req.Severity = domain.AlertSeverityWarning
 	}
-	if req.Comparator == "" {
+	if commonstrings.IsEmpty(req.Comparator) {
 		req.Comparator = domain.AlertComparatorGTE
 	}
 	if err := validateAlertRuleCreate(req); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	rule, err := h.store.CreateAlertRule(httpctx.FromRequest(ctx), req, actor.Username)
+	if !commonstrings.IsEmpty(req.ClusterID) && !auth.CanAccessCluster(storeUser, req.ClusterID) {
+		httpstatus.WriteForbidden(ctx)
+		return
+	}
+	rule, err := h.alerts.CreateRule(httpctx.FromRequest(ctx), req, actor.Username)
 	if err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusCreated, rule)
+	httpstatus.WriteData(ctx, fasthttp.StatusCreated, rule)
 }
 
 func (h *AlertsHandler) UpdateRule(ctx *fasthttp.RequestCtx) {
-	if _, _, ok := requireManageAlertRules(ctx); !ok {
+	_, storeUser, ok := requireManageAlertRules(ctx)
+	if !ok {
 		return
 	}
 	id := httpctx.RouteParam(ctx, "ruleId")
 	if err := validateUUID(id); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	var req domain.AlertRuleUpdate
-	if err := parseJSONBody(ctx, &req); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.Unmarshal(ctx.PostBody(), &req); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	if err := validateAlertRuleUpdate(req); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	rule, err := h.store.UpdateAlertRule(httpctx.FromRequest(ctx), id, req)
+	if req.ClusterID != nil && !commonstrings.IsEmpty(*req.ClusterID) && !auth.CanAccessCluster(storeUser, *req.ClusterID) {
+		httpstatus.WriteForbidden(ctx)
+		return
+	}
+	rule, err := h.alerts.UpdateRule(httpctx.FromRequest(ctx), id, req)
 	if err != nil {
-		writeAlertStoreError(ctx, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, rule)
+	httpstatus.WriteData(ctx, fasthttp.StatusOK, rule)
 }
 
 func (h *AlertsHandler) DeleteRule(ctx *fasthttp.RequestCtx) {
@@ -261,11 +267,11 @@ func (h *AlertsHandler) DeleteRule(ctx *fasthttp.RequestCtx) {
 	}
 	id := httpctx.RouteParam(ctx, "ruleId")
 	if err := validateUUID(id); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if err := h.store.DeleteAlertRule(httpctx.FromRequest(ctx), id); err != nil {
-		writeAlertStoreError(ctx, err)
+	if err := h.alerts.DeleteRule(httpctx.FromRequest(ctx), id); err != nil {
+		writeAPIError(ctx, err)
 		return
 	}
 	ctx.SetStatusCode(fasthttp.StatusNoContent)
@@ -274,11 +280,11 @@ func (h *AlertsHandler) DeleteRule(ctx *fasthttp.RequestCtx) {
 func requireManageAlertRules(ctx *fasthttp.RequestCtx) (domain.User, store.User, bool) {
 	actor, storeUser, ok := actorStoreFromContext(ctx)
 	if !ok {
-		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+		httpstatus.WriteUnauthorized(ctx)
 		return domain.User{}, store.User{}, false
 	}
 	if !auth.CanManageAlertRules(storeUser) {
-		ctx.SetStatusCode(fasthttp.StatusForbidden)
+		httpstatus.WriteForbidden(ctx)
 		return domain.User{}, store.User{}, false
 	}
 	return actor, storeUser, true
@@ -305,7 +311,7 @@ func accessibleClusterIDs(actor domain.User, storeUser store.User) []string {
 		if i := strings.IndexByte(id, ':'); i >= 0 {
 			id = id[:i]
 		}
-		if id == "" {
+		if commonstrings.IsEmpty(id) {
 			continue
 		}
 		found := slices.Contains(ids, id)
@@ -317,7 +323,7 @@ func accessibleClusterIDs(actor domain.User, storeUser store.User) []string {
 }
 
 func validateAlertRuleCreate(req domain.AlertRuleCreate) error {
-	if strings.TrimSpace(req.Name) == "" {
+	if commonstrings.IsEmpty(strings.TrimSpace(req.Name)) {
 		return errors.New("name is required")
 	}
 	if !domain.ValidMetricName(req.Metric) {
@@ -329,7 +335,7 @@ func validateAlertRuleCreate(req domain.AlertRuleCreate) error {
 	if !domain.ValidAlertSeverity(req.Severity) {
 		return errors.New("invalid severity")
 	}
-	if req.ClusterID != "" {
+	if !commonstrings.IsEmpty(req.ClusterID) {
 		if err := validateUUID(req.ClusterID); err != nil {
 			return err
 		}
@@ -347,29 +353,20 @@ func validateAlertRuleUpdate(req domain.AlertRuleUpdate) error {
 	if req.Severity != nil && !domain.ValidAlertSeverity(*req.Severity) {
 		return errors.New("invalid severity")
 	}
-	if req.ClusterID != nil && *req.ClusterID != "" {
+	if req.ClusterID != nil && !commonstrings.IsEmpty(*req.ClusterID) {
 		if err := validateUUID(*req.ClusterID); err != nil {
 			return err
 		}
 	}
-	if req.Name != nil && strings.TrimSpace(*req.Name) == "" {
+	if req.Name != nil && commonstrings.IsEmpty(strings.TrimSpace(*req.Name)) {
 		return errors.New("name is required")
 	}
 	return nil
 }
 
-func writeAlertStoreError(ctx *fasthttp.RequestCtx, err error) {
-	switch {
-	case errors.Is(err, store.ErrAlertNotFound), errors.Is(err, store.ErrAlertRuleNotFound):
-		serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
-	default:
-		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
-	}
-}
-
 func queryInt(ctx *fasthttp.RequestCtx, key string, fallback int) int {
-	raw := string(ctx.QueryArgs().Peek(key))
-	if raw == "" {
+	raw := commonstrings.BytesToString(ctx.QueryArgs().Peek(key))
+	if commonstrings.IsEmpty(raw) {
 		return fallback
 	}
 	v, err := strconv.Atoi(raw)

@@ -15,7 +15,7 @@ test.describe("auth", () => {
 
   test("successful login redirects to systems", async ({ page }) => {
     await mockLoginSuccess(page);
-    await mockJson(page, "**/api/v1/clusters**", { clusters: [CLUSTER], total: 1 });
+    await mockJson(page, "**/api/v1/clusters**", { data: [CLUSTER], meta: { total: 1 } });
 
     await page.goto("/login");
     await page.getByLabel("Username").fill("admin");
@@ -36,7 +36,7 @@ test.describe("auth", () => {
   test("invite accept loads and signs in", async ({ page }) => {
     const token = "invite-token-1";
     await mockInvite(page, token);
-    await mockJson(page, "**/api/v1/clusters**", { clusters: [CLUSTER], total: 1 });
+    await mockJson(page, "**/api/v1/clusters**", { data: [CLUSTER], meta: { total: 1 } });
 
     await page.goto(`/invite/${token}`);
     await expect(page.getByRole("heading", { name: "Accept invite" })).toBeVisible();
@@ -83,6 +83,6 @@ test.describe("auth", () => {
 
     await page.goto("/systems");
     await page.getByRole("button", { name: "Open user menu" }).click();
-    await expect(page.getByRole("button", { name: "Sign Out" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Sign Out" })).toBeVisible();
   });
 });

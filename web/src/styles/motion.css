@@ -475,11 +475,15 @@
 }
 
 .topology-node:hover .topology-node__icon {
-  transform: scale(1.06);
+  transform: scale(1.05);
 }
 
 .topology-node__status--healthy {
   animation: pulse-dot 2.4s ease-in-out infinite;
+}
+
+.topology-node__status--unhealthy {
+  animation: pulse-dot 1.4s ease-in-out infinite;
 }
 
 .topology-node__chip {
@@ -490,6 +494,18 @@
 
 .topology-node:hover .topology-node__chip {
   transform: translateY(-1px);
+}
+
+.topology-group__header {
+  transition: background var(--duration-fast) ease;
+}
+
+.topology-group__rail {
+  transition: transform var(--duration-fast) var(--ease-spring);
+}
+
+.topology-group:hover .topology-group__rail {
+  transform: scaleY(1.15);
 }
 
 /* Interactive polish */

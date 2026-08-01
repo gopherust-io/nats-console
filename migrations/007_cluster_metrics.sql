@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 CREATE TABLE cluster_metric_samples (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   cluster_id  UUID NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
@@ -9,3 +11,9 @@ CREATE TABLE cluster_metric_samples (
 
 CREATE INDEX idx_cluster_metric_samples_range
   ON cluster_metric_samples (cluster_id, metric, captured_at DESC);
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+SELECT 1;
+-- +goose StatementEnd

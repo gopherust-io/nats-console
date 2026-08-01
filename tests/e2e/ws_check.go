@@ -3,8 +3,8 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"github.com/fasthttp/websocket"
+
+	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 func main() {
@@ -23,11 +26,11 @@ func main() {
 	clusterID := os.Args[2]
 
 	headers := http.Header{}
-	if auth := os.Getenv("AUTH"); auth != "" {
-		headers.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(auth)))
+	if auth := os.Getenv("AUTH"); !commonstrings.IsEmpty(auth) {
+		headers.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString(commonstrings.StringToBytes(auth)))
 	}
-	if len(os.Args) >= 4 && os.Args[3] != "" {
-		if cookie := netscapeCookieHeader(os.Args[3]); cookie != "" {
+	if len(os.Args) >= 4 && !commonstrings.IsEmpty(os.Args[3]) {
+		if cookie := netscapeCookieHeader(os.Args[3]); !commonstrings.IsEmpty(cookie) {
 			headers.Set("Cookie", cookie)
 		}
 	}
@@ -37,6 +40,9 @@ func main() {
 	wsURL = fmt.Sprintf("%s/api/v1/clusters/%s/live/ws?stream=LIVE_SMOKE", wsURL, clusterID)
 
 	dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second}
+	if os.Getenv("TLS_INSECURE") == "1" {
+		dialer.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // optional lab HTTPS smoke
+	}
 	conn, _, err := dialer.Dial(wsURL, headers)
 	if err != nil {
 		exitErr(fmt.Errorf("websocket dial: %w", err))
@@ -54,7 +60,7 @@ func main() {
 	var frame struct {
 		Type string `json:"type"`
 	}
-	if err := json.Unmarshal(data, &frame); err != nil {
+	if err := serializer.Unmarshal(data, &frame); err != nil {
 		exitErr(fmt.Errorf("parse frame: %w", err))
 	}
 	if frame.Type != "connected" {
@@ -69,8 +75,8 @@ func netscapeCookieHeader(path string) string {
 		return ""
 	}
 	var parts []string
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "#") || strings.TrimSpace(line) == "" {
+	for _, line := range strings.Split(commonstrings.BytesToString(data), "\n") {
+		if strings.HasPrefix(line, "#") || commonstrings.IsEmpty(strings.TrimSpace(line)) {
 			continue
 		}
 		fields := strings.Split(line, "\t")

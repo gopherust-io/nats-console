@@ -6,6 +6,7 @@ import { DEFAULT_THEME, ThemeProvider, THEME_IDS, THEMES, useTheme } from "./the
 
 vi.mock("./themeStyles", () => ({
   loadThemeStyles: vi.fn(async () => undefined),
+  preloadThemeStyles: vi.fn(async () => undefined),
 }));
 
 function ThemeProbe() {
@@ -43,9 +44,11 @@ describe("theme persistence", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "light" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("theme")).toHaveTextContent("control-light");
+    });
     expect(localStorage.getItem(STORAGE_KEYS.theme)).toBe("control-light");
     expect(document.documentElement.getAttribute("data-theme")).toBe("control-light");
-    expect(screen.getByTestId("theme")).toHaveTextContent("control-light");
   });
 
   it("restores a stored theme on mount", () => {
@@ -82,5 +85,27 @@ describe("theme persistence", () => {
       expect(screen.getByTestId("theme")).toHaveTextContent("control");
     });
     expect(localStorage.getItem(STORAGE_KEYS.theme)).not.toBe("aurora");
+  });
+
+  it("toggles theme with Ctrl+Shift+D and ignores when typing in an input", async () => {
+    const user = userEvent.setup();
+    render(
+      <ThemeProvider>
+        <ThemeProbe />
+        <input aria-label="payload" />
+      </ThemeProvider>,
+    );
+
+    await user.keyboard("{Control>}{Shift>}d{/Shift}{/Control}");
+    await waitFor(() => {
+      expect(screen.getByTestId("theme")).toHaveTextContent("control-light");
+    });
+    expect(localStorage.getItem(STORAGE_KEYS.theme)).toBe("control-light");
+
+    await user.click(screen.getByLabelText("payload"));
+    await user.keyboard("{Control>}{Shift>}d{/Shift}{/Control}");
+    await waitFor(() => {
+      expect(screen.getByTestId("theme")).toHaveTextContent("control-light");
+    });
   });
 });

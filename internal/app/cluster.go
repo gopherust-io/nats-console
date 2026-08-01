@@ -41,22 +41,6 @@ func (s *ClusterService) BootstrapDefault(ctx context.Context) error {
 	return s.gateway.BootstrapDefault(ctx)
 }
 
-func (s *ClusterService) Create(ctx context.Context, in domain.ClusterCreate) (domain.Cluster, error) {
-	if in.Name == "" || in.NATSURL == "" {
-		return domain.Cluster{}, errors.New("name and natsUrl required")
-	}
-	return s.clusters.CreateCluster(ctx, in)
-}
-
-func (s *ClusterService) Update(ctx context.Context, id string, in domain.ClusterUpdate) (domain.Cluster, error) {
-	cluster, err := s.clusters.UpdateCluster(ctx, id, in)
-	if err != nil {
-		return domain.Cluster{}, err
-	}
-	s.gateway.Evict(id)
-	return cluster, nil
-}
-
 func (s *ClusterService) Delete(ctx context.Context, id string) error {
 	cluster, err := s.clusters.GetCluster(ctx, id)
 	if err != nil {

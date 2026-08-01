@@ -7,133 +7,170 @@ import (
 
 	"github.com/valyala/fasthttp"
 
+	"github.com/gopherust-io/nats-consol/internal/app"
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
+	"github.com/gopherust-io/nats-consol/internal/httpctx/httpstatus"
+	"github.com/gopherust-io/nats-consol/internal/ipset"
 	"github.com/gopherust-io/nats-consol/internal/store"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 type AccessHandler struct {
-	store *store.Store
-	auth  *auth.Service
-	cfg   config.Config
+	access *app.AccessService
+	users  *app.UserService
+	auth   *auth.Service
+	cfg    config.Config
 }
 
-func NewAccessHandler(st *store.Store, authSvc *auth.Service, cfg config.Config) *AccessHandler {
-	return &AccessHandler{store: st, auth: authSvc, cfg: cfg}
+func NewAccessHandler(access *app.AccessService, users *app.UserService, authSvc *auth.Service, cfg config.Config) *AccessHandler {
+	return &AccessHandler{access: access, users: users, auth: authSvc, cfg: cfg}
 }
 
 func (h *AccessHandler) ListSystemAccess(ctx *fasthttp.RequestCtx) {
-	h.listResourceAccess(ctx, store.ResourceSystem, clusterID(ctx))
+	h.listResourceAccess(ctx, domain.ResourceSystem, clusterID(ctx))
 }
 
 func (h *AccessHandler) UpsertSystemAccess(ctx *fasthttp.RequestCtx) {
-	h.upsertResourceAccess(ctx, store.ResourceSystem, clusterID(ctx), true)
+	h.upsertResourceAccess(ctx, domain.ResourceSystem, clusterID(ctx), true)
 }
 
 func (h *AccessHandler) DeleteSystemAccess(ctx *fasthttp.RequestCtx) {
-	h.deleteResourceAccess(ctx, store.ResourceSystem, clusterID(ctx))
+	h.deleteResourceAccess(ctx, domain.ResourceSystem, clusterID(ctx))
 }
 
 func (h *AccessHandler) ListAccountAccess(ctx *fasthttp.RequestCtx) {
 	account := httpctx.RouteParam(ctx, "account")
-	if account == "" {
+	if commonstrings.IsEmpty(account) {
 		account = "Default"
 	}
-	h.listResourceAccess(ctx, store.ResourceAccount, domain.AccountResourceKey(clusterID(ctx), account))
+	h.listResourceAccess(ctx, domain.ResourceAccount, domain.AccountResourceKey(clusterID(ctx), account))
 }
 
 func (h *AccessHandler) UpsertAccountAccess(ctx *fasthttp.RequestCtx) {
 	account := httpctx.RouteParam(ctx, "account")
-	if account == "" {
+	if commonstrings.IsEmpty(account) {
 		account = "Default"
 	}
-	h.upsertResourceAccess(ctx, store.ResourceAccount, domain.AccountResourceKey(clusterID(ctx), account), false)
+	h.upsertResourceAccess(ctx, domain.ResourceAccount, domain.AccountResourceKey(clusterID(ctx), account), false)
 }
 
 func (h *AccessHandler) DeleteAccountAccess(ctx *fasthttp.RequestCtx) {
 	account := httpctx.RouteParam(ctx, "account")
-	if account == "" {
+	if commonstrings.IsEmpty(account) {
 		account = "Default"
 	}
-	h.deleteResourceAccess(ctx, store.ResourceAccount, domain.AccountResourceKey(clusterID(ctx), account))
+	h.deleteResourceAccess(ctx, domain.ResourceAccount, domain.AccountResourceKey(clusterID(ctx), account))
 }
 
 func (h *AccessHandler) InvitePerson(ctx *fasthttp.RequestCtx) {
-	actor, ok := storeActor(ctx)
+	actorStore, ok := auth.UserFromContext(httpctx.FromRequest(ctx))
+
 	if !ok {
-		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
-	if !auth.CanManageUsers(actor) {
-		ctx.SetStatusCode(fasthttp.StatusForbidden)
-		ctx.SetBodyString("forbidden")
+	actor := auth.StoreUserToDomain(actorStore)
+	if !auth.CanManageUsers(actorStore) {
+		httpstatus.WriteForbidden(ctx)
 		return
 	}
 	var req struct {
-		Username string   `json:"username"`
-		Email    string   `json:"email"`
-		Roles    []string `json:"roles"`
+		Username   string   `json:"username"`
+		Email      string   `json:"email"`
+		Roles      []string `json:"roles"`
+		ClusterIDs []string `json:"clusterIds"`
 	}
-	if err := parseJSONBody(ctx, &req); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.Unmarshal(ctx.PostBody(), &req); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	req.Username = strings.TrimSpace(req.Username)
-	if req.Username == "" {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("username"))
+	if commonstrings.IsEmpty(req.Username) {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("username"))
 		return
 	}
 	if len(req.Roles) == 0 {
-		req.Roles = []string{store.RoleViewer}
+		req.Roles = []string{domain.RoleViewer}
 	}
-	if req.Email == "" {
+	if commonstrings.IsEmpty(req.Email) {
 		req.Email = req.Username + "@local"
 	}
-	user, err := h.store.CreateUser(httpctx.FromRequest(ctx), store.UserCreate{
+	clusterIDs := append([]string(nil), req.ClusterIDs...)
+	if len(clusterIDs) == 0 {
+		if actor.AccessRules != nil {
+			clusterIDs = append([]string(nil), actor.AccessRules.ClusterIDs...)
+		}
+	}
+	if len(clusterIDs) == 0 {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("clusterIds required: assign at least one cluster"))
+		return
+	}
+	user, err := h.users.Create(httpctx.FromRequest(ctx), actor, domain.UserCreate{
 		Username: req.Username,
 		Email:    req.Email,
 		Roles:    req.Roles,
-		AccessRules: &store.AccessRules{
-			ClusterIDs:      []string{},
-			AssignableRoles: []string{store.RoleViewer},
+		AccessRules: &domain.AccessRules{
+			ClusterIDs:      clusterIDs,
+			AssignableRoles: []string{domain.RoleViewer},
 		},
 	})
 	if err != nil {
-		if errors.Is(err, store.ErrConflict) {
-			serializer.WriteError(ctx, fasthttp.StatusConflict, err)
-			return
-		}
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	inv, err := h.store.CreateUserInvite(httpctx.FromRequest(ctx), user.ID, 7*24*time.Hour)
+	inv, err := h.access.CreateInvite(httpctx.FromRequest(ctx), user.ID, 7*24*time.Hour)
 	if err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
+		writeAPIError(ctx, err)
 		return
 	}
 	base := strings.TrimSuffix(h.cfg.PublicBaseURL, "/")
-	serializer.WriteJSON(ctx, fasthttp.StatusCreated, map[string]any{
-		"user":      toUserResponse(user),
+	httpstatus.WriteData(ctx, fasthttp.StatusCreated, map[string]any{
+		"user":      toUserResponse(domainUserToStore(user)),
 		"inviteUrl": base + "/invite/" + inv.Token,
 		"expiresAt": inv.ExpiresAt.UTC().Format(time.RFC3339),
 	})
 }
 
+func domainUserToStore(user domain.User) store.User {
+	out := store.User{
+		ID:        user.ID,
+		Username:  user.Username,
+		Email:     user.Email,
+		Roles:     append([]string(nil), user.Roles...),
+		IsRoot:    user.IsRoot,
+		CreatedAt: user.CreatedAt,
+	}
+	if user.AccessRules != nil {
+		out.AccessRules = &store.AccessRules{
+			ClusterIDs:      append([]string(nil), user.AccessRules.ClusterIDs...),
+			ManageUsers:     user.AccessRules.ManageUsers,
+			ViewAudit:       user.AccessRules.ViewAudit,
+			DeleteClusters:  user.AccessRules.DeleteClusters,
+			AssignableRoles: append([]string(nil), user.AccessRules.AssignableRoles...),
+		}
+	}
+	for _, g := range user.Grants {
+		out.Grants = append(out.Grants, store.AccessGrant(g))
+	}
+	return out
+}
+
 func (h *AccessHandler) GetInvite(ctx *fasthttp.RequestCtx) {
 	token := httpctx.RouteParam(ctx, "token")
-	inv, err := h.store.GetUserInvite(httpctx.FromRequest(ctx), token)
+	inv, err := h.access.GetInvite(httpctx.FromRequest(ctx), token)
 	if err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusNotFound, err)
 		return
 	}
 	if inv.AcceptedAt != nil || time.Now().UTC().After(inv.ExpiresAt) {
-		serializer.WriteError(ctx, fasthttp.StatusGone, errors.New("invite expired or already used"))
+		httpstatus.WriteErrorMessage(ctx, fasthttp.StatusGone, httpstatus.CodeGone, "invite expired or already used")
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, map[string]any{
+	httpstatus.WriteData(ctx, fasthttp.StatusOK, map[string]any{
 		"username":  inv.Username,
 		"email":     inv.Email,
 		"expiresAt": inv.ExpiresAt.UTC().Format(time.RFC3339),
@@ -145,160 +182,160 @@ func (h *AccessHandler) AcceptInvite(ctx *fasthttp.RequestCtx) {
 		Token    string `json:"token"`
 		Password string `json:"password"`
 	}
-	if err := parseJSONBody(ctx, &req); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.Unmarshal(ctx.PostBody(), &req); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if req.Token == "" || req.Password == "" {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("token and password required"))
+	if commonstrings.IsEmpty(req.Token) || commonstrings.IsEmpty(req.Password) {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("token and password required"))
 		return
 	}
-	user, err := h.store.AcceptUserInvite(httpctx.FromRequest(ctx), req.Token, req.Password)
+	user, err := h.access.AcceptInvite(httpctx.FromRequest(ctx), req.Token, req.Password)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
+		if errors.Is(err, domain.ErrNotFound) {
+			httpstatus.WriteError(ctx, fasthttp.StatusNotFound, err)
 			return
 		}
-		if errors.Is(err, store.ErrConflict) {
-			serializer.WriteError(ctx, fasthttp.StatusConflict, err)
+		if errors.Is(err, domain.ErrConflict) {
+			httpstatus.WriteError(ctx, fasthttp.StatusConflict, err)
 			return
 		}
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	h.auth.InvalidateUser(user.ID)
-	token, err := h.auth.CreateSession(user)
+	storeUser := domainUserToStore(user)
+	h.auth.InvalidateUser(httpctx.FromRequest(ctx), user.ID)
+	trusted := ipset.ParseTrustedProxies(h.cfg.TrustedProxyList())
+	fph := auth.DeviceFingerprint(
+		commonstrings.BytesToString(ctx.Request.Header.UserAgent()),
+		httpctx.ClientIP(ctx, trusted),
+	)
+	token, err := h.auth.CreateSession(httpctx.FromRequest(ctx), storeUser, fph)
 	if err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
+		writeAPIError(ctx, err)
+		return
+	}
+	refresh, _, err := h.auth.IssueRefresh(httpctx.FromRequest(ctx), user.ID, fph)
+	if err != nil {
+		writeAPIError(ctx, err)
 		return
 	}
 	csrf, err := h.auth.NewCSRFToken()
 	if err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	setCookie(ctx, h.auth.SessionCookie(token))
-	setCookie(ctx, h.auth.CSRFCookie(csrf))
-	writeUserJSON(ctx, fasthttp.StatusOK, user)
+	httpctx.SetCookie(ctx, h.auth.SessionCookie(token))
+	httpctx.SetCookie(ctx, h.auth.RefreshTokenCookie(refresh))
+	httpctx.SetCookie(ctx, h.auth.CSRFCookie(csrf))
+	httpstatus.WriteData(ctx, fasthttp.StatusOK, toUserResponse(storeUser))
 }
 
 func (h *AccessHandler) listResourceAccess(ctx *fasthttp.RequestCtx, resourceType, resourceKey string) {
-	actor, ok := storeActor(ctx)
+	actor, ok := auth.UserFromContext(httpctx.FromRequest(ctx))
 	if !ok {
-		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 	if !h.canManage(actor, resourceType, resourceKey) {
-		ctx.SetStatusCode(fasthttp.StatusForbidden)
-		ctx.SetBodyString("forbidden")
+		httpstatus.WriteForbidden(ctx)
 		return
 	}
-	grants, err := h.store.ListAccessGrantsByResource(httpctx.FromRequest(ctx), resourceType, resourceKey)
+	grants, err := h.access.ListGrantsByResource(httpctx.FromRequest(ctx), resourceType, resourceKey)
 	if err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, map[string]any{
-		"grants": nonNilSlice(grants),
-		"total":  len(grants),
-	})
+	httpstatus.WriteDataMeta(ctx, fasthttp.StatusOK, nonNilSlice(grants), totalMeta(len(grants)))
 }
 
 func (h *AccessHandler) upsertResourceAccess(ctx *fasthttp.RequestCtx, resourceType, resourceKey string, systemOnly bool) {
-	actor, ok := storeActor(ctx)
+	actor, ok := auth.UserFromContext(httpctx.FromRequest(ctx))
 	if !ok {
-		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 	if !h.canManage(actor, resourceType, resourceKey) {
-		ctx.SetStatusCode(fasthttp.StatusForbidden)
-		ctx.SetBodyString("forbidden")
+		httpstatus.WriteForbidden(ctx)
 		return
 	}
 	var req struct {
 		UserID string `json:"userId"`
 		Role   string `json:"role"`
 	}
-	if err := parseJSONBody(ctx, &req); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.Unmarshal(ctx.PostBody(), &req); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if systemOnly && req.Role == store.GrantCredentialDownloader {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("credential_downloader is account-scoped"))
+	if systemOnly && req.Role == domain.GrantCredentialDownloader {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("credential_downloader is account-scoped"))
 		return
 	}
-	grant, err := h.store.UpsertAccessGrant(httpctx.FromRequest(ctx), store.AccessGrantUpsert{
+	grant, err := h.access.UpsertGrant(httpctx.FromRequest(ctx), domain.AccessGrantUpsert{
 		UserID:       req.UserID,
 		ResourceType: resourceType,
 		ResourceKey:  resourceKey,
 		Role:         req.Role,
 	})
 	if err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	h.auth.InvalidateUser(req.UserID)
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, grant)
+	h.auth.InvalidateUser(httpctx.FromRequest(ctx), req.UserID)
+	httpstatus.WriteData(ctx, fasthttp.StatusOK, grant)
 }
 
 func (h *AccessHandler) deleteResourceAccess(ctx *fasthttp.RequestCtx, resourceType, resourceKey string) {
-	actor, ok := storeActor(ctx)
+	actor, ok := auth.UserFromContext(httpctx.FromRequest(ctx))
 	if !ok {
-		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 	if !h.canManage(actor, resourceType, resourceKey) {
-		ctx.SetStatusCode(fasthttp.StatusForbidden)
-		ctx.SetBodyString("forbidden")
+		httpstatus.WriteForbidden(ctx)
 		return
 	}
 	grantID := httpctx.RouteParam(ctx, "grantId")
-	userID := string(ctx.QueryArgs().Peek("userId"))
+	userID := commonstrings.BytesToString(ctx.QueryArgs().Peek("userId"))
 	c := httpctx.FromRequest(ctx)
-	if grantID != "" {
-		if err := h.store.DeleteAccessGrant(c, grantID); err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
+	if !commonstrings.IsEmpty(grantID) {
+		deletedUserID, err := h.access.DeleteGrantScoped(c, grantID, resourceType, resourceKey)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				httpstatus.WriteError(ctx, fasthttp.StatusNotFound, err)
 				return
 			}
-			serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
+			writeAPIError(ctx, err)
 			return
 		}
-		if userID != "" {
-			h.auth.InvalidateUser(userID)
-		}
+		h.auth.InvalidateUser(c, deletedUserID)
 		ctx.SetStatusCode(fasthttp.StatusNoContent)
 		return
 	}
-	if userID == "" {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("userId"))
+	if commonstrings.IsEmpty(userID) {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("userId"))
 		return
 	}
-	if err := h.store.DeleteAccessGrantByResource(c, userID, resourceType, resourceKey); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
+	if err := h.access.DeleteGrantByResource(c, userID, resourceType, resourceKey); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			httpstatus.WriteError(ctx, fasthttp.StatusNotFound, err)
 			return
 		}
-		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	h.auth.InvalidateUser(userID)
+	h.auth.InvalidateUser(c, userID)
 	ctx.SetStatusCode(fasthttp.StatusNoContent)
 }
 
 func (h *AccessHandler) canManage(actor store.User, resourceType, resourceKey string) bool {
 	switch resourceType {
-	case store.ResourceSystem:
+	case domain.ResourceSystem:
 		return auth.CanManageSystemAccess(actor, resourceKey)
-	case store.ResourceAccount:
+	case domain.ResourceAccount:
 		clusterID, account, _ := strings.Cut(resourceKey, ":")
 		return auth.CanManageAccountAccess(actor, clusterID, account)
 	default:
 		return auth.CanManageUsers(actor) || actor.IsRoot
 	}
-}
-
-func storeActor(ctx *fasthttp.RequestCtx) (store.User, bool) {
-	c := httpctx.FromRequest(ctx)
-	return auth.UserFromContext(c)
 }

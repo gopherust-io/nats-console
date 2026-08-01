@@ -6,6 +6,7 @@ import { ShellRoutes, TestProviders } from "../test/mocks";
 
 vi.mock("../lib/themeStyles", () => ({
   loadThemeStyles: vi.fn(async () => undefined),
+  preloadThemeStyles: vi.fn(async () => undefined),
 }));
 
 vi.mock("../lib/auth", () => ({
@@ -47,7 +48,7 @@ vi.mock("../lib/account", () => ({
 }));
 
 vi.mock("./AssistantPanel", () => ({
-  default: () => null,
+  default: () => <div data-testid="assistant-panel">AI</div>,
 }));
 
 describe("ConsolShell", () => {
@@ -61,7 +62,7 @@ describe("ConsolShell", () => {
     );
 
     expect(document.querySelector(".nc-topbar__brand")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Switch to Console Light" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Switch to Console Light/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Notifications" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open user menu" })).toBeInTheDocument();
   });
@@ -108,7 +109,7 @@ describe("ConsolShell", () => {
     expect(screen.queryByRole("link", { name: "Clusters" })).not.toBeInTheDocument();
   });
 
-  it("shows Clusters and Settings as team tabs next to Systems", () => {
+  it("hides the team tab bar on Systems", () => {
     render(
       <TestProviders initialEntries={["/systems"]}>
         <ShellRoutes>
@@ -117,10 +118,61 @@ describe("ConsolShell", () => {
       </TestProviders>,
     );
 
-    expect(screen.getByRole("navigation", { name: "Team" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Systems" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Clusters" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Team" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Clusters" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
+  });
+
+  it("renders Docs and Architecture in the user menu", async () => {
+    const user = userEvent.setup();
+    render(
+      <TestProviders initialEntries={["/systems"]}>
+        <ShellRoutes>
+          <ConsolShell />
+        </ShellRoutes>
+      </TestProviders>,
+    );
+
+    expect(screen.queryByRole("menuitem", { name: "Docs and Architecture" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Open user menu" }));
+    const docsLink = screen.getByRole("menuitem", { name: "Docs and Architecture" });
+    expect(docsLink).toBeInTheDocument();
+    expect(docsLink).toHaveAttribute("href", "/docs");
+  });
+
+  it("hides the team tab bar on All streams", () => {
+    render(
+      <TestProviders initialEntries={["/systems/streams"]}>
+        <ShellRoutes>
+          <ConsolShell />
+        </ShellRoutes>
+      </TestProviders>,
+    );
+
+    expect(screen.queryByRole("navigation", { name: "Team" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "All streams" })).not.toBeInTheDocument();
+  });
+
+  it("shows the AI assistant only inside Docs", async () => {
+    const { unmount } = render(
+      <TestProviders initialEntries={["/systems"]}>
+        <ShellRoutes>
+          <ConsolShell />
+        </ShellRoutes>
+      </TestProviders>,
+    );
+    expect(screen.queryByTestId("assistant-panel")).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <TestProviders initialEntries={["/docs"]}>
+        <ShellRoutes>
+          <ConsolShell />
+        </ShellRoutes>
+      </TestProviders>,
+    );
+    expect(await screen.findByTestId("assistant-panel")).toBeInTheDocument();
   });
 
   it("keeps account tabs on Topology when a system/account is selected", () => {

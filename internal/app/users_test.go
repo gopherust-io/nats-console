@@ -183,3 +183,72 @@ func TestUserServiceRootCanCreateDelegatedAdmin(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "delegate", created.Username)
 }
+
+func TestUserServiceRejectsClearingAccessRulesForNonRoot(t *testing.T) {
+	repo := &mockUsers{users: map[string]domain.User{
+		"mgr": {
+			ID: "mgr", Username: "mgr", Roles: []string{domain.RoleAdmin},
+			AccessRules: &domain.AccessRules{
+				ClusterIDs:      []string{"cluster-a"},
+				ManageUsers:     true,
+				AssignableRoles: []string{domain.RoleViewer, domain.RoleOperator, domain.RoleAdmin},
+			},
+		},
+		"target": {
+			ID: "target", Username: "target", Roles: []string{domain.RoleAdmin},
+			AccessRules: &domain.AccessRules{
+				ClusterIDs:      []string{"cluster-a"},
+				ManageUsers:     true,
+				AssignableRoles: []string{domain.RoleViewer},
+			},
+		},
+	}}
+	svc := app.NewUserService(repo)
+	mgr := repo.users["mgr"]
+
+	_, err := svc.Update(context.Background(), mgr, "target", domain.UserUpdate{
+		SetRules:    true,
+		AccessRules: nil,
+	})
+	require.ErrorIs(t, err, domain.ErrCannotEscalate)
+
+	root := domain.User{ID: "root", IsRoot: true, Roles: []string{domain.RoleAdmin}}
+	updated, err := svc.Update(context.Background(), root, "target", domain.UserUpdate{
+		SetRules:    true,
+		AccessRules: nil,
+	})
+	require.NoError(t, err)
+	assert.Nil(t, updated.AccessRules)
+}
+
+func TestUserServiceInviteCreateRequiresClusterIDs(t *testing.T) {
+	repo := &mockUsers{users: map[string]domain.User{}}
+	svc := app.NewUserService(repo)
+	mgr := domain.User{
+		ID: "mgr", Roles: []string{domain.RoleAdmin},
+		AccessRules: &domain.AccessRules{
+			ClusterIDs:      []string{"cluster-a"},
+			ManageUsers:     true,
+			AssignableRoles: []string{domain.RoleViewer, domain.RoleAdmin},
+		},
+	}
+
+	_, err := svc.Create(context.Background(), mgr, domain.UserCreate{
+		Username: "invited",
+		Email:    "invited@example.com",
+		Roles:    []string{domain.RoleAdmin},
+		AccessRules: &domain.AccessRules{
+			ClusterIDs:      []string{},
+			AssignableRoles: []string{domain.RoleViewer},
+		},
+	})
+	require.Error(t, err)
+
+	_, err = svc.Create(context.Background(), mgr, domain.UserCreate{
+		Username: "invited",
+		Email:    "invited@example.com",
+		Roles:    []string{domain.RoleAdmin},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "accessRules required")
+}

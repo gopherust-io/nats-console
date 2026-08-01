@@ -1,0 +1,101 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
+import ArchitectureScorePanel from "../components/ArchitectureScorePanel";
+import PageHeader from "../components/ui/PageHeader";
+import QueryErrorState from "../components/ui/QueryErrorState";
+import {
+  askArchitectureScore,
+  demoArchitectureScore,
+  fetchArchitectureScore,
+  type ArchitectureScoreSnapshot,
+} from "../lib/architectureScore";
+import { fetchAssistantConfig } from "../lib/assistant";
+import { useCluster } from "../lib/cluster";
+import { MONITORING_POLL_MS } from "../lib/constants";
+import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
+
+export default function ArchitectureScorePage() {
+  const { t } = useTranslation();
+  const { clusterId } = useCluster();
+  const [forceSample, setForceSample] = useState(false);
+  const [aiReply, setAiReply] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
+
+  const scoreQuery = useQuery({
+    queryKey: clusterQueryKey(clusterId, "architecture-score"),
+    queryFn: () => fetchArchitectureScore(clusterId!, { fresh: true }),
+    enabled: Boolean(clusterId) && !forceSample,
+    refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
+  });
+
+  const assistantConfigQuery = useQuery({
+    queryKey: ["assistant-config"],
+    queryFn: fetchAssistantConfig,
+    staleTime: 60_000,
+  });
+
+  const demo = useMemo(() => demoArchitectureScore(), []);
+  const useDemo = forceSample || !clusterId || scoreQuery.isError;
+  const snapshot: ArchitectureScoreSnapshot = useDemo ? demo : (scoreQuery.data ?? demo);
+  const sample = useDemo;
+  const aiEnabled = Boolean(assistantConfigQuery.data?.aiEnabled) && Boolean(clusterId) && !sample;
+
+  useEffect(() => {
+    setAiReply(null);
+  }, [clusterId, forceSample]);
+
+  const handleAsk = useCallback(async () => {
+    if (!clusterId || asking || sample) return;
+    setAsking(true);
+    try {
+      const result = await askArchitectureScore(clusterId, undefined, { fresh: true });
+      setAiReply(result.reply);
+    } catch {
+      setAiReply(null);
+    } finally {
+      setAsking(false);
+    }
+  }, [asking, clusterId, sample]);
+
+  return (
+    <>
+      <PageHeader title={t("archScore.title")} subtitle={t("archScore.subtitle")} />
+      <div className="live-arch-page__toolbar" role="toolbar" aria-label={t("archScore.title")}>
+        {!clusterId && <span className="text-muted">{t("archScore.needSystem")}</span>}
+        {clusterId && (
+          <button
+            type="button"
+            aria-pressed={forceSample}
+            onClick={() => {
+              setForceSample((v) => !v);
+              setAiReply(null);
+            }}
+          >
+            {forceSample ? t("archScore.useLive") : t("archScore.useSample")}
+          </button>
+        )}
+      </div>
+      {clusterId && scoreQuery.isError && !forceSample && (
+        <QueryErrorState
+          error={scoreQuery.error}
+          onRetry={() => void scoreQuery.refetch()}
+          title={t("archScore.loadFailed")}
+        />
+      )}
+      {clusterId && scoreQuery.isLoading && !forceSample && !scoreQuery.data && (
+        <div className="skeleton skeleton--panel" />
+      )}
+      {(forceSample || !scoreQuery.isLoading || scoreQuery.data || !clusterId) && (
+        <ArchitectureScorePanel
+          snapshot={snapshot}
+          reply={aiReply}
+          asking={asking}
+          aiEnabled={aiEnabled}
+          onAsk={sample ? undefined : () => void handleAsk()}
+          sample={sample}
+        />
+      )}
+    </>
+  );
+}

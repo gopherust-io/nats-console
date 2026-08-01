@@ -1,4 +1,5 @@
 import { clusterPath } from "./api";
+import { safeDecodeURIComponent } from "./safeDecode";
 
 export type AssistantMessage = {
   role: "user" | "assistant";
@@ -54,10 +55,12 @@ export class AssistantRequestError extends Error {
 }
 
 type AssistantErrorResponse = {
-  error?: string;
-  code?: AssistantErrorCode;
-  retryable?: boolean;
-  retryAfterSeconds?: number;
+  error?: {
+    message?: string;
+    code?: AssistantErrorCode;
+    retryable?: boolean;
+    retryAfterSeconds?: number;
+  };
 };
 
 function inferErrorCode(status: number): AssistantErrorCode {
@@ -71,11 +74,12 @@ function inferErrorCode(status: number): AssistantErrorCode {
 }
 
 function parseAssistantError(response: Response, body: AssistantErrorResponse): AssistantRequestError {
-  const message = body.error ?? `Assistant request failed (${response.status})`;
+  const nested = body.error;
+  const message = nested?.message ?? `Assistant request failed (${response.status})`;
   return new AssistantRequestError(message, {
-    code: body.code ?? inferErrorCode(response.status),
-    retryable: body.retryable ?? (response.status === 429 || response.status >= 500),
-    retryAfterSeconds: body.retryAfterSeconds,
+    code: nested?.code ?? inferErrorCode(response.status),
+    retryable: nested?.retryable ?? (response.status === 429 || response.status >= 500),
+    retryAfterSeconds: nested?.retryAfterSeconds,
   });
 }
 
@@ -109,7 +113,8 @@ export async function fetchAssistantConfig(): Promise<AssistantConfig> {
     if (!response.ok) {
       return { aiEnabled: false };
     }
-    return response.json() as Promise<AssistantConfig>;
+    const body = (await response.json().catch(() => ({}))) as { data?: AssistantConfig };
+    return body.data ?? { aiEnabled: false };
   } catch {
     return { aiEnabled: false };
   }
@@ -136,35 +141,58 @@ export async function sendAssistantMessage(
     });
   }
 
-  const body = (await response.json().catch(() => ({}))) as AssistantErrorResponse & { reply?: string };
+  const body = (await response.json().catch(() => ({}))) as AssistantErrorResponse & {
+    data?: { reply?: string };
+  };
   if (!response.ok) {
     throw parseAssistantError(response, body);
   }
-  if (!body.reply) {
+  const reply = body.data?.reply;
+  if (!reply) {
     throw new AssistantRequestError("Assistant returned an empty response.", {
       code: "provider",
       retryable: true,
     });
   }
-  return body.reply;
+  return reply;
 }
 
 export function pageContextFromLocation(pathname: string): AssistantPageContext {
   const parts = pathname.split("/").filter(Boolean);
   const page: AssistantPageContext = { route: pathname };
 
+  // Current shape: /systems/:clusterId/accounts/:account/jetstream/(streams|kv|objects)/...
+  if (parts[0] === "systems" && parts[2] === "accounts" && parts[4] === "jetstream") {
+    const section = parts[5];
+    if (section === "streams" && parts[6]) {
+      page.stream = safeDecodeURIComponent(parts[6]);
+      if (parts[7] === "consumers" && parts[8]) {
+        page.consumer = safeDecodeURIComponent(parts[8]);
+      }
+    }
+    if (section === "kv" && parts[6]) {
+      page.bucket = safeDecodeURIComponent(parts[6]);
+      if (parts[7]) page.key = safeDecodeURIComponent(parts[7]);
+    }
+    if (section === "objects" && parts[6]) {
+      page.bucket = safeDecodeURIComponent(parts[6]);
+    }
+    return page;
+  }
+
+  // Legacy shape kept for old bookmarks/redirects: /streams/:name, /kv/:bucket, /objects/:bucket
   if (parts[0] === "streams" && parts[1]) {
-    page.stream = decodeURIComponent(parts[1]);
+    page.stream = safeDecodeURIComponent(parts[1]);
     if (parts[2] === "consumers" && parts[3]) {
-      page.consumer = decodeURIComponent(parts[3]);
+      page.consumer = safeDecodeURIComponent(parts[3]);
     }
   }
   if (parts[0] === "kv" && parts[1]) {
-    page.bucket = decodeURIComponent(parts[1]);
-    if (parts[2]) page.key = decodeURIComponent(parts[2]);
+    page.bucket = safeDecodeURIComponent(parts[1]);
+    if (parts[2]) page.key = safeDecodeURIComponent(parts[2]);
   }
   if (parts[0] === "objects" && parts[1]) {
-    page.bucket = decodeURIComponent(parts[1]);
+    page.bucket = safeDecodeURIComponent(parts[1]);
   }
   return page;
 }

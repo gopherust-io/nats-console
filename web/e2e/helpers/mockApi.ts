@@ -5,6 +5,7 @@ import {
   emptyAccount,
   emptyBuckets,
   emptyConnz,
+  emptyRequestReply,
   emptyConsumers,
   emptyExports,
   emptyGrants,
@@ -51,21 +52,25 @@ export async function mockShell(page: Page, user: AuthUserFixture = ADMIN) {
     await route.fallback();
   });
 
-  await mockJson(page, "**/api/v1/alerts/open-summary", { count: 0, alerts: [] });
-  await mockJson(page, "**/api/v1/auth/config", { basicEnabled: true, authEnabled: true });
-  await mockJson(page, "**/api/v1/auth/me", user);
-  await mockJson(page, "**/api/v1/clusters**", { clusters: [CLUSTER], total: 1 });
+  await mockJson(page, "**/api/v1/alerts/open-summary", { data: { count: 0, alerts: [] } });
+  await mockJson(page, "**/api/v1/auth/config", { data: { basicEnabled: true, authEnabled: true } });
+  await mockJson(page, "**/api/v1/auth/me", { data: user });
+  await mockJson(page, "**/api/v1/clusters**", { data: [CLUSTER], meta: { total: 1 } });
 }
 
 /** Common cluster-scoped GETs so account/jetstream pages render cleanly. */
 export async function mockClusterApis(page: Page) {
-  await mockJson(page, "**/api/v1/clusters/connections", connectedStatus);
-  await mockJson(page, "**/api/v1/clusters/*/account", emptyAccount);
+  await mockJson(page, "**/api/v1/clusters/connections", {
+    data: connectedStatus,
+    meta: { total: connectedStatus.length },
+  });
+  await mockJson(page, "**/api/v1/clusters/*/account", { data: emptyAccount });
   await mockJson(page, "**/api/v1/clusters/*/streams**", emptyStreams);
   await mockJson(page, "**/api/v1/clusters/*/kv/buckets**", emptyBuckets);
   await mockJson(page, "**/api/v1/clusters/*/objects/buckets**", emptyBuckets);
   await mockJson(page, "**/api/v1/clusters/*/monitoring/varz**", emptyVarz);
   await mockJson(page, "**/api/v1/clusters/*/monitoring/connz**", emptyConnz);
+  await mockJson(page, "**/api/v1/clusters/*/request-reply**", emptyRequestReply);
   await mockJson(page, "**/api/v1/clusters/*/monitoring/jsz**", emptyJsz);
   await mockJson(page, "**/api/v1/clusters/*/metrics/history**", emptyMetricsHistory);
   await mockJson(page, "**/api/v1/clusters/*/access**", emptyGrants);
@@ -81,11 +86,10 @@ export async function mockStreamDetail(
   stream: ReturnType<typeof import("../fixtures/api").sampleStream>,
   consumers: unknown[] = [],
 ) {
-  await mockJson(page, `**/api/v1/clusters/*/streams/${encodeURIComponent(stream.config.name)}`, stream);
+  await mockJson(page, `**/api/v1/clusters/*/streams/${encodeURIComponent(stream.config.name)}`, { data: stream });
   await mockJson(page, `**/api/v1/clusters/*/streams/${encodeURIComponent(stream.config.name)}/consumers**`, {
-    ...emptyConsumers,
-    consumers,
-    total: consumers.length,
+    data: consumers,
+    meta: { total: consumers.length, offset: 0, limit: 50 },
   });
 }
 
@@ -94,11 +98,10 @@ export async function mockKVBucket(
   bucket: ReturnType<typeof import("../fixtures/api").sampleKVBucket>,
   keys: string[] = [],
 ) {
-  await mockJson(page, `**/api/v1/clusters/*/kv/buckets/${encodeURIComponent(bucket.bucket)}`, bucket);
+  await mockJson(page, `**/api/v1/clusters/*/kv/buckets/${encodeURIComponent(bucket.bucket)}`, { data: bucket });
   await mockJson(page, `**/api/v1/clusters/*/kv/buckets/${encodeURIComponent(bucket.bucket)}/keys**`, {
-    ...emptyKeys,
-    keys,
-    total: keys.length,
+    data: keys,
+    meta: { total: keys.length, offset: 0, limit: 50 },
   });
 }
 
@@ -107,11 +110,10 @@ export async function mockObjectBucket(
   bucket: ReturnType<typeof import("../fixtures/api").sampleObjectBucket>,
   objects: string[] = [],
 ) {
-  await mockJson(page, `**/api/v1/clusters/*/objects/buckets/${encodeURIComponent(bucket.bucket)}`, bucket);
+  await mockJson(page, `**/api/v1/clusters/*/objects/buckets/${encodeURIComponent(bucket.bucket)}`, { data: bucket });
   await mockJson(page, `**/api/v1/clusters/*/objects/buckets/${encodeURIComponent(bucket.bucket)}/objects**`, {
-    ...emptyObjects,
-    objects,
-    total: objects.length,
+    data: objects,
+    meta: { total: objects.length, offset: 0, limit: 50 },
   });
 }
 

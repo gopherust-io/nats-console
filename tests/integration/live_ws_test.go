@@ -5,7 +5,6 @@ package integration_test
 import (
 	"context"
 	"encoding/base64"
-	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/fasthttp/websocket"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
@@ -29,8 +29,7 @@ func TestLiveWS(t *testing.T) {
 	createBody := `{"name":"LIVE_SMOKE","subjects":["live.>"]}`
 	resp, err := srv.Client.Post(base+"/streams", "application/json", strings.NewReader(createBody))
 	require.NoError(t, err)
-	respBody, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
+	respBody := resp.Body
 	require.Equal(t, http.StatusCreated, resp.StatusCode, "create stream: %s", string(respBody))
 
 	dialer := websocket.Dialer{
@@ -39,7 +38,9 @@ func TestLiveWS(t *testing.T) {
 		},
 	}
 	wsURL := "ws://nats-consol.local/api/v1/clusters/" + clusterID + "/live/ws?stream=LIVE_SMOKE"
-	conn, _, err := dialer.Dial(wsURL, nil)
+	headers := http.Header{}
+	headers.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("admin:admin")))
+	conn, _, err := dialer.Dial(wsURL, headers)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 
@@ -47,13 +48,13 @@ func TestLiveWS(t *testing.T) {
 	require.Equal(t, "connected", connected["type"])
 	assert.Equal(t, "LIVE_SMOKE", connected["subject"])
 
-	nc, err := nats.Connect(stack.Cfg.NATSURL)
+	nc, err := nats.Connect(stack.Cfg.NATS.URL)
 	require.NoError(t, err)
 	t.Cleanup(func() { nc.Close() })
 	js, err := nc.JetStream()
 	require.NoError(t, err)
 
-	_, err = js.Publish("live.test", []byte("hello-live"))
+	_, err = js.Publish("live.test", commonstrings.StringToBytes("hello-live"))
 	require.NoError(t, err)
 
 	msg := readLiveFrame(t, conn, 5*time.Second)
@@ -63,11 +64,11 @@ func TestLiveWS(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "hello-live", string(decoded))
 
-	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"action":"pause"}`)))
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, commonstrings.StringToBytes(`{"action":"pause"}`)))
 	paused := readLiveFrame(t, conn, 2*time.Second)
 	require.Equal(t, "paused", paused["type"])
 
-	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"action":"resume"}`)))
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, commonstrings.StringToBytes(`{"action":"resume"}`)))
 	resumed := readLiveFrame(t, conn, 2*time.Second)
 	require.Equal(t, "resumed", resumed["type"])
 }

@@ -45,14 +45,14 @@ test.describe("systems and accounts", () => {
       role: string;
     }> = [];
 
-    await mockJson(page, "**/api/v1/people**", { users: [person], total: 1 });
+    await mockJson(page, "**/api/v1/people**", { data: [person], meta: { total: 1 } });
     await page.route(`**/api/v1/clusters/${CLUSTER.id}/access**`, async (route) => {
       const method = route.request().method();
       if (method === "GET") {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ grants }),
+          body: JSON.stringify({ data: grants, meta: { total: grants.length } }),
         });
         return;
       }
@@ -72,7 +72,7 @@ test.describe("systems and accounts", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(grants[0]),
+          body: JSON.stringify({ data: grants[0] }),
         });
         return;
       }
@@ -87,7 +87,7 @@ test.describe("systems and accounts", () => {
     await expect(page.getByRole("heading", { name: "Access" })).toBeVisible();
     await expect(page.getByText("No access grants yet.")).toBeVisible();
 
-    await page.locator("form.form-grid select").first().selectOption(person.id);
+    await page.getByLabel("Person").selectOption(person.id);
     await page.getByRole("button", { name: "Add User" }).click();
     await expect(page.getByRole("cell", { name: person.username })).toBeVisible();
   });
@@ -105,9 +105,10 @@ test.describe("systems and accounts", () => {
     await expect(page.getByText("No connections found")).toBeVisible();
   });
 
-  test("account settings shows sections", async ({ page }) => {
+  test("account overview shows settings sections", async ({ page }) => {
+    // Legacy /settings redirects onto the account overview (settings live there).
     await page.goto(`${base}/settings`);
-    await expect(page.getByRole("heading", { name: "Account Settings" })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/systems/${CLUSTER.id}/accounts/${ACCOUNT}$`));
     await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Limits" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "JetStream" })).toBeVisible();
@@ -129,7 +130,7 @@ test.describe("systems and accounts", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ exports, total: exports.length }),
+          body: JSON.stringify({ data: exports, meta: { total: exports.length } }),
         });
         return;
       }
@@ -152,7 +153,7 @@ test.describe("systems and accounts", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(item),
+          body: JSON.stringify({ data: item }),
         });
         return;
       }

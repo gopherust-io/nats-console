@@ -4,12 +4,10 @@ package security_test
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/store"
 	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/assert"
@@ -32,33 +30,56 @@ func TestScopedViewerCannotAccessOtherCluster(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	srv := stack.NewServer(t, func(cfg *config.Config) {
-		cfg.AuthEnabled = true
-	})
+	srv := stack.NewServer(t, nil)
 
-	req, _ := http.NewRequest(http.MethodGet, "http://nats-consol.local/api/v1/clusters", nil)
-	req.Header.Set("Authorization", basicAuth("scoped-viewer", "scoped-pass"))
-	resp, err := srv.Client.Do(req)
+	resp, err := srv.Client.Do(&testutil.Request{
+		Method: http.MethodGet,
+		URL:    "http://nats-consol.local/api/v1/clusters",
+		Header: http.Header{
+			"Authorization": {basicAuth("scoped-viewer", "scoped-pass")},
+		},
+	})
 	require.NoError(t, err)
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
+	body := resp.Body
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Contains(t, string(body), clusterID)
 
 	otherCluster := "660e8400-e29b-41d4-a716-446655440001"
-	req, _ = http.NewRequest(http.MethodGet, srv.BaseURL(otherCluster)+"/streams", nil)
-	req.Header.Set("Authorization", basicAuth("scoped-viewer", "scoped-pass"))
-	resp, err = srv.Client.Do(req)
+	resp, err = srv.Client.Do(&testutil.Request{
+		Method: http.MethodGet,
+		URL:    srv.BaseURL(otherCluster)+"/streams",
+		Header: http.Header{
+			"Authorization": {basicAuth("scoped-viewer", "scoped-pass")},
+		},
+	})
 	require.NoError(t, err)
-	_ = resp.Body.Close()
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 
-	req, _ = http.NewRequest(http.MethodGet, srv.BaseURL(otherCluster)+"/metrics/history", nil)
-	req.Header.Set("Authorization", basicAuth("scoped-viewer", "scoped-pass"))
-	resp, err = srv.Client.Do(req)
+	resp, err = srv.Client.Do(&testutil.Request{
+		Method: http.MethodGet,
+		URL:    srv.BaseURL(otherCluster)+"/metrics/history",
+		Header: http.Header{
+			"Authorization": {basicAuth("scoped-viewer", "scoped-pass")},
+		},
+	})
 	require.NoError(t, err)
-	_ = resp.Body.Close()
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+func TestCannotCreateClusterViaAPI(t *testing.T) {
+	stack := testutil.SetupStack(t)
+	srv := stack.NewServer(t, nil)
+
+	resp, err := srv.Client.Do(&testutil.Request{
+		Method: http.MethodPost,
+		URL:    "http://nats-consol.local/api/v1/clusters",
+		Body:   strings.NewReader(`{"name":"blocked","natsUrl":"nats://nats.example:4222","monitoringUrl":"http://nats.example:8222"}`),
+		Header: http.Header{
+			"Content-Type": {"application/json"},
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 }
 
 func TestScopedAdminCannotCreateCluster(t *testing.T) {
@@ -78,18 +99,19 @@ func TestScopedAdminCannotCreateCluster(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	srv := stack.NewServer(t, func(cfg *config.Config) {
-		cfg.AuthEnabled = true
-	})
+	srv := stack.NewServer(t, nil)
 
-	req, _ := http.NewRequest(http.MethodPost, "http://nats-consol.local/api/v1/clusters",
-		strings.NewReader(`{"name":"blocked","natsUrl":"nats://nats.example:4222","monitoringUrl":"http://nats.example:8222"}`))
-	req.Header.Set("Authorization", basicAuth("scoped-admin", "scoped-pass"))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := srv.Client.Do(req)
+	resp, err := srv.Client.Do(&testutil.Request{
+		Method: http.MethodPost,
+		URL:    "http://nats-consol.local/api/v1/clusters",
+		Body:   strings.NewReader(`{"name":"blocked","natsUrl":"nats://nats.example:4222","monitoringUrl":"http://nats.example:8222"}`),
+		Header: http.Header{
+			"Authorization": {basicAuth("scoped-admin", "scoped-pass")},
+			"Content-Type":  {"application/json"},
+		},
+	})
 	require.NoError(t, err)
-	_ = resp.Body.Close()
-	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 }
 
 func TestViewerWithoutClusterAccessGetsEmptyList(t *testing.T) {
@@ -107,16 +129,17 @@ func TestViewerWithoutClusterAccessGetsEmptyList(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	srv := stack.NewServer(t, func(cfg *config.Config) {
-		cfg.AuthEnabled = true
-	})
+	srv := stack.NewServer(t, nil)
 
-	req, _ := http.NewRequest(http.MethodGet, "http://nats-consol.local/api/v1/clusters", nil)
-	req.Header.Set("Authorization", basicAuth("no-cluster-viewer", "none-pass"))
-	resp, err := srv.Client.Do(req)
+	resp, err := srv.Client.Do(&testutil.Request{
+		Method: http.MethodGet,
+		URL:    "http://nats-consol.local/api/v1/clusters",
+		Header: http.Header{
+			"Authorization": {basicAuth("no-cluster-viewer", "none-pass")},
+		},
+	})
 	require.NoError(t, err)
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
+	body := resp.Body
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Contains(t, string(body), `"total":0`)
+	assert.Contains(t, string(body), `"meta":{"total":0}`)
 }

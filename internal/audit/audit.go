@@ -4,8 +4,9 @@ import (
 	"context"
 	"strings"
 
-	"github.com/gopherust-io/nats-consol/internal/store"
 	"github.com/valyala/fasthttp"
+
+	"github.com/gopherust-io/nats-consol/internal/store"
 )
 
 const auditQueueSize = 512
@@ -30,14 +31,13 @@ func (w *Writer) worker() {
 	}
 }
 
-func (w *Writer) Log(ctx context.Context, in store.AuditCreate) {
+func (w *Writer) Log(in store.AuditCreate) {
 	if w == nil || w.store == nil {
 		return
 	}
 	select {
 	case w.ch <- in:
-	default:
-		// Drop under backpressure rather than blocking request completion.
+	default: // Drop under backpressure rather than blocking request completion.
 	}
 }
 

@@ -18,7 +18,7 @@ COPY . .
 COPY --from=web /src/web/dist /src/web/dist
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux go build -o /out/nats-consol ./cmd/server
+    CGO_ENABLED=0 GOOS=linux go build -o /out/nats-consol ./cmd
 
 FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
 RUN apk add --no-cache ca-certificates
@@ -28,8 +28,7 @@ COPY migrations /app/migrations
 COPY api/openapi.yaml /app/api/openapi.yaml
 ENV HTTP_ADDR=:8080 \
     STATIC_DIR=/app/web \
-    OPENAPI_PATH=/app/api/openapi.yaml \
-    AUTH_ENABLED=true
+    OPENAPI_PATH=/app/api/openapi.yaml
 COPY --from=web /src/web/dist /app/web
 EXPOSE 8080
 ENTRYPOINT ["/app/nats-consol"]

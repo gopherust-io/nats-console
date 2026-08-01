@@ -2,9 +2,30 @@ package app
 
 import (
 	"context"
+	"errors"
+	"sync"
+	"time"
 
 	"github.com/gopherust-io/nats-consol/internal/port"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
+	"github.com/gopherust-io/nats-consol/pkg/common/safe"
 )
+
+const (
+	depPostgres           = "postgres"
+	depNATSDefaultCluster = "natsDefaultCluster"
+)
+
+const (
+	healthStatusOK       = "ok"
+	healthStatusError    = "error"
+	healthStatusUnknown  = "unknown"
+	healthStatusDegraded = "degraded"
+)
+
+// ErrDependencyUnknown marks a required dependency that could not be evaluated
+// (e.g. no default NATS cluster). Check maps it to "unknown" and still fails readiness.
+var ErrDependencyUnknown = errors.New("dependency status unknown")
 
 type HealthStatus struct {
 	Status             string `json:"status"`
@@ -12,41 +33,113 @@ type HealthStatus struct {
 	NATSDefaultCluster string `json:"natsDefaultCluster"`
 }
 
-type HealthService struct {
-	clusters port.ClusterRepository
-	gateway  port.ClusterGateway
+// Dependency is a named external dependency that HealthService can ping.
+// goalign:ignore // trailing bool padding is unavoidable
+type Dependency struct {
+	Ping     func(ctx context.Context) error
+	Name     string
+	Required bool
 }
 
-func NewHealthService(clusters port.ClusterRepository, gateway port.ClusterGateway) *HealthService {
-	return &HealthService{clusters: clusters, gateway: gateway}
+type HealthService struct {
+	deps    []Dependency
+	timeout time.Duration
+}
+
+func NewHealthService(clusters port.ClusterRepository, gateway port.ClusterGateway, timeout time.Duration) *HealthService {
+	if timeout <= 0 {
+		timeout = 2 * time.Second
+	}
+	return &HealthService{
+		timeout: timeout,
+		deps: []Dependency{
+			postgresDependency(clusters),
+			natsDefaultClusterDependency(clusters, gateway),
+		},
+	}
+}
+
+func postgresDependency(clusters port.ClusterRepository) Dependency {
+	return Dependency{
+		Name:     depPostgres,
+		Required: true,
+		Ping:     clusters.Ping,
+	}
+}
+
+func natsDefaultClusterDependency(clusters port.ClusterRepository, gateway port.ClusterGateway) Dependency {
+	return Dependency{
+		Name:     depNATSDefaultCluster,
+		Required: true,
+		Ping: func(ctx context.Context) error {
+			cluster, err := clusters.GetDefaultCluster(ctx)
+			if err != nil {
+				return ErrDependencyUnknown
+			}
+			result, err := gateway.Test(ctx, cluster.ID)
+			if err != nil || !result.OK || strings.IsEmpty(result.ServerName) {
+				return errors.New("nats default cluster unhealthy")
+			}
+			return nil
+		},
+	}
 }
 
 func (s *HealthService) Check(ctx context.Context) (HealthStatus, int) {
-	postgresStatus := "ok"
-	if err := s.clusters.Ping(ctx); err != nil {
-		postgresStatus = "error"
+	type result struct {
+		name   string
+		status string
 	}
 
-	natsStatus := "unknown"
-	if cluster, err := s.clusters.GetDefaultCluster(ctx); err == nil {
-		result, err := s.gateway.Test(ctx, cluster.ID)
-		if err == nil && result.OK && result.ServerName != "" {
-			natsStatus = "ok"
-		} else {
-			natsStatus = "error"
+	results := make([]result, len(s.deps))
+	var wg sync.WaitGroup
+	wg.Add(len(s.deps))
+
+	for i, dep := range s.deps {
+		go func(i int, dep Dependency) {
+			defer wg.Done()
+			defer func() {
+				if rec := recover(); rec != nil {
+					safe.Log("health", rec)
+					results[i] = result{name: dep.Name, status: healthStatusError}
+				}
+			}()
+			status := healthStatusOK
+			pCtx, cancel := context.WithTimeout(ctx, s.timeout)
+			defer cancel()
+			if err := dep.Ping(pCtx); err != nil {
+				if errors.Is(err, ErrDependencyUnknown) {
+					status = healthStatusUnknown
+				} else {
+					status = healthStatusError
+				}
+			}
+			results[i] = result{name: dep.Name, status: status}
+		}(i, dep)
+	}
+	wg.Wait()
+
+	byName := make(map[string]string, len(results))
+	for _, r := range results {
+		byName[r.name] = r.status
+	}
+
+	overall := healthStatusOK
+	code := 200
+	for _, dep := range s.deps {
+		if !dep.Required {
+			continue
+		}
+		if byName[dep.Name] != healthStatusOK {
+			overall = healthStatusDegraded
+			code = 503
+			break
 		}
 	}
 
-	status := "ok"
-	code := 200
-	if postgresStatus != "ok" {
-		status = "degraded"
-		code = 503
-	}
-
 	return HealthStatus{
-		Status:             status,
-		Postgres:           postgresStatus,
-		NATSDefaultCluster: natsStatus,
+		Status:             overall,
+		Postgres:           byName[depPostgres],
+		NATSDefaultCluster: byName[depNATSDefaultCluster],
 	}, code
 }

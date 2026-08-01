@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: NATS Consol API
   version: 0.8.0
-  description: Self-hosted admin console for NATS JetStream — cluster-scoped REST and WebSocket API.
+  description: Self-hosted admin console for NATS JetStream — cluster-scoped REST, WebSocket, and SSE API.
 
 servers:
   - url: /
@@ -10,6 +10,7 @@ servers:
 
 security:
   - basicAuth: []
+  - bearerAuth: []
   - sessionCookie: []
 
 paths:
@@ -53,12 +54,36 @@ paths:
   /api/v1/auth/login:
     post:
       tags: [Auth]
-      summary: Login with username/password
+      summary: Login with username and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Logged in; sets session, refresh, and CSRF cookies
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate access and refresh tokens
+      description: Requires the refresh cookie and matching CSRF token. Validates the device fingerprint (User-Agent + client IP).
       security: []
       responses:
         "200":
-          description: Session created
-
+          description: New session and refresh cookies issued
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /api/v1/auth/logout:
     post:
       tags: [Auth]
@@ -110,7 +135,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AlertOpenSummary"
+                $ref: "#/components/schemas/AlertOpenSummaryResponse"
 
   /api/v1/alerts/{alertId}:
     get:
@@ -124,7 +149,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Alert"
+                $ref: "#/components/schemas/AlertResponse"
 
   /api/v1/alerts/{alertId}/acknowledge:
     post:
@@ -138,7 +163,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Alert"
+                $ref: "#/components/schemas/AlertResponse"
 
   /api/v1/alert-rules:
     get:
@@ -255,7 +280,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Cluster"
+                $ref: "#/components/schemas/ClusterResponse"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -290,6 +315,106 @@ paths:
                 type: object
         "502":
           $ref: "#/components/responses/BadGateway"
+
+  /api/v1/clusters/{clusterId}/event-catalog:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [EventCatalog]
+      summary: List event catalog
+      description: >
+        Hybrid Swagger-style catalog of concrete NATS subjects discovered from
+        JetStream stream subjects and consumer filters, merged with Postgres
+        enrichments (owner, description, JSON Schema, example, deprecation).
+        Consumers whose filters match each subject are included. Use `?fresh=1`
+        to bypass the monitoring cache.
+      parameters:
+        - name: fresh
+          in: query
+          schema:
+            type: string
+            enum: ["1"]
+          description: Bypass cached jsz snapshot when set to 1
+      responses:
+        "200":
+          description: Event catalog snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventCatalogSnapshot"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /api/v1/clusters/{clusterId}/event-wikipedia:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [EventWikipedia]
+      summary: List event Wikipedia pages
+      description: >
+        Auto-assembled per-subject documentation pages built from Event Catalog
+        enrichments, live JetStream consumers, and Event Genome related peers.
+        Use `?fresh=1` to bypass the monitoring cache and `?subject=` to filter
+        a single page.
+      parameters:
+        - name: fresh
+          in: query
+          schema:
+            type: string
+            enum: ["1"]
+          description: Bypass cached jsz snapshot when set to 1
+        - name: subject
+          in: query
+          schema:
+            type: string
+          description: Optional concrete subject to return a single Wikipedia page
+      responses:
+        "200":
+          description: Event Wikipedia snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventWikipediaSnapshot"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /api/v1/clusters/{clusterId}/event-catalog/{subject}:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - name: subject
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Concrete event subject (no NATS wildcards)
+    put:
+      tags: [EventCatalog]
+      summary: Upsert event catalog enrichment
+      description: Create or update owner, description, JSON Schema, example, and deprecation for a subject.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventCatalogUpsert"
+      responses:
+        "200":
+          description: Saved enrichment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventCatalogDoc"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+    delete:
+      tags: [EventCatalog]
+      summary: Delete event catalog enrichment
+      description: Removes documentation only; live subjects still appear as undocumented.
+      responses:
+        "204":
+          description: Enrichment removed
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /api/v1/clusters/{clusterId}/metrics/history:
     parameters:
@@ -328,6 +453,183 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
+  /api/v1/clusters/{clusterId}/hidden-bottlenecks:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [Monitoring]
+      summary: Find hidden bottlenecks (schedule × payload correlations)
+      description: >
+        Deterministic mining of recurring weekday×hour patterns from hourly
+        rollups (consumer lag, derived avg payload, optional fingerprint
+        processing latency). Not the same as slow-consumer lag/CPU threshold
+        alerts. Pass demo=1 for the canned Friday 18:00 showcase.
+      parameters:
+        - name: demo
+          in: query
+          schema:
+            type: string
+            enum: ["1"]
+      responses:
+        "200":
+          description: Bottleneck snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HiddenBottleneckSnapshot"
+
+  /api/v1/clusters/{clusterId}/hidden-bottlenecks/ask:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    post:
+      tags: [Monitoring]
+      summary: Ask AI to narrate hidden bottleneck findings
+      description: >
+        Gemini narrates the same precomputed snapshot as GET (does not invent findings).
+      parameters:
+        - name: demo
+          in: query
+          schema:
+            type: string
+            enum: ["1"]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      responses:
+        "200":
+          description: AI reply plus snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reply:
+                    type: string
+                  snapshot:
+                    $ref: "#/components/schemas/HiddenBottleneckSnapshot"
+
+  /api/v1/chaos-story/demo:
+    get:
+      tags: [Docs]
+      summary: Sample Black Friday chaos story
+      description: >
+        Canned multi-act disaster narrative for Docs showcase. Narrative only —
+        does not inject faults into any cluster.
+      responses:
+        "200":
+          description: Demo chaos story plus seed names
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChaosStoryEnvelope"
+
+  /api/v1/clusters/{clusterId}/chaos-story:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [Docs]
+      summary: Chaos story seed or demo
+      description: >
+        Without demo=1, returns capped live inventory names for the Chaos Story
+        Generator. With demo=1, returns the canned Black Friday story.
+      parameters:
+        - name: demo
+          in: query
+          schema:
+            type: string
+            enum: ["1"]
+        - name: fresh
+          in: query
+          schema:
+            type: string
+            enum: ["1"]
+      responses:
+        "200":
+          description: Story and/or seed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChaosStoryEnvelope"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /api/v1/clusters/{clusterId}/chaos-story/generate:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    post:
+      tags: [Docs]
+      summary: Generate a realistic chaos story with AI
+      description: >
+        Gemini invents a multi-act disaster narrative using only stream/consumer/subject
+        names from live inventory. Does not inject faults. Requires AI_ENABLED.
+      parameters:
+        - name: fresh
+          in: query
+          schema:
+            type: string
+            enum: ["1"]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hint:
+                  type: string
+                  description: Optional operator hint (e.g. Black Friday)
+      responses:
+        "200":
+          description: Generated story plus seed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      story:
+                        $ref: "#/components/schemas/ChaosStory"
+                      seed:
+                        $ref: "#/components/schemas/ChaosStorySeed"
+        "404":
+          description: AI assistant not enabled
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /api/v1/clusters/{clusterId}/incident-annotations:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    post:
+      tags: [Monitoring]
+      summary: Create an incident annotation (e.g. deploy marker)
+      description: >
+        Records a CI/manual change event used by incident reconstruction.
+        When deploy annotations exist in a window they take precedence over
+        audit-log change fallbacks.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IncidentAnnotationCreate"
+      responses:
+        "201":
+          description: Annotation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentAnnotation"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
   /api/v1/clusters/{clusterId}/monitoring/varz:
     parameters:
       - $ref: "#/components/parameters/clusterId"
@@ -341,6 +643,54 @@ paths:
             application/json:
               schema:
                 type: object
+
+  /api/v1/clusters/{clusterId}/replicas:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [Monitoring]
+      summary: NATS server replicas (view-only)
+      description: |
+        Projects cluster server peers from varz, routez, and jsz meta_cluster.
+        Rich varz stats apply only to the monitored node; other peers are route/meta-derived.
+      parameters:
+        - name: fresh
+          in: query
+          schema:
+            type: string
+            enum: ["1"]
+          description: Bypass snapshot hub cache for varz/jsz
+      responses:
+        "200":
+          description: Replica snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ReplicasSnapshot"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /api/v1/clusters/{clusterId}/replicas/events:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [Monitoring]
+      summary: Replicas SSE (demand-driven)
+      description: |
+        Server-Sent Events stream of projected replica snapshots while the Replicas
+        page is open. Scrapes about every 2s while at least one subscriber is connected.
+      responses:
+        "200":
+          description: text/event-stream with event name "replicas"
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "503":
+          description: replicas broker unavailable
 
   /api/v1/clusters/{clusterId}/monitoring/jsz:
     parameters:
@@ -438,6 +788,27 @@ paths:
         "204":
           description: Deleted
 
+  /api/v1/clusters/{clusterId}/streams/{name}/impact:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/streamName"
+    get:
+      tags: [Streams]
+      summary: Blast radius analysis for deleting a stream
+      description: >
+        Returns impacted service counts, related streams (mirror/source dependents
+        and companion DLQ), consumer count, and critical service names derived from
+        consumer metadata (nats-consol/service, nats-consol/critical).
+      responses:
+        "200":
+          description: Blast radius summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlastRadius"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/v1/clusters/{clusterId}/streams/{name}/purge:
     parameters:
       - $ref: "#/components/parameters/clusterId"
@@ -522,6 +893,91 @@ paths:
         "204":
           description: Deleted
 
+  /api/v1/clusters/{clusterId}/streams/{name}/consumers/{consumer}/behavior-fingerprint:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/streamName"
+      - $ref: "#/components/parameters/consumerName"
+    get:
+      tags: [Consumers]
+      summary: Get consumer behavior fingerprint
+      description: >
+        Returns the latest worker-reported Normal/Current msg/min and processing
+        latency from the configured JetStream KV bucket (default
+        nats_consol_fingerprints, key stream/durable). When no snapshot exists,
+        available=false (HTTP 200) so the UI can show an idle state.
+      responses:
+        "200":
+          description: Fingerprint snapshot (or available=false)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BehaviorFingerprintReport"
+
+  /api/v1/clusters/{clusterId}/streams/{name}/consumers/{consumer}/incident-reconstruction:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/streamName"
+      - $ref: "#/components/parameters/consumerName"
+    get:
+      tags: [Consumers]
+      summary: Reconstruct an automatic incident timeline for a consumer
+      description: >
+        Merges deploy annotations (or audit-change fallback), consumer lag /
+        redelivery / processing-stop detections, and named route disconnects
+        into a chronological timeline. Defaults to the last 24 hours.
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Reconstructed timeline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentReconstruction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/clusters/{clusterId}/streams/{name}/consumers/{consumer}/replay/dry-run:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/streamName"
+      - $ref: "#/components/parameters/consumerName"
+    post:
+      tags: [Consumers]
+      summary: Preview replay impact without mutating the consumer
+      description: >
+        Estimates message count, duration, consumers affected, and potential
+        duplicate services for a replay request. Does not reposition or create
+        durables. Duration uses a fixed instant throughput heuristic (1000 msg/s)
+        unless replayPolicy=original with a time window.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplayConsumerRequest"
+      responses:
+        "200":
+          description: Dry-run estimate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReplayDryRun"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/v1/clusters/{clusterId}/streams/{name}/consumers/{consumer}/replay:
     parameters:
       - $ref: "#/components/parameters/clusterId"
@@ -533,7 +989,9 @@ paths:
       description: >
         Repositions an existing durable (mode=reset) or creates a side-car durable
         (mode=sidecar) so messages are redelivered from a start sequence, time,
-        beginning, or new messages only. Does not republish payloads onto subjects.
+        beginning, or new messages only. Optional untilSeq, untilTime, and limit
+        bound the intended window (stored in consumer metadata; JetStream does not
+        enforce an end). Does not republish payloads onto subjects.
       requestBody:
         required: true
         content:
@@ -547,6 +1005,52 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReplayConsumerResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/clusters/{clusterId}/streams/{name}/messages/range:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/streamName"
+      - name: startSeq
+        in: query
+        schema:
+          type: integer
+          format: int64
+      - name: endSeq
+        in: query
+        schema:
+          type: integer
+          format: int64
+      - name: startTime
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: endTime
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 1000
+          maximum: 1000
+    get:
+      tags: [Messages]
+      summary: Fetch a closed range of stored messages by sequence or time
+      description: >
+        Returns stored messages without moving consumer cursors or republishing.
+        Provide either startSeq+endSeq or startTime+endTime.
+      responses:
+        "200":
+          description: Message range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageRangeResult"
         "400":
           $ref: "#/components/responses/BadRequest"
 
@@ -596,6 +1100,65 @@ paths:
                 $ref: "#/components/schemas/PublishMessageResult"
         "400":
           $ref: "#/components/responses/BadRequest"
+
+  /api/v1/clusters/{clusterId}/streams/{name}/dlq/messages:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/streamName"
+      - name: startSeq
+        in: query
+        schema:
+          type: integer
+          format: int64
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 100
+          maximum: 500
+    get:
+      tags: [Messages]
+      summary: List dead-letter messages
+      description: >
+        Lists stored messages on a DLQ stream (`*_DLQ` or metadata role=dlq),
+        parsing gopherust-io/nats DLQ headers into structured fields.
+      responses:
+        "200":
+          description: DLQ message page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DLQListResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/clusters/{clusterId}/streams/{name}/dlq/retry:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+      - $ref: "#/components/parameters/streamName"
+    post:
+      tags: [Messages]
+      summary: Retry dead-letter messages
+      description: >
+        Republishes selected (or all, capped) DLQ messages to their original
+        subjects, then deletes them from the DLQ stream.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DLQRetryRequest"
+      responses:
+        "200":
+          description: Retry batch result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DLQRetryResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /api/v1/admin/rotate-encryption-key:
     post:
@@ -651,6 +1214,30 @@ paths:
           description: Switching Protocols
         "400":
           $ref: "#/components/responses/BadRequest"
+
+  /api/v1/clusters/{clusterId}/snapshots/events:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [Live]
+      summary: Snapshot refresh events (SSE)
+      description: |
+        Server-Sent Events stream. Emits `event: snapshot` with JSON data
+        `{"clusterId":"...","capturedAt":"..."}` whenever the metrics snapshot hub
+        publishes a fresh scrape for this cluster. Comment pings (`: ping`) are sent
+        about every 15s to keep the connection alive. Auth uses the session cookie.
+      responses:
+        "200":
+          description: text/event-stream of snapshot notifications
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: |
+                  event: snapshot
+                  data: {"clusterId":"abc","capturedAt":"2026-07-28T00:00:00Z"}
+        "503":
+          description: Snapshot hub unavailable
 
   /api/v1/clusters/{clusterId}/kv/buckets:
     parameters:
@@ -892,11 +1479,82 @@ paths:
         "204":
           description: Deleted
 
+  /api/v1/clusters/{clusterId}/subject-permissions:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [NATSUsers]
+      summary: List NATS users permitted on a subject
+      description: |
+        Returns which NATS users in an account can publish, subscribe, and queue-subscribe
+        on the given subject. Queue subscribe uses the same JWT subscribe permission as subscribe.
+      parameters:
+        - name: account
+          in: query
+          schema:
+            type: string
+            default: Default
+        - name: subject
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Subject permissions lookup result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubjectPermissionsResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/clusters/{clusterId}/nats-users/subject-permissions:
+    parameters:
+      - $ref: "#/components/parameters/clusterId"
+    get:
+      tags: [NATSUsers]
+      deprecated: true
+      summary: List NATS users permitted on a subject (legacy path)
+      description: |
+        Legacy alias for `/subject-permissions`. Prefer the cluster-scoped path to avoid
+        colliding with `/nats-users/{userId}`.
+      parameters:
+        - name: account
+          in: query
+          schema:
+            type: string
+            default: Default
+        - name: subject
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Subject permissions lookup result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubjectPermissionsResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
 components:
   securitySchemes:
     basicAuth:
       type: http
       scheme: basic
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: RS256 session JWT from POST /api/v1/auth/login (same claims as the session cookie).
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: nats_consol_session
+      description: HttpOnly RS256 session JWT cookie set by login.
 
   parameters:
     clusterId:
@@ -995,13 +1653,57 @@ components:
         acknowledgedAt: { type: string, format: date-time }
         ruleName: { type: string }
 
+    Meta:
+      type: object
+      properties:
+        total: { type: integer }
+        offset: { type: integer }
+        limit: { type: integer }
+
+    ErrorBody:
+      type: object
+      required: [message, code]
+      properties:
+        message: { type: string }
+        code:
+          type: string
+          description: Stable machine-readable error code
+          enum:
+            - not_found
+            - forbidden
+            - unauthorized
+            - validation
+            - conflict
+            - timeout
+            - unavailable
+            - internal
+            - rate_limit
+            - csrf_invalid
+            - gone
+        retryable:
+          type: boolean
+          description: True when the client may safely retry the request (transient NATS/gateway failures and rate limits)
+        retryAfterSeconds:
+          type: integer
+          description: Suggested wait before retry when retryable is true
+      description: |
+        Nested error object. retryable and retryAfterSeconds appear for transient
+        failures (502/503/504 NATS errors and 429 rate limits).
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorBody"
+
     AlertListResponse:
       type: object
       properties:
-        alerts:
+        data:
           type: array
           items: { $ref: "#/components/schemas/Alert" }
-        total: { type: integer }
+        meta:
+          $ref: "#/components/schemas/Meta"
 
     AlertOpenSummary:
       type: object
@@ -1011,7 +1713,19 @@ components:
           type: array
           items: { $ref: "#/components/schemas/Alert" }
 
-    HealthResponse:
+    AlertOpenSummaryResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/AlertOpenSummary"
+
+    AlertResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/Alert"
+
+    HealthStatus:
       type: object
       properties:
         status:
@@ -1020,15 +1734,39 @@ components:
         postgres:
           type: string
           example: ok
-        nats_default_cluster:
+        natsDefaultCluster:
           type: string
           example: ok
 
-    ErrorResponse:
+    HealthResponse:
       type: object
       properties:
-        error:
-          type: string
+        data:
+          $ref: "#/components/schemas/HealthStatus"
+
+    SubjectPermissionEntry:
+      type: object
+      properties:
+        userId: { type: string, format: uuid }
+        name: { type: string }
+        signingGroup: { type: string }
+        assignedUserId: { type: string, format: uuid }
+        source: { type: string, enum: [user, signing-group, unrestricted] }
+        matchedPattern: { type: string }
+
+    SubjectPermissionsResult:
+      type: object
+      properties:
+        subject: { type: string }
+        publish:
+          type: array
+          items: { $ref: "#/components/schemas/SubjectPermissionEntry" }
+        subscribe:
+          type: array
+          items: { $ref: "#/components/schemas/SubjectPermissionEntry" }
+        queueSubscribe:
+          type: array
+          items: { $ref: "#/components/schemas/SubjectPermissionEntry" }
 
     Cluster:
       type: object
@@ -1038,32 +1776,73 @@ components:
           format: uuid
         name:
           type: string
-        nats_url:
+        natsUrl:
           type: string
-        monitoring_url:
+        monitoringUrl:
           type: string
-        has_creds:
+        hasCreds:
           type: boolean
-        has_token:
+        hasToken:
           type: boolean
-        is_default:
+        isDefault:
           type: boolean
-        created_at:
+        createdAt:
           type: string
           format: date-time
-        updated_at:
+        updatedAt:
           type: string
           format: date-time
+
+    ReplicaPeer:
+      type: object
+      required: [name, role, online]
+      properties:
+        name: { type: string }
+        role: { type: string, enum: [monitored, route, meta] }
+        online: { type: boolean }
+        current: { type: boolean }
+        leader: { type: boolean }
+        uptime: { type: string }
+        rtt: { type: string }
+        idle: { type: string }
+        version: { type: string }
+        ip: { type: string }
+        inMsgs: { type: integer, format: int64 }
+        outMsgs: { type: integer, format: int64 }
+        pending: { type: integer, format: int64 }
+        connections: { type: integer }
+        cpu: { type: number }
+        mem: { type: integer, format: int64 }
+
+    ReplicasSnapshot:
+      type: object
+      properties:
+        capturedAt: { type: string, format: date-time }
+        clusterName: { type: string }
+        monitoredServer: { type: string }
+        jetstreamLeader: { type: string }
+        clusterSize: { type: integer }
+        peerCount: { type: integer }
+        onlineCount: { type: integer }
+        peers:
+          type: array
+          items: { $ref: "#/components/schemas/ReplicaPeer" }
+
+    ClusterResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/Cluster"
 
     ClusterListResponse:
       type: object
       properties:
-        clusters:
+        data:
           type: array
           items:
             $ref: "#/components/schemas/Cluster"
-        total:
-          type: integer
+        meta:
+          $ref: "#/components/schemas/Meta"
 
     ClusterTestResponse:
       type: object
@@ -1214,12 +1993,275 @@ components:
     StreamListResponse:
       type: object
       properties:
-        streams:
+        data:
           type: array
           items:
             type: object
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    BlastRadius:
+      type: object
+      properties:
+        stream:
+          type: string
+        services:
+          type: integer
+          description: Unique service identities derived from consumers
+        streams:
+          type: integer
+          description: Related streams (mirror/source dependents and companion DLQ)
+        consumers:
+          type: integer
+        critical:
+          type: array
+          items:
+            type: string
+          description: Service names marked nats-consol/critical=true
+        serviceNames:
+          type: array
+          items:
+            type: string
+        relatedStreams:
+          type: array
+          items:
+            type: string
+        consumerNames:
+          type: array
+          items:
+            type: string
+          description: Consumer names that will be deleted with the stream
+
+    EventCatalogSnapshot:
+      type: object
+      properties:
+        capturedAt:
+          type: string
+          format: date-time
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/EventCatalogEntry"
+        totals:
+          $ref: "#/components/schemas/EventCatalogTotals"
+
+    EventCatalogTotals:
+      type: object
+      properties:
         total:
           type: integer
+        documented:
+          type: integer
+        undocumented:
+          type: integer
+        orphan:
+          type: integer
+
+    EventCatalogEntry:
+      type: object
+      properties:
+        subject:
+          type: string
+        owner:
+          type: string
+        description:
+          type: string
+        schema:
+          type: object
+          additionalProperties: true
+          description: JSON Schema for the event payload
+        example:
+          type: object
+          additionalProperties: true
+          description: Curated example payload
+        deprecated:
+          type: boolean
+        successorSubject:
+          type: string
+        deprecationNote:
+          type: string
+        updatedBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        streams:
+          type: array
+          items:
+            type: string
+        consumers:
+          type: array
+          items:
+            $ref: "#/components/schemas/EventCatalogConsumer"
+        documented:
+          type: boolean
+        orphan:
+          type: boolean
+          description: Documented in Postgres but not present in live JetStream inventory
+
+    EventCatalogConsumer:
+      type: object
+      properties:
+        name:
+          type: string
+        stream:
+          type: string
+        service:
+          type: string
+          description: Logical service from nats-consol/service metadata when set
+
+    EventCatalogDoc:
+      type: object
+      properties:
+        subject:
+          type: string
+        owner:
+          type: string
+        description:
+          type: string
+        schema:
+          type: object
+          additionalProperties: true
+        example:
+          type: object
+          additionalProperties: true
+        deprecated:
+          type: boolean
+        successorSubject:
+          type: string
+        deprecationNote:
+          type: string
+        updatedBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    EventCatalogUpsert:
+      type: object
+      properties:
+        owner:
+          type: string
+        description:
+          type: string
+        schema:
+          type: object
+          additionalProperties: true
+          description: JSON Schema object; omit or null to clear
+        example:
+          type: object
+          additionalProperties: true
+          description: Example payload object; omit or null to clear
+        deprecated:
+          type: boolean
+        successorSubject:
+          type: string
+        deprecationNote:
+          type: string
+
+    EventWikipediaSnapshot:
+      type: object
+      properties:
+        capturedAt:
+          type: string
+          format: date-time
+        pages:
+          type: array
+          items:
+            $ref: "#/components/schemas/EventWikipediaPage"
+        totals:
+          $ref: "#/components/schemas/EventWikipediaTotals"
+
+    EventWikipediaTotals:
+      type: object
+      properties:
+        total:
+          type: integer
+        documented:
+          type: integer
+        deprecated:
+          type: integer
+        orphan:
+          type: integer
+
+    EventWikipediaPage:
+      type: object
+      properties:
+        subject:
+          type: string
+        purpose:
+          type: string
+          description: From catalog description
+        history:
+          $ref: "#/components/schemas/EventWikipediaHistory"
+        owner:
+          type: string
+        consumers:
+          type: array
+          items:
+            $ref: "#/components/schemas/EventCatalogConsumer"
+        example:
+          type: object
+          additionalProperties: true
+        schema:
+          type: object
+          additionalProperties: true
+        relatedEvents:
+          type: array
+          items:
+            type: string
+        knownIncidents:
+          type: array
+          items:
+            $ref: "#/components/schemas/EventWikipediaIncidentLink"
+        deprecation:
+          $ref: "#/components/schemas/EventWikipediaDeprecation"
+        documented:
+          type: boolean
+        orphan:
+          type: boolean
+
+    EventWikipediaHistory:
+      type: object
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+        streams:
+          type: array
+          items:
+            type: string
+
+    EventWikipediaDeprecation:
+      type: object
+      properties:
+        deprecated:
+          type: boolean
+        successorSubject:
+          type: string
+        note:
+          type: string
+
+    EventWikipediaIncidentLink:
+      type: object
+      properties:
+        stream:
+          type: string
+        consumer:
+          type: string
+        service:
+          type: string
 
     ConsumerConfig:
       type: object
@@ -1317,6 +2359,17 @@ components:
           type: string
           format: date-time
           description: Required when from=time (RFC3339)
+        untilSeq:
+          type: integer
+          format: int64
+          description: Inclusive end sequence bound (metadata + result; JetStream has no server end)
+        untilTime:
+          type: string
+          format: date-time
+          description: Inclusive end timestamp (resolved to seq when possible)
+        limit:
+          type: integer
+          description: Max messages in the intended replay window (use 1 for one message)
         replayPolicy:
           type: string
           enum: [instant, original]
@@ -1334,16 +2387,420 @@ components:
         mode:
           type: string
           enum: [reset, sidecar]
+        startSeq:
+          type: integer
+          format: int64
+        untilSeq:
+          type: integer
+          format: int64
+        limit:
+          type: integer
+        startTime:
+          type: string
+          format: date-time
+        untilTime:
+          type: string
+          format: date-time
+
+    ReplayDryRun:
+      type: object
+      properties:
+        messages:
+          type: integer
+          format: int64
+          description: Estimated messages in the intended replay window
+        estimatedDurationMs:
+          type: integer
+          format: int64
+          description: Estimated duration in milliseconds
+        consumersAffected:
+          type: integer
+          description: Durables this operation will feed (1 for reset/sidecar)
+        potentialDuplicates:
+          type: array
+          items:
+            type: string
+          description: Service identities that may re-process messages
+        unbounded:
+          type: boolean
+          description: True when the request has no until/limit bound
+        approximate:
+          type: boolean
+          description: True when message count could not be resolved precisely (e.g. time window)
+
+    BehaviorFingerprintSnapshot:
+      type: object
+      properties:
+        msgPerMin:
+          type: number
+        processingMs:
+          type: number
+          description: Mean handler latency in milliseconds
+
+    BehaviorFingerprintReport:
+      type: object
+      properties:
+        available:
+          type: boolean
+          description: False when no KV snapshot exists for this consumer
+        stream:
+          type: string
+        durable:
+          type: string
+        anomaly:
+          type: boolean
+        normal:
+          $ref: "#/components/schemas/BehaviorFingerprintSnapshot"
+        current:
+          $ref: "#/components/schemas/BehaviorFingerprintSnapshot"
+        sustainedForMs:
+          type: integer
+          format: int64
+        updatedAt:
+          type: string
+          format: date-time
+
+    HiddenBottleneckFinding:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+            - correlated_payload_lag
+            - schedule_lag_spike
+            - schedule_payload_growth
+            - schedule_processing_slow
+        severity:
+          type: string
+          enum: [info, warn, critical]
+        title:
+          type: string
+        evidence:
+          type: array
+          items:
+            type: string
+        suggestion:
+          type: string
+        stream:
+          type: string
+        consumer:
+          type: string
+        schedule:
+          type: string
+        weekday:
+          type: integer
+        hourUtc:
+          type: integer
+
+    HiddenBottleneckSnapshot:
+      type: object
+      properties:
+        capturedAt:
+          type: string
+          format: date-time
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        verdict:
+          type: string
+          enum: [healthy, needs_attention, at_risk]
+        findings:
+          type: array
+          items:
+            $ref: "#/components/schemas/HiddenBottleneckFinding"
+        suggestions:
+          type: array
+          items:
+            type: string
+        totals:
+          type: object
+          properties:
+            problems:
+              type: integer
+            critical:
+              type: integer
+            warn:
+              type: integer
+            info:
+              type: integer
+            byKind:
+              type: object
+              additionalProperties:
+                type: integer
+        demo:
+          type: boolean
+
+    ChaosStoryAct:
+      type: object
+      properties:
+        title: { type: string }
+        description: { type: string }
+        kind:
+          type: string
+          enum:
+            - cluster_down
+            - quorum_loss
+            - schema_mismatch
+            - consumer_deploy
+            - traffic_spike
+            - partition
+            - recovery
+        targets:
+          type: array
+          items: { type: string }
+        durationSec: { type: integer }
+
+    ChaosStory:
+      type: object
+      properties:
+        title: { type: string }
+        setting: { type: string }
+        severity:
+          type: string
+          enum: [info, warn, critical]
+        summary: { type: string }
+        acts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChaosStoryAct"
+        blastRadius:
+          type: array
+          items: { type: string }
+        recoveryHints:
+          type: array
+          items: { type: string }
+        source: { type: string }
+        demo: { type: boolean }
+
+    ChaosStorySeed:
+      type: object
+      properties:
+        streams:
+          type: array
+          items: { type: string }
+        consumers:
+          type: array
+          items: { type: string }
+        subjects:
+          type: array
+          items: { type: string }
+
+    ChaosStoryEnvelope:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            story:
+              $ref: "#/components/schemas/ChaosStory"
+            seed:
+              $ref: "#/components/schemas/ChaosStorySeed"
+
+    IncidentAnnotationCreate:
+      type: object
+      required: [title]
+      properties:
+        occurredAt:
+          type: string
+          format: date-time
+          description: Defaults to server time when omitted
+        type:
+          type: string
+          description: Annotation kind (default deploy)
+          enum: [deploy]
+        title:
+          type: string
+        details:
+          type: string
+
+    IncidentAnnotation:
+      type: object
+      properties:
+        id:
+          type: string
+        clusterId:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        type:
+          type: string
+        title:
+          type: string
+        details:
+          type: string
+
+    IncidentTimelineEvent:
+      type: object
+      properties:
+        at:
+          type: string
+          format: date-time
+        category:
+          type: string
+          enum: [deploy, change, lag_growth, redelivery_spike, node_disconnect, processing_stopped]
+        label:
+          type: string
+        source:
+          type: string
+        evidence:
+          type: string
+
+    IncidentReconstruction:
+      type: object
+      properties:
+        clusterId:
+          type: string
+        stream:
+          type: string
+        consumer:
+          type: string
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/IncidentTimelineEvent"
+        eventCount:
+          type: integer
+        usedDeployAnnotations:
+          type: boolean
+        usedAuditFallback:
+          type: boolean
+
+    MessageRangeResult:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/StreamMessage"
+        truncated:
+          type: boolean
+
+    DLQMessage:
+      type: object
+      properties:
+        seq:
+          type: integer
+          format: int64
+        subject:
+          type: string
+        time:
+          type: string
+        data:
+          type: string
+          description: Base64-encoded payload
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        reason:
+          type: string
+        originalSubject:
+          type: string
+        sourceStream:
+          type: string
+        sourceSeq:
+          type: integer
+          format: int64
+        consumer:
+          type: string
+        numDelivered:
+          type: integer
+          format: int64
+        autopsyError:
+          type: string
+        autopsyHash:
+          type: string
+        autopsyStack:
+          type: string
+
+    DLQListResult:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/DLQMessage"
+        truncated:
+          type: boolean
+        nextSeq:
+          type: integer
+          format: int64
+
+    DLQRetryRequest:
+      type: object
+      properties:
+        seqs:
+          type: array
+          items:
+            type: integer
+            format: int64
+        all:
+          type: boolean
+        limit:
+          type: integer
+          description: Cap for all=true (default 10000, max 10000); request pages until exhausted or this max
+
+    DLQRetryFailure:
+      type: object
+      properties:
+        seq:
+          type: integer
+          format: int64
+        error:
+          type: string
+
+    DLQRetryResult:
+      type: object
+      properties:
+        retried:
+          type: integer
+        failed:
+          type: array
+          items:
+            $ref: "#/components/schemas/DLQRetryFailure"
+        truncated:
+          type: boolean
+          description: True when retry-all hit the safety max and more DLQ messages remain
+        remaining:
+          type: integer
+          description: Approximate messages left unretried when truncated
+
+    StreamMessage:
+      type: object
+      properties:
+        seq:
+          type: integer
+        subject:
+          type: string
+        time:
+          type: string
+        data:
+          type: string
+          description: Base64-encoded payload
+        headers:
+          type: object
+          additionalProperties:
+            type: string
 
     ConsumerListResponse:
       type: object
       properties:
-        consumers:
+        data:
           type: array
           items:
             type: object
-        total:
-          type: integer
+        meta:
+          $ref: "#/components/schemas/Meta"
 
     RawStreamMessage:
       type: object
@@ -1480,22 +2937,22 @@ components:
     KVBucketListResponse:
       type: object
       properties:
-        buckets:
+        data:
           type: array
           items:
             $ref: "#/components/schemas/KVBucketInfo"
-        total:
-          type: integer
+        meta:
+          $ref: "#/components/schemas/Meta"
 
     KVKeyListResponse:
       type: object
       properties:
-        keys:
+        data:
           type: array
           items:
             type: string
-        total:
-          type: integer
+        meta:
+          $ref: "#/components/schemas/Meta"
 
     KVEntry:
       type: object
@@ -1524,12 +2981,12 @@ components:
     KVHistoryResponse:
       type: object
       properties:
-        entries:
+        data:
           type: array
           items:
             $ref: "#/components/schemas/KVEntry"
-        total:
-          type: integer
+        meta:
+          $ref: "#/components/schemas/Meta"
 
     ObjectBucketConfig:
       type: object
@@ -1606,22 +3063,22 @@ components:
     ObjectBucketListResponse:
       type: object
       properties:
-        buckets:
+        data:
           type: array
           items:
             $ref: "#/components/schemas/ObjectBucketInfo"
-        total:
-          type: integer
+        meta:
+          $ref: "#/components/schemas/Meta"
 
     ObjectListResponse:
       type: object
       properties:
-        objects:
+        data:
           type: array
           items:
             type: string
-        total:
-          type: integer
+        meta:
+          $ref: "#/components/schemas/Meta"
 
     ObjectInfo:
       type: object

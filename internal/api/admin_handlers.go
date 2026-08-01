@@ -5,49 +5,50 @@ import (
 
 	"github.com/valyala/fasthttp"
 
+	"github.com/gopherust-io/nats-consol/internal/app"
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/crypto"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/httpctx/httpstatus"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 type AdminHandler struct {
-	store *store.Store
+	admin *app.AdminService
 }
 
-func NewAdminHandler(st *store.Store) *AdminHandler {
-	return &AdminHandler{store: st}
+func NewAdminHandler(admin *app.AdminService) *AdminHandler {
+	return &AdminHandler{admin: admin}
 }
 
 func (h *AdminHandler) RotateEncryptionKey(ctx *fasthttp.RequestCtx) {
 	c := httpctx.FromRequest(ctx)
 	user, ok := auth.UserFromContext(c)
 	if !ok || !user.IsRoot {
-		ctx.SetStatusCode(fasthttp.StatusForbidden)
-		ctx.SetBodyString("forbidden")
+		httpstatus.WriteForbidden(ctx)
 		return
 	}
 
 	var req domain.RotateEncryptionKeyRequest
-	if err := serializer.UnmarshalRequest(ctx.PostBody(), &req); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.Unmarshal(ctx.PostBody(), &req); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if req.CurrentKey == "" || req.NewKey == "" {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, domain.ErrInvalidInput)
+	if commonstrings.IsEmpty(req.CurrentKey) || commonstrings.IsEmpty(req.NewKey) {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, domain.ErrInvalidInput)
 		return
 	}
 	if len(req.NewKey) < 16 {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, crypto.ErrInvalidKey)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, crypto.ErrInvalidKey)
 		return
 	}
 
-	dryRun := strings.EqualFold(string(ctx.QueryArgs().Peek("dryRun")), "true")
-	stats, err := h.store.RotateEncryptionKeys(c, req.CurrentKey, req.NewKey, dryRun)
+	dryRun := strings.EqualFold(commonstrings.BytesToString(ctx.QueryArgs().Peek("dryRun")), "true")
+	stats, err := h.admin.RotateEncryptionKeys(c, req.CurrentKey, req.NewKey, dryRun)
 	if err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 
@@ -55,7 +56,7 @@ func (h *AdminHandler) RotateEncryptionKey(ctx *fasthttp.RequestCtx) {
 	if dryRun {
 		msg = "Dry run only — no data was modified."
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, domain.RotateEncryptionKeyResult{
+	httpstatus.WriteData(ctx, fasthttp.StatusOK, domain.RotateEncryptionKeyResult{
 		ClustersUpdated: stats.ClustersUpdated,
 		DryRun:          dryRun,
 		Message:         msg,

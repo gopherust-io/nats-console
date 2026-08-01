@@ -5,9 +5,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Alert from "../components/ui/Alert";
 import EmptyState from "../components/ui/EmptyState";
 import PageHeader from "../components/ui/PageHeader";
+import QueryErrorState from "../components/ui/QueryErrorState";
 import { acknowledgeAlert, fetchAlerts, type AlertStatus } from "../lib/alerts";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
+import { ALERTS_POLL_MS } from "../lib/constants";
+import { visibilityAwareInterval } from "../lib/query";
 
 function formatWhen(iso: string) {
   try {
@@ -28,6 +31,7 @@ export default function AlertsPage() {
   const alertsQuery = useQuery({
     queryKey: ["alerts", status, filterCluster],
     queryFn: () => fetchAlerts({ status, clusterId: filterCluster || undefined, limit: 100 }),
+    refetchInterval: visibilityAwareInterval(ALERTS_POLL_MS),
   });
 
   const ackMutation = useMutation({
@@ -42,9 +46,7 @@ export default function AlertsPage() {
 
   const alerts = alertsQuery.data?.alerts ?? [];
   const total = alertsQuery.data?.total ?? 0;
-  const error =
-    (alertsQuery.error instanceof Error ? alertsQuery.error.message : "") ||
-    (ackMutation.error instanceof Error ? ackMutation.error.message : "");
+  const mutationError = ackMutation.error instanceof Error ? ackMutation.error.message : "";
 
   function onFilter(event: FormEvent) {
     event.preventDefault();
@@ -71,7 +73,10 @@ export default function AlertsPage() {
         }
       />
 
-      <Alert variant="error">{error}</Alert>
+      {alertsQuery.isError && (
+        <QueryErrorState error={alertsQuery.error} onRetry={() => void alertsQuery.refetch()} />
+      )}
+      {mutationError && <Alert variant="error">{mutationError}</Alert>}
 
       <div className="nc-tabs" style={{ marginBottom: 16 }}>
         <button type="button" className={`nc-tab${status === "open" ? " active" : ""}`} onClick={() => setStatus("open")}>
@@ -129,7 +134,7 @@ export default function AlertsPage() {
                   </td>
                   <td>
                     <div>{alert.message || alert.ruleName}</div>
-                    <div className="text-muted" style={{ fontSize: "0.8rem" }}>
+                    <div className="text-muted text-md">
                       {alert.ruleName}
                       {alert.acknowledgedAt ? ` · ${t("alerts.acknowledged")}` : ""}
                     </div>

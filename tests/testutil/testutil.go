@@ -3,9 +3,9 @@ package testutil
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,6 +28,7 @@ import (
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
 	"github.com/gopherust-io/nats-consol/internal/snapshot"
 	"github.com/gopherust-io/nats-consol/internal/store"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 // Stack holds containers, store, and services for API integration tests.
@@ -40,7 +41,7 @@ type Stack struct {
 // RequireDocker skips the test when Docker is unavailable or SKIP_TESTCONTAINERS is set.
 func RequireDocker(t *testing.T) {
 	t.Helper()
-	if os.Getenv("SKIP_TESTCONTAINERS") != "" {
+	if !commonstrings.IsEmpty(os.Getenv("SKIP_TESTCONTAINERS")) {
 		t.Skip("SKIP_TESTCONTAINERS set")
 	}
 	if _, err := testcontainers.NewDockerProvider(); err != nil {
@@ -159,14 +160,29 @@ func SetupStack(t *testing.T) *Stack {
 	st := OpenStore(t, ctx, pgURL)
 
 	cfg := config.Config{
-		NATSURL:            natsEP.ClientURL,
-		MonitoringURL:      natsEP.MonitoringURL,
-		RequestTimeout:     10 * time.Second,
-		AuthEnabled:        false,
-		DefaultClusterName: "test",
-		AdminUsername:      "admin",
-		AdminPassword:      "admin",
-		SessionSecret:      "test-session-secret-key",
+		HTTP: config.HTTPConfig{
+			MaxRequestBodySize: 1 << 20,
+		},
+		NATS: config.NATSConfig{
+			URL:           natsEP.ClientURL,
+			MonitoringURL: natsEP.MonitoringURL,
+		},
+		RequestTimeout:         10 * time.Second,
+		DefaultClusterName:     "test",
+		AdminUsername:          "admin",
+		AdminPassword:          "admin",
+		MaxMonitoringBodyBytes: 8 << 20,
+		Auth: config.AuthConfig{
+			SessionPrivateKey: TestSessionPrivateKeyPEM,
+			SessionPublicKey:  TestSessionPublicKeyPEM,
+			RateLimit:         10,
+			RateLimitWindow:   time.Minute,
+		},
+		EncryptionKey: "test-session-secret-key",
+		Pagination: config.PaginationConfig{
+			DefaultLimit: 100,
+			MaxLimit:     500,
+		},
 	}
 
 	manager := natsclient.NewManager(st, cfg)
@@ -204,15 +220,16 @@ func (s *Stack) Services(t *testing.T) *app.Services {
 	}
 	gateway := natsadapter.NewGateway(s.Manager)
 	uow := pgadapter.WrapStore(s.Store)
-	svc := app.NewServices(uow, gateway, authSvc, nil)
+	svc := app.NewServices(uow, gateway, authSvc, nil, s.Cfg.HealthCheckTimeout)
 	svc.JetStream = gateway
 	return svc
 }
 
 // Server wraps an in-memory HTTP server backed by fasthttp.
 type Server struct {
-	Client *http.Client
-	ln     *fasthttputil.InmemoryListener
+	Client       *HTTPClient // injects Basic admin:admin
+	UnauthClient *HTTPClient // no Authorization header
+	ln           *fasthttputil.InmemoryListener
 }
 
 // DialConn returns a connection to the in-memory server (for WebSocket tests).
@@ -232,38 +249,28 @@ func (s *Stack) NewServer(t *testing.T, mutate func(*config.Config)) *Server {
 	if err != nil {
 		t.Fatalf("auth service: %v", err)
 	}
-	if cfg.AuthEnabled {
-		if err := authSvc.SeedAdmin(context.Background()); err != nil {
-			t.Fatalf("seed admin: %v", err)
-		}
+	if err := authSvc.SeedAdmin(context.Background()); err != nil {
+		t.Fatalf("seed admin: %v", err)
 	}
 
 	gateway := natsadapter.NewGateway(s.Manager)
 	uow := pgadapter.WrapStore(s.Store)
-	services := app.NewServices(uow, gateway, authSvc, nil)
+	services := app.NewServices(uow, gateway, authSvc, nil, cfg.HealthCheckTimeout)
 	services.JetStream = gateway
 
-	handler := api.NewRouter(api.RouterDeps{
-		Config:      cfg,
-		Services:    services,
-		AuditWriter: audit.NewWriter(s.Store),
-		Store:       s.Store,
-		SnapshotHub: snapshot.NewHub(),
-	})
+	handler := api.NewRouter(services, audit.NewWriter(s.Store), snapshot.NewHub(), cfg).InitRouter()
 
 	ln := fasthttputil.NewInmemoryListener()
 	server := &fasthttp.Server{Handler: handler}
 	go func() { _ = server.Serve(ln) }()
 	t.Cleanup(func() { _ = server.Shutdown() })
 
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return ln.Dial()
-			},
-		},
+	adminAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte(cfg.AdminUsername+":"+cfg.AdminPassword))
+	return &Server{
+		Client:       newHTTPClient(ln, adminAuth),
+		UnauthClient: newHTTPClient(ln, ""),
+		ln:           ln,
 	}
-	return &Server{Client: client, ln: ln}
 }
 
 // BaseURL is a helper for building cluster-scoped paths.

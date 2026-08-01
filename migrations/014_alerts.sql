@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 CREATE TABLE alert_rules (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   cluster_id    UUID REFERENCES clusters(id) ON DELETE CASCADE,
@@ -76,3 +78,9 @@ VALUES
     false,
     'system'
   );
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+SELECT 1;
+-- +goose StatementEnd

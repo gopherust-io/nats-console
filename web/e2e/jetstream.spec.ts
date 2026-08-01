@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { emptyConsumers, emptyStreams, sampleConsumer, sampleStream } from "./fixtures/api";
+import { sampleConsumer, sampleStream } from "./fixtures/api";
 import { accountBase } from "./fixtures/cluster";
 import { mockClusterApis, mockJson, mockShell, mockStreamDetail } from "./helpers/mockApi";
 
@@ -20,7 +20,7 @@ test.describe("jetstream", () => {
   });
 
   test("create stream from hub", async ({ page }) => {
-    let streams = [...emptyStreams.streams];
+    let streams: ReturnType<typeof sampleStream>[] = [];
 
     await page.route("**/api/v1/clusters/*/streams**", async (route) => {
       const method = route.request().method();
@@ -33,7 +33,7 @@ test.describe("jetstream", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(created),
+          body: JSON.stringify({ data: created }),
         });
         return;
       }
@@ -41,7 +41,7 @@ test.describe("jetstream", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ streams, total: streams.length }),
+          body: JSON.stringify({ data: streams, meta: { total: streams.length } }),
         });
         return;
       }
@@ -71,7 +71,7 @@ test.describe("jetstream", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ seq: 1 }),
+          body: JSON.stringify({ data: { seq: 1 } }),
         });
         return;
       }
@@ -79,7 +79,7 @@ test.describe("jetstream", () => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          message: { seq: 1, subject: "orders.new", time: "2024-01-01T00:00:00Z", data: btoa("{}") },
+          data: { message: { seq: 1, subject: "orders.new", time: "2024-01-01T00:00:00Z", data: btoa("{}") } },
         }),
       });
     });
@@ -102,7 +102,7 @@ test.describe("jetstream", () => {
     let consumers: ReturnType<typeof sampleConsumer>[] = [];
     let lastCreateBody: Record<string, unknown> | null = null;
 
-    await mockJson(page, "**/api/v1/clusters/*/streams/ORDERS", stream);
+    await mockJson(page, "**/api/v1/clusters/*/streams/ORDERS", { data: stream });
     await page.route("**/api/v1/clusters/*/streams/ORDERS/consumers**", async (route) => {
       const method = route.request().method();
       if (method === "POST") {
@@ -113,14 +113,14 @@ test.describe("jetstream", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(created),
+          body: JSON.stringify({ data: created }),
         });
         return;
       }
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ ...emptyConsumers, consumers, total: consumers.length }),
+        body: JSON.stringify({ data: consumers, meta: { total: consumers.length, offset: 0, limit: 50 } }),
       });
     });
 
@@ -154,23 +154,32 @@ test.describe("jetstream", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ purged: 0 }),
+        body: JSON.stringify({ data: { purged: 0 } }),
       });
     });
 
     await page.goto(`${jetstream}/streams/ORDERS`);
-    page.once("dialog", (dialog) => {
-      void dialog.accept();
-    });
     await page.getByRole("button", { name: "Purge Stream" }).click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Purge" }).click();
     await expect.poll(() => purged).toBe(true);
   });
 
   test("consumer detail loads and delete", async ({ page }) => {
-    const stream = sampleStream("ORDERS");
+    const stream = {
+      ...sampleStream("ORDERS"),
+      state: {
+        messages: 100,
+        bytes: 1024,
+        firstSeq: 1,
+        lastSeq: 100,
+        consumerCount: 1,
+      },
+    };
     const consumer = sampleConsumer("worker");
-    await mockJson(page, "**/api/v1/clusters/*/streams/ORDERS", stream);
-    await mockJson(page, "**/api/v1/clusters/*/streams/ORDERS/consumers/worker", consumer);
+    await mockJson(page, "**/api/v1/clusters/*/streams/ORDERS", { data: stream });
+    await mockJson(page, "**/api/v1/clusters/*/streams/ORDERS/consumers/worker", { data: consumer });
 
     let deleted = false;
     await page.route("**/api/v1/clusters/*/streams/ORDERS/consumers/worker", async (route) => {
@@ -182,23 +191,27 @@ test.describe("jetstream", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(consumer),
+        body: JSON.stringify({ data: consumer }),
       });
     });
 
     await page.goto(`${jetstream}/streams/ORDERS/consumers/worker`);
-    await expect(page.getByRole("heading", { name: "worker" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "worker", level: 1 })).toBeVisible();
+    await expect(page.getByText("Lag", { exact: true })).toBeVisible();
+    await expect(page.getByText("Pending", { exact: true })).toBeVisible();
+    await expect(page.getByText("Waiting", { exact: true })).toBeVisible();
+    await expect(page.getByText("Redelivered", { exact: true })).toBeVisible();
+    await expect(page.getByText("Ack Wait", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Delete Consumer" })).toBeVisible();
-    page.once("dialog", (dialog) => {
-      void dialog.accept();
-    });
     await page.getByRole("button", { name: "Delete Consumer" }).click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Delete" }).click();
     await expect.poll(() => deleted).toBe(true);
   });
 
   test("live stream page shows waiting state", async ({ page }) => {
     const stream = sampleStream("ORDERS");
-    await mockJson(page, "**/api/v1/clusters/*/streams/ORDERS", stream);
+    await mockJson(page, "**/api/v1/clusters/*/streams/ORDERS", { data: stream });
 
     await page.goto(`${jetstream}/streams/ORDERS/live`);
     await expect(page.getByRole("heading", { name: "Live: ORDERS" })).toBeVisible();

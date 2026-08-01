@@ -1,20 +1,21 @@
 package jsonkeys
 
 import (
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"strings"
 	"unicode"
 )
 
 // SnakeToCamel converts snake_case keys to lowerCamelCase.
 func SnakeToCamel(key string) string {
-	if key == "" || !strings.Contains(key, "_") {
+	if commonstrings.IsEmpty(key) || !strings.Contains(key, "_") {
 		return key
 	}
 	parts := strings.Split(key, "_")
 	out := parts[0]
 	var outSb15 strings.Builder
 	for _, part := range parts[1:] {
-		if part == "" {
+		if commonstrings.IsEmpty(part) {
 			continue
 		}
 		outSb15.WriteString(strings.ToUpper(part[:1]) + part[1:])
@@ -25,7 +26,7 @@ func SnakeToCamel(key string) string {
 
 // CamelToSnake converts lowerCamelCase / PascalCase keys to snake_case.
 func CamelToSnake(key string) string {
-	if key == "" {
+	if commonstrings.IsEmpty(key) {
 		return key
 	}
 	var b strings.Builder

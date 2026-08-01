@@ -3,9 +3,10 @@ package api
 import (
 	"testing"
 
-	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gopherust-io/nats-consol/internal/domain"
 )
 
 func TestValidateAlertRuleCreate(t *testing.T) {
@@ -26,9 +27,4 @@ func TestValidateAlertRuleCreate(t *testing.T) {
 		Severity:   domain.AlertSeverityWarning,
 	})
 	assert.Error(t, err)
-}
-
-func TestIsLongRunningProfilePathStillWorks(t *testing.T) {
-	// Keep package tests compiling alongside alerts additions.
-	assert.True(t, isPprofPath("/debug/pprof"))
 }

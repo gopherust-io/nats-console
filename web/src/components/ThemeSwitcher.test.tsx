@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import ThemeSwitcher from "./ThemeSwitcher";
@@ -7,6 +7,7 @@ import { ThemeProvider } from "../lib/theme";
 
 vi.mock("../lib/themeStyles", () => ({
   loadThemeStyles: vi.fn(async () => undefined),
+  preloadThemeStyles: vi.fn(async () => undefined),
 }));
 
 describe("ThemeSwitcher", () => {
@@ -18,13 +19,15 @@ describe("ThemeSwitcher", () => {
       </ThemeProvider>,
     );
 
-    const toggle = screen.getByRole("button", { name: "Switch to Console Light" });
+    const toggle = screen.getByRole("button", { name: /Switch to Console Light/ });
     expect(toggle).toBeInTheDocument();
     await user.click(toggle);
 
-    expect(document.documentElement.getAttribute("data-theme")).toBe("control-light");
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute("data-theme")).toBe("control-light");
+    });
     expect(localStorage.getItem(STORAGE_KEYS.theme)).toBe("control-light");
-    expect(screen.getByRole("button", { name: "Switch to Console Dark" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Switch to Console Dark/ })).toBeInTheDocument();
   });
 
   it("toggles back to dark from light", async () => {
@@ -36,8 +39,10 @@ describe("ThemeSwitcher", () => {
       </ThemeProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Switch to Console Dark" }));
-    expect(document.documentElement.getAttribute("data-theme")).toBe("control");
+    await user.click(screen.getByRole("button", { name: /Switch to Console Dark/ }));
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute("data-theme")).toBe("control");
+    });
     expect(localStorage.getItem(STORAGE_KEYS.theme)).toBe("control");
   });
 });

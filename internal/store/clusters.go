@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -52,15 +52,12 @@ type ClusterUpdate struct {
 
 func (s *Store) CountClusters(ctx context.Context) (int, error) {
 	var count int
-	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM clusters`).Scan(&count)
+	err := s.pool.QueryRow(ctx, queryCountClusters).Scan(&count)
 	return count, err
 }
 
 func (s *Store) ListClusters(ctx context.Context) ([]Cluster, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, nats_url, monitoring_url, creds_file_path, token, is_default, created_at, updated_at
-		FROM clusters
-		ORDER BY is_default DESC, name ASC`)
+	rows, err := s.pool.Query(ctx, queryListClusters)
 	if err != nil {
 		return nil, err
 	}
@@ -81,21 +78,15 @@ func (s *Store) ListClusters(ctx context.Context) ([]Cluster, error) {
 }
 
 func (s *Store) GetCluster(ctx context.Context, id string) (Cluster, error) {
-	row := s.pool.QueryRow(ctx, `
-		SELECT id, name, nats_url, monitoring_url, creds_file_path, token, is_default, created_at, updated_at
-		FROM clusters WHERE id = $1`, id)
-	return scanClusterRow(row)
+	return scanClusterRow(s.pool.QueryRow(ctx, queryGetClusterByID, id))
 }
 
 func (s *Store) GetDefaultCluster(ctx context.Context) (Cluster, error) {
-	row := s.pool.QueryRow(ctx, `
-		SELECT id, name, nats_url, monitoring_url, creds_file_path, token, is_default, created_at, updated_at
-		FROM clusters WHERE is_default = TRUE LIMIT 1`)
-	return scanClusterRow(row)
+	return scanClusterRow(s.pool.QueryRow(ctx, queryGetDefaultCluster))
 }
 
 func (s *Store) CreateCluster(ctx context.Context, in ClusterCreate) (Cluster, error) {
-	id := uuid.New().String()
+	id := newID()
 	now := time.Now().UTC()
 
 	tx, err := s.pool.Begin(ctx)
@@ -105,7 +96,7 @@ func (s *Store) CreateCluster(ctx context.Context, in ClusterCreate) (Cluster, e
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if in.IsDefault {
-		if _, err := tx.Exec(ctx, `UPDATE clusters SET is_default = FALSE, updated_at = $1`, now); err != nil {
+		if _, err := tx.Exec(ctx, queryClearDefaultClusters, now); err != nil {
 			return Cluster{}, err
 		}
 	}
@@ -115,13 +106,8 @@ func (s *Store) CreateCluster(ctx context.Context, in ClusterCreate) (Cluster, e
 		return Cluster{}, fmt.Errorf("encrypt token: %w", err)
 	}
 
-	row := tx.QueryRow(ctx, `
-		INSERT INTO clusters (id, name, nats_url, monitoring_url, creds_file_path, token, is_default, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, name, nats_url, monitoring_url, creds_file_path, token, is_default, created_at, updated_at`,
-		id, in.Name, in.NATSURL, in.MonitoringURL, in.CredsFilePath, token, in.IsDefault, now, now)
-
-	c, err := scanClusterRow(row)
+	c, err := scanClusterRow(tx.QueryRow(ctx, queryInsertCluster,
+		id, in.Name, in.NATSURL, in.MonitoringURL, in.CredsFilePath, token, in.IsDefault, now, now))
 	if err != nil {
 		return Cluster{}, err
 	}
@@ -168,20 +154,13 @@ func (s *Store) UpdateCluster(ctx context.Context, id string, in ClusterUpdate) 
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if current.IsDefault {
-		if _, err := tx.Exec(ctx, `UPDATE clusters SET is_default = FALSE, updated_at = $1 WHERE id <> $2`, current.UpdatedAt, id); err != nil {
+		if _, err := tx.Exec(ctx, queryClearDefaultClustersExcept, current.UpdatedAt, id); err != nil {
 			return Cluster{}, err
 		}
 	}
 
-	row := tx.QueryRow(ctx, `
-		UPDATE clusters
-		SET name = $2, nats_url = $3, monitoring_url = $4, creds_file_path = $5, token = $6,
-		    is_default = $7, updated_at = $8
-		WHERE id = $1
-		RETURNING id, name, nats_url, monitoring_url, creds_file_path, token, is_default, created_at, updated_at`,
-		id, current.Name, current.NATSURL, current.MonitoringURL, current.CredsFilePath, current.Token, current.IsDefault, current.UpdatedAt)
-
-	c, err := scanClusterRow(row)
+	c, err := scanClusterRow(tx.QueryRow(ctx, queryUpdateCluster,
+		id, current.Name, current.NATSURL, current.MonitoringURL, current.CredsFilePath, current.Token, current.IsDefault, current.UpdatedAt))
 	if err != nil {
 		return Cluster{}, err
 	}
@@ -205,7 +184,7 @@ func (s *Store) GetClusterCredentials(ctx context.Context, id string) (Cluster, 
 }
 
 func (s *Store) DeleteCluster(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM clusters WHERE id = $1`, id)
+	tag, err := s.pool.Exec(ctx, queryDeleteCluster, id)
 	if err != nil {
 		return err
 	}
@@ -224,8 +203,8 @@ func scanCluster(rows pgx.Rows) (Cluster, error) {
 	if err != nil {
 		return Cluster{}, err
 	}
-	c.HasCreds = c.CredsFilePath != ""
-	c.HasToken = c.Token != ""
+	c.HasCreds = !strings.IsEmpty(c.CredsFilePath)
+	c.HasToken = !strings.IsEmpty(c.Token)
 	return c, nil
 }
 
@@ -241,7 +220,7 @@ func scanClusterRow(row pgx.Row) (Cluster, error) {
 	if err != nil {
 		return Cluster{}, fmt.Errorf("scan cluster: %w", err)
 	}
-	c.HasCreds = c.CredsFilePath != ""
-	c.HasToken = c.Token != ""
+	c.HasCreds = !strings.IsEmpty(c.CredsFilePath)
+	c.HasToken = !strings.IsEmpty(c.Token)
 	return c, nil
 }

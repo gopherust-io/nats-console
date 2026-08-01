@@ -4,6 +4,7 @@ import (
 	"maps"
 	"time"
 
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/nats-io/nats.go"
 )
 
@@ -29,10 +30,12 @@ func StreamInfoFromNATS(info *nats.StreamInfo) StreamInfo {
 	if info == nil {
 		return StreamInfo{}
 	}
+	cfg := streamConfigFromNATS(info.Config)
 	return StreamInfo{
-		Config:  streamConfigFromNATS(info.Config),
+		Config:  cfg,
 		State:   streamStateFromNATS(info.State),
 		Created: info.Created,
+		IsDLQ:   IsDLQStream(cfg.Name, cfg.Metadata),
 	}
 }
 
@@ -77,7 +80,7 @@ func streamConfigFromNATS(cfg nats.StreamConfig) StreamConfigDTO {
 		AllowMsgTTL:            cfg.AllowMsgTTL,
 		Metadata:               cloneStringMap(cfg.Metadata),
 	}
-	if cfg.Placement != nil && (cfg.Placement.Cluster != "" || len(cfg.Placement.Tags) > 0) {
+	if cfg.Placement != nil && (!strings.IsEmpty(cfg.Placement.Cluster) || len(cfg.Placement.Tags) > 0) {
 		out.Placement = &StreamPlacementDTO{
 			Cluster: cfg.Placement.Cluster,
 			Tags:    append([]string(nil), cfg.Placement.Tags...),
@@ -95,13 +98,13 @@ func streamConfigFromNATS(cfg nats.StreamConfig) StreamConfigDTO {
 			out.Sources = append(out.Sources, *streamSourceFromNATS(src))
 		}
 	}
-	if cfg.SubjectTransform != nil && cfg.SubjectTransform.Destination != "" {
+	if cfg.SubjectTransform != nil && !strings.IsEmpty(cfg.SubjectTransform.Destination) {
 		out.SubjectTransform = &SubjectTransformDTO{
 			Source:      cfg.SubjectTransform.Source,
 			Destination: cfg.SubjectTransform.Destination,
 		}
 	}
-	if cfg.RePublish != nil && cfg.RePublish.Destination != "" {
+	if cfg.RePublish != nil && !strings.IsEmpty(cfg.RePublish.Destination) {
 		out.RePublish = &RePublishDTO{
 			Source:      cfg.RePublish.Source,
 			Destination: cfg.RePublish.Destination,

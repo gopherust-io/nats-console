@@ -19,6 +19,9 @@ type UnitOfWork struct {
 var _ port.UnitOfWork = (*UnitOfWork)(nil)
 
 func Open(ctx context.Context, databaseURL, migrationsDir string, encryptor *crypto.Encryptor, pool store.PoolConfig) (*UnitOfWork, error) {
+	if err := ValidateDatabaseURL(databaseURL); err != nil {
+		return nil, err
+	}
 	st, err := store.Open(ctx, databaseURL, migrationsDir, encryptor, pool)
 	if err != nil {
 		return nil, err
@@ -27,16 +30,26 @@ func Open(ctx context.Context, databaseURL, migrationsDir string, encryptor *cry
 }
 
 func OpenWithConfig(ctx context.Context, cfg config.Config, encryptor *crypto.Encryptor) (*UnitOfWork, error) {
-	return Open(ctx, cfg.DatabaseURL, "migrations", encryptor, poolConfigFrom(cfg))
+	// Local lab (http PublicBaseURL) may use sslmode=disable; enforce SSL only for HTTPS deploys.
+	if cfg.TLSEnabled() {
+		if err := ValidateDatabaseURL(cfg.DB.URL); err != nil {
+			return nil, err
+		}
+	}
+	st, err := store.Open(ctx, cfg.DB.URL, "migrations", encryptor, poolConfigFrom(cfg))
+	if err != nil {
+		return nil, err
+	}
+	return WrapStore(st), nil
 }
 
 func poolConfigFrom(cfg config.Config) store.PoolConfig {
 	return store.PoolConfig{
-		MaxConns:          boundedInt32(cfg.DBMaxConns),
-		MinConns:          boundedInt32(cfg.DBMinConns),
-		MaxConnLifetime:   cfg.DBMaxConnLifetime,
-		MaxConnIdleTime:   cfg.DBMaxConnIdleTime,
-		HealthCheckPeriod: cfg.DBHealthCheckPeriod,
+		MaxConns:          boundedInt32(cfg.DB.MaxConns),
+		MinConns:          boundedInt32(cfg.DB.MinConns),
+		MaxConnLifetime:   cfg.DB.MaxConnLifetime,
+		MaxConnIdleTime:   cfg.DB.MaxConnIdleTime,
+		HealthCheckPeriod: cfg.DB.HealthCheckPeriod,
 	}
 }
 
@@ -270,17 +283,7 @@ func toDomainCluster(c store.Cluster) domain.Cluster {
 func toDomainUser(u store.User) domain.User {
 	grants := make([]domain.AccessGrant, 0, len(u.Grants))
 	for _, g := range u.Grants {
-		grants = append(grants, domain.AccessGrant{
-			ID:           g.ID,
-			UserID:       g.UserID,
-			ResourceType: g.ResourceType,
-			ResourceKey:  g.ResourceKey,
-			Role:         g.Role,
-			CreatedAt:    g.CreatedAt,
-			UpdatedAt:    g.UpdatedAt,
-			Username:     g.Username,
-			Email:        g.Email,
-		})
+		grants = append(grants, domain.AccessGrant(g))
 	}
 	return domain.User{
 		ID:          u.ID,
@@ -347,7 +350,22 @@ func mapError(err error) error {
 		return domain.ErrRootProtected
 	}
 	if errors.Is(err, store.ErrConflict) {
-		return domain.ErrRootExists
+		return domain.ErrConflict
+	}
+	if errors.Is(err, store.ErrAlertNotFound) {
+		return domain.ErrAlertNotFound
+	}
+	if errors.Is(err, store.ErrAlertRuleNotFound) {
+		return domain.ErrAlertRuleNotFound
+	}
+	if errors.Is(err, store.ErrEventCatalogEntryNotFound) {
+		return domain.ErrEventCatalogEntryNotFound
+	}
+	if errors.Is(err, store.ErrSigningGroupProtected) {
+		return domain.ErrSigningGroupProtected
+	}
+	if errors.Is(err, store.ErrSigningGroupInUse) {
+		return domain.ErrSigningGroupInUse
 	}
 	return err
 }

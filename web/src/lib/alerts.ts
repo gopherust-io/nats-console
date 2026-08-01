@@ -50,33 +50,35 @@ export type AlertRuleMetrics = {
   severities: AlertSeverity[];
 };
 
-export function fetchAlertOpenSummary() {
-  return api<AlertOpenSummary>("/api/v1/alerts/open-summary");
+export async function fetchAlertOpenSummary() {
+  return (await api<AlertOpenSummary>("/api/v1/alerts/open-summary")).data;
 }
 
-export function fetchAlerts(params: { status?: AlertStatus; clusterId?: string; limit?: number }) {
+export async function fetchAlerts(params: { status?: AlertStatus; clusterId?: string; limit?: number }) {
   const q = new URLSearchParams();
   if (params.status) q.set("status", params.status);
   if (params.clusterId) q.set("clusterId", params.clusterId);
   if (params.limit) q.set("limit", String(params.limit));
   const suffix = q.toString() ? `?${q}` : "";
-  return api<{ alerts: Alert[]; total: number }>(`/api/v1/alerts${suffix}`);
+  const r = await api<Alert[]>(`/api/v1/alerts${suffix}`);
+  return { alerts: r.data ?? [], total: r.meta?.total ?? 0 };
 }
 
-export function acknowledgeAlert(id: string) {
-  return api<Alert>(`/api/v1/alerts/${encodeURIComponent(id)}/acknowledge`, { method: "POST" });
+export async function acknowledgeAlert(id: string) {
+  return (await api<Alert>(`/api/v1/alerts/${encodeURIComponent(id)}/acknowledge`, { method: "POST" })).data;
 }
 
-export function fetchAlertRules(clusterId?: string) {
+export async function fetchAlertRules(clusterId?: string) {
   const q = clusterId ? `?clusterId=${encodeURIComponent(clusterId)}` : "";
-  return api<{ rules: AlertRule[]; total: number }>(`/api/v1/alert-rules${q}`);
+  const r = await api<AlertRule[]>(`/api/v1/alert-rules${q}`);
+  return { rules: r.data ?? [], total: r.meta?.total ?? 0 };
 }
 
-export function fetchAlertRuleMetrics() {
-  return api<AlertRuleMetrics>("/api/v1/alert-rules/metrics");
+export async function fetchAlertRuleMetrics() {
+  return (await api<AlertRuleMetrics>("/api/v1/alert-rules/metrics")).data;
 }
 
-export function createAlertRule(body: {
+export async function createAlertRule(body: {
   name: string;
   message?: string;
   severity: AlertSeverity;
@@ -86,10 +88,10 @@ export function createAlertRule(body: {
   enabled?: boolean;
   clusterId?: string;
 }) {
-  return api<AlertRule>("/api/v1/alert-rules", { method: "POST", body: JSON.stringify(body) });
+  return (await api<AlertRule>("/api/v1/alert-rules", { method: "POST", body: JSON.stringify(body) })).data;
 }
 
-export function updateAlertRule(
+export async function updateAlertRule(
   id: string,
   body: Partial<{
     name: string;
@@ -103,12 +105,14 @@ export function updateAlertRule(
     clearCluster: boolean;
   }>,
 ) {
-  return api<AlertRule>(`/api/v1/alert-rules/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify(body),
-  });
+  return (
+    await api<AlertRule>(`/api/v1/alert-rules/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    })
+  ).data;
 }
 
-export function deleteAlertRule(id: string) {
-  return api<void>(`/api/v1/alert-rules/${encodeURIComponent(id)}`, { method: "DELETE" });
+export async function deleteAlertRule(id: string) {
+  await api<void>(`/api/v1/alert-rules/${encodeURIComponent(id)}`, { method: "DELETE" });
 }

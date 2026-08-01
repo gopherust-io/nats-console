@@ -233,7 +233,7 @@ export default function CreateObjectBucketPanel({
     try {
       await onSubmit(body);
     } catch {
-      // Parent surfaces API error.
+      // onSubmit surfaces errors to the panel
     }
   }
 

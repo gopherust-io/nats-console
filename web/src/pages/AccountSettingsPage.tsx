@@ -24,7 +24,7 @@ export default function AccountSettingsPage() {
 
   const accountQuery = useQuery({
     queryKey: clusterQueryKey(id, "account"),
-    queryFn: () => api<AccountInfo>(clusterPath(id!, "/account")),
+    queryFn: async () => (await api<AccountInfo>(clusterPath(id!, "/account"))).data,
     enabled: Boolean(id),
   });
 

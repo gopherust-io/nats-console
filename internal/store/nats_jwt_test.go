@@ -9,6 +9,8 @@ import (
 	"github.com/nats-io/nkeys"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 func TestMintUserJWTAppliesUserPermissionsAndLimits(t *testing.T) {
@@ -36,7 +38,14 @@ func TestMintUserJWTAppliesUserPermissionsAndLimits(t *testing.T) {
 		JWTLifetimeNs: int64(time.Hour),
 	}
 
-	token, err := mintUserJWT(context.Background(), &Store{}, "c", "Default", user, string(userSeed), string(accountSeed))
+	token, err := mintUserJWT(
+		context.Background(),
+		&Store{},
+		"c",
+		"Default",
+		user,
+		strings.BytesToString(userSeed),
+		strings.BytesToString(accountSeed))
 	require.NoError(t, err)
 
 	claims, err := jwt.DecodeUserClaims(token)
@@ -78,7 +87,14 @@ func TestMintUserJWTAppliesAdvancedUserFields(t *testing.T) {
 		RespTTLNs:              int64(5 * time.Second),
 	}
 
-	token, err := mintUserJWT(context.Background(), &Store{}, "c", "Default", user, string(userSeed), string(accountSeed))
+	token, err := mintUserJWT(
+		context.Background(),
+		&Store{},
+		"c",
+		"Default",
+		user,
+		strings.BytesToString(userSeed),
+		strings.BytesToString(accountSeed))
 	require.NoError(t, err)
 	claims, err := jwt.DecodeUserClaims(token)
 	require.NoError(t, err)
@@ -109,7 +125,17 @@ func TestMintUserJWTNoExpiryWhenLifetimeZero(t *testing.T) {
 	userSeed, err := userKP.Seed()
 	require.NoError(t, err)
 
-	token, err := mintUserJWT(context.Background(), &Store{}, "c", "Default", NATSAccountUser{Name: "x", SigningGroup: "Default"}, string(userSeed), string(accountSeed))
+	token, err := mintUserJWT(
+		context.Background(),
+		&Store{},
+		"c",
+		"Default",
+		NATSAccountUser{
+			Name:         "x",
+			SigningGroup: "Default",
+		},
+		strings.BytesToString(userSeed),
+		strings.BytesToString(accountSeed))
 	require.NoError(t, err)
 	claims, err := jwt.DecodeUserClaims(token)
 	require.NoError(t, err)

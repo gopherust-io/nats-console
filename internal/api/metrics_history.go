@@ -6,18 +6,19 @@ import (
 
 	"github.com/valyala/fasthttp"
 
+	"github.com/gopherust-io/nats-consol/internal/app"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
-	"github.com/gopherust-io/nats-consol/internal/store"
-	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
+	"github.com/gopherust-io/nats-consol/internal/httpctx/httpstatus"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 type MetricsHistoryHandler struct {
-	store *store.Store
+	metrics *app.MetricsService
 }
 
-func NewMetricsHistoryHandler(st *store.Store) *MetricsHistoryHandler {
-	return &MetricsHistoryHandler{store: st}
+func NewMetricsHistoryHandler(metrics *app.MetricsService) *MetricsHistoryHandler {
+	return &MetricsHistoryHandler{metrics: metrics}
 }
 
 func (h *MetricsHistoryHandler) History(ctx *fasthttp.RequestCtx) {
@@ -27,41 +28,41 @@ func (h *MetricsHistoryHandler) History(ctx *fasthttp.RequestCtx) {
 	to := time.Now().UTC()
 	from := to.Add(-24 * time.Hour)
 
-	if raw := string(ctx.QueryArgs().Peek("from")); raw != "" {
+	if raw := commonstrings.BytesToString(ctx.QueryArgs().Peek("from")); !commonstrings.IsEmpty(raw) {
 		parsed, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
-			serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+			httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 			return
 		}
 		from = parsed.UTC()
 	}
-	if raw := string(ctx.QueryArgs().Peek("to")); raw != "" {
+	if raw := commonstrings.BytesToString(ctx.QueryArgs().Peek("to")); !commonstrings.IsEmpty(raw) {
 		parsed, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
-			serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+			httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 			return
 		}
 		to = parsed.UTC()
 	}
 	if !from.Before(to) {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, domain.ErrInvalidRange)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, domain.ErrInvalidRange)
 		return
 	}
 
-	metrics := parseMetricsQuery(string(ctx.QueryArgs().Peek("metrics")))
-	stepRaw := string(ctx.QueryArgs().Peek("step"))
-	step, err := store.ParseMetricsStep(stepRaw)
+	metrics := parseMetricsQuery(commonstrings.BytesToString(ctx.QueryArgs().Peek("metrics")))
+	stepRaw := commonstrings.BytesToString(ctx.QueryArgs().Peek("step"))
+	step, err := domain.ParseMetricsStep(stepRaw)
 	if err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	if step <= 0 {
-		step = store.DefaultMetricsStep(from, to)
+		step = domain.DefaultMetricsStep(from, to)
 	}
 
-	seriesMap, err := h.store.QueryMetricSeries(c, clusterID, metrics, from, to, step)
+	seriesMap, err := h.metrics.QuerySeries(c, clusterID, metrics, from, to, step)
 	if err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadGateway, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadGateway, err)
 		return
 	}
 
@@ -77,7 +78,7 @@ func (h *MetricsHistoryHandler) History(ctx *fasthttp.RequestCtx) {
 		series = append(series, domain.MetricSeries{Metric: metric, Points: points})
 	}
 
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, domain.MetricsHistoryResponse{
+	httpstatus.WriteData(ctx, fasthttp.StatusOK, domain.MetricsHistoryResponse{
 		ClusterID: clusterID,
 		From:      from,
 		To:        to,
@@ -86,17 +87,17 @@ func (h *MetricsHistoryHandler) History(ctx *fasthttp.RequestCtx) {
 }
 
 func parseMetricsQuery(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
+	if commonstrings.IsEmpty(strings.TrimSpace(raw)) {
 		return append([]string(nil), domain.DefaultDashboardMetrics...)
 	}
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
-		if part == "" {
+		if commonstrings.IsEmpty(part) {
 			continue
 		}
-		if !domain.ValidMetricName(part) {
+		if !domain.ValidHistoryMetricName(part) {
 			continue
 		}
 		out = append(out, part)

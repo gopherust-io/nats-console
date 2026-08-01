@@ -2,6 +2,7 @@ package port
 
 import (
 	"context"
+	"time"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/nats-io/nats.go"
@@ -26,8 +27,14 @@ type JetStreamExecutor interface {
 	ReplayConsumer(ctx context.Context, stream, consumer string, req domain.ReplayConsumerRequest) (domain.ReplayConsumerResult, error)
 	GetMessage(ctx context.Context, stream string, seq uint64) (*nats.RawStreamMsg, error)
 	GetMessageNav(ctx context.Context, stream string, seq uint64, direction string) (*domain.MessageResult, error)
+	GetMessageRange(ctx context.Context, stream string, startSeq, endSeq uint64, limit int) (*domain.MessageRangeResult, error)
+	GetMessageRangeByTime(ctx context.Context, stream string, start, end time.Time, limit int) (*domain.MessageRangeResult, error)
 	PublishStreamMessage(ctx context.Context, stream string, in domain.PublishMessageRequest) (domain.PublishMessageResult, error)
+	DeleteMessage(ctx context.Context, stream string, seq uint64) error
+	ListDLQMessages(ctx context.Context, stream string, startSeq uint64, limit int) (*domain.DLQListResult, error)
+	RetryDLQMessages(ctx context.Context, stream string, req domain.DLQRetryRequest) (*domain.DLQRetryResult, error)
 	Monitoring(ctx context.Context, path string) ([]byte, error)
+	ProbeRequest(ctx context.Context, subject string, format domain.RequestReplyPayloadFormat, payload []byte, timeout time.Duration) (*nats.Msg, time.Duration, error)
 	ListKVBuckets(ctx context.Context) ([]domain.KVBucketInfo, error)
 	CreateKVBucket(ctx context.Context, cfg *nats.KeyValueConfig, opts domain.KVBucketWriteOpts) (*domain.KVBucketInfo, error)
 	UpdateKVBucket(ctx context.Context, cfg *nats.KeyValueConfig, opts domain.KVBucketWriteOpts) (*domain.KVBucketInfo, error)

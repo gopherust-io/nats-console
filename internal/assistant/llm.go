@@ -1,13 +1,10 @@
 package assistant
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"strings"
 	"time"
 
@@ -16,6 +13,7 @@ import (
 
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/httpclient"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 type Message struct {
@@ -28,39 +26,41 @@ type LLM interface {
 }
 
 type gemini struct {
-	client    *http.Client
+	client    *fasthttp.Client
 	apiKey    string
 	model     string
 	apiBase   string
 	maxTokens int
+	timeout   time.Duration
 }
 
 func NewLLM(cfg config.Config) (LLM, error) {
-	if cfg.AIAPIKey == "" {
+	if commonstrings.IsEmpty(cfg.AI.APIKey) {
 		return nil, errors.New("AI_API_KEY is required when AI_ENABLED=true")
 	}
-	timeout := cfg.AIRequestTimeout
+	timeout := cfg.AI.RequestTimeout
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
-	model := cfg.AIModel
-	if model == "" {
+	model := cfg.AI.Model
+	if commonstrings.IsEmpty(model) {
 		model = "gemini-2.5-flash"
 	}
-	apiBase := strings.TrimSuffix(cfg.AIGeminiAPIBase, "/")
-	if apiBase == "" {
+	apiBase := strings.TrimSuffix(cfg.AI.GeminiAPIBase, "/")
+	if commonstrings.IsEmpty(apiBase) {
 		apiBase = "https://generativelanguage.googleapis.com/v1beta"
 	}
-	maxTokens := cfg.AIMaxTokens
+	maxTokens := cfg.AI.MaxTokens
 	if maxTokens <= 0 {
 		maxTokens = 4096
 	}
 	return &gemini{
 		client:    httpclient.NewClient(cfg, timeout),
-		apiKey:    cfg.AIAPIKey,
+		apiKey:    cfg.AI.APIKey,
 		model:     model,
 		maxTokens: maxTokens,
 		apiBase:   apiBase,
+		timeout:   timeout,
 	}, nil
 }
 
@@ -91,15 +91,42 @@ func (g *gemini) Chat(ctx context.Context, system string, messages []Message) (s
 		},
 	})
 	url := fmt.Sprintf("%s/models/%s:generateContent?key=%s", g.apiBase, g.model, g.apiKey)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return "", newProviderError("Could not create Gemini request.", false, 0)
-	}
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := g.client.Do(req)
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+
+	req.Header.SetMethod(fasthttp.MethodPost)
+	req.SetRequestURI(url)
+	req.Header.SetContentType("application/json")
+	req.SetBody(body)
+
+	timeout := g.timeout
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return "", newAssistantError(CodeTimeout, "Gemini request timed out. Try again or increase AI_REQUEST_TIMEOUT.", true, 0)
+		}
+		if remaining < timeout || timeout <= 0 {
+			timeout = remaining
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return "", newAssistantError(CodeTimeout, "Gemini request timed out. Try again or increase AI_REQUEST_TIMEOUT.", true, 0)
+		}
+		return "", WrapError(err)
+	}
+
+	var err error
+	if timeout > 0 {
+		err = g.client.DoTimeout(req, resp, timeout)
+	} else {
+		err = g.client.Do(req, resp)
+	}
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || isTimeoutError(err) {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, fasthttp.ErrTimeout) || isTimeoutError(err) {
 			return "", newAssistantError(CodeTimeout, "Gemini request timed out. Try again or increase AI_REQUEST_TIMEOUT.", true, 0)
 		}
 		var netErr net.Error
@@ -108,10 +135,11 @@ func (g *gemini) Chat(ctx context.Context, system string, messages []Message) (s
 		}
 		return "", WrapError(err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return "", mapGeminiHTTPError(g.model, resp.StatusCode, raw)
+
+	raw := append([]byte(nil), resp.Body()...)
+	status := resp.StatusCode()
+	if status >= 400 {
+		return "", mapGeminiHTTPError(g.model, status, raw)
 	}
 
 	var parsed struct {
@@ -140,8 +168,8 @@ func mapGeminiHTTPError(model string, status int, raw []byte) *Error {
 			Code    int    `json:"code"`
 		} `json:"error"`
 	}
-	if err := sonic.Unmarshal(raw, &envelope); err != nil || envelope.Error.Message == "" {
-		body := strings.TrimSpace(string(raw))
+	if err := sonic.Unmarshal(raw, &envelope); err != nil || commonstrings.IsEmpty(envelope.Error.Message) {
+		body := strings.TrimSpace(commonstrings.BytesToString(raw))
 		if len(body) > 200 {
 			body = body[:200] + "…"
 		}

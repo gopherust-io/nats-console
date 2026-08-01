@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
@@ -316,6 +317,14 @@ func (e *Executor) GetMessageNav(ctx context.Context, stream string, seq uint64,
 	return e.client.GetMessageNav(ctx, stream, seq, direction)
 }
 
+func (e *Executor) GetMessageRange(ctx context.Context, stream string, startSeq, endSeq uint64, limit int) (*domain.MessageRangeResult, error) {
+	return e.client.GetMessageRange(ctx, stream, startSeq, endSeq, limit)
+}
+
+func (e *Executor) GetMessageRangeByTime(ctx context.Context, stream string, start, end time.Time, limit int) (*domain.MessageRangeResult, error) {
+	return e.client.GetMessageRangeByTime(ctx, stream, start, end, limit)
+}
+
 func (e *Executor) PublishStreamMessage(ctx context.Context, stream string, in domain.PublishMessageRequest) (domain.PublishMessageResult, error) {
 	return e.client.PublishStreamMessage(ctx, stream, in)
 }
@@ -328,8 +337,40 @@ func (e *cachingExecutor) PublishStreamMessage(ctx context.Context, stream strin
 	return res, err
 }
 
+func (e *Executor) DeleteMessage(ctx context.Context, stream string, seq uint64) error {
+	return e.client.DeleteMessage(ctx, stream, seq)
+}
+
+func (e *cachingExecutor) DeleteMessage(ctx context.Context, stream string, seq uint64) error {
+	err := e.client.DeleteMessage(ctx, stream, seq)
+	if err == nil {
+		e.invalidate()
+	}
+	return err
+}
+
+func (e *Executor) ListDLQMessages(ctx context.Context, stream string, startSeq uint64, limit int) (*domain.DLQListResult, error) {
+	return e.client.ListDLQMessages(ctx, stream, startSeq, limit)
+}
+
+func (e *Executor) RetryDLQMessages(ctx context.Context, stream string, req domain.DLQRetryRequest) (*domain.DLQRetryResult, error) {
+	return e.client.RetryDLQMessages(ctx, stream, req)
+}
+
+func (e *cachingExecutor) RetryDLQMessages(ctx context.Context, stream string, req domain.DLQRetryRequest) (*domain.DLQRetryResult, error) {
+	res, err := e.client.RetryDLQMessages(ctx, stream, req)
+	if err == nil && res != nil && res.Retried > 0 {
+		e.invalidate()
+	}
+	return res, err
+}
+
 func (e *Executor) Monitoring(ctx context.Context, path string) ([]byte, error) {
 	return e.client.Monitoring(ctx, path)
+}
+
+func (e *Executor) ProbeRequest(ctx context.Context, subject string, format domain.RequestReplyPayloadFormat, payload []byte, timeout time.Duration) (*nats.Msg, time.Duration, error) {
+	return e.client.ProbeRequest(ctx, subject, format, payload, timeout)
 }
 
 func (e *cachingExecutor) Monitoring(ctx context.Context, path string) ([]byte, error) {
@@ -346,6 +387,10 @@ func (e *cachingExecutor) Monitoring(ctx context.Context, path string) ([]byte, 
 		return nil, fmt.Errorf("view cache: unexpected monitoring type %T", v)
 	}
 	return raw, nil
+}
+
+func (e *cachingExecutor) ProbeRequest(ctx context.Context, subject string, format domain.RequestReplyPayloadFormat, payload []byte, timeout time.Duration) (*nats.Msg, time.Duration, error) {
+	return e.client.ProbeRequest(ctx, subject, format, payload, timeout)
 }
 
 func (e *Executor) ListKVBuckets(ctx context.Context) ([]domain.KVBucketInfo, error) {

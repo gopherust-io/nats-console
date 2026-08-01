@@ -2,108 +2,28 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/nats-io/nkeys"
+
+	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
-type NATSUserTimeRange struct {
-	Start string `json:"start"`
-	End   string `json:"end"`
-}
-
-// goalign:ignore
-type NATSAccountUser struct {
-	CreatedAt              time.Time           `json:"createdAt"`
-	UpdatedAt              time.Time           `json:"updatedAt"`
-	ID                     string              `json:"id"`
-	ClusterID              string              `json:"clusterId"`
-	AccountName            string              `json:"accountName"`
-	Name                   string              `json:"name"`
-	PublicKey              string              `json:"publicKey"`
-	SigningGroup           string              `json:"signingGroup"`
-	AssignedUserID         string              `json:"assignedUserId,omitempty"`
-	Tags                   []string            `json:"tags,omitempty"`
-	PubAllow               []string            `json:"pubAllow,omitempty"`
-	PubDeny                []string            `json:"pubDeny,omitempty"`
-	SubAllow               []string            `json:"subAllow,omitempty"`
-	SubDeny                []string            `json:"subDeny,omitempty"`
-	AllowedConnectionTypes []string            `json:"allowedConnectionTypes,omitempty"`
-	SrcCIDRs               []string            `json:"srcCidrs,omitempty"`
-	TimesLocale            string              `json:"timesLocale,omitempty"`
-	TimeRanges             []NATSUserTimeRange `json:"timeRanges,omitempty"`
-	MaxSubs                int64               `json:"maxSubs"`
-	MaxPayload             int64               `json:"maxPayload"`
-	MaxData                int64               `json:"maxData"`
-	JWTLifetimeNs          int64               `json:"jwtLifetimeNs"`
-	RespMaxMsgs            int                 `json:"respMaxMsgs"`
-	RespTTLNs              int64               `json:"respTTLNs"`
-	BearerToken            bool                `json:"bearerToken"`
-	ProxyRequired          bool                `json:"proxyRequired"`
-	HasJWT                 bool                `json:"hasJwt"`
-	JWTIssued              bool                `json:"jwtIssued"`
-}
-
-// goalign:ignore
-type NATSAccountUserCreate struct {
-	ClusterID              string
-	AccountName            string
-	Name                   string
-	SigningGroup           string
-	Tags                   []string
-	PubAllow               []string
-	PubDeny                []string
-	SubAllow               []string
-	SubDeny                []string
-	AllowedConnectionTypes []string
-	SrcCIDRs               []string
-	TimesLocale            string
-	TimeRanges             []NATSUserTimeRange
-	MaxSubs                int64
-	MaxPayload             int64
-	MaxData                int64
-	JWTLifetimeNs          int64
-	RespMaxMsgs            int
-	RespTTLNs              int64
-	BearerToken            bool
-	ProxyRequired          bool
-}
-
-// goalign:ignore
-type NATSAccountUserUpdate struct {
-	SigningGroup           string
-	Tags                   []string
-	PubAllow               []string
-	PubDeny                []string
-	SubAllow               []string
-	SubDeny                []string
-	AllowedConnectionTypes []string
-	SrcCIDRs               []string
-	TimesLocale            string
-	TimeRanges             []NATSUserTimeRange
-	MaxSubs                int64
-	MaxPayload             int64
-	MaxData                int64
-	JWTLifetimeNs          int64
-	RespMaxMsgs            int
-	RespTTLNs              int64
-	BearerToken            bool
-	ProxyRequired          bool
-}
-
-const natsUserSelectCols = `
-	id, cluster_id, account_name, name, public_key, signing_group, jwt,
-	COALESCE(assigned_user_id::text, ''),
-	tags, pub_allow, pub_deny, sub_allow, sub_deny,
-	max_subs, max_payload, jwt_lifetime_ns,
-	bearer_token, proxy_required, allowed_connection_types, src_cidrs,
-	times_locale, time_ranges, resp_max_msgs, resp_ttl_ns, max_data,
-	created_at, updated_at`
+type (
+	NATSUserTimeRange      = domain.NATSUserTimeRange
+	NATSAccountUser        = domain.NATSAccountUser
+	NATSAccountUserCreate  = domain.NATSAccountUserCreate
+	NATSAccountUserUpdate  = domain.NATSAccountUserUpdate
+	NATSAccountUserCreds   = domain.NATSAccountUserCreds
+	NATSAccountExport      = domain.NATSAccountExport
+	NATSAccountExportCreate = domain.NATSAccountExportCreate
+	NATSAccountExportUpdate = domain.NATSAccountExportUpdate
+)
 
 func scanNATSAccountUser(scan func(dest ...any) error) (NATSAccountUser, string, error) {
 	var item NATSAccountUser
@@ -123,8 +43,8 @@ func scanNATSAccountUser(scan func(dest ...any) error) (NATSAccountUser, string,
 	}
 	item.TimeRanges = decodeTimeRanges(timeRangesJSON)
 	normalizeNATSUserConfig(&item)
-	item.HasJWT = jwtStr != ""
-	item.JWTIssued = jwtStr != ""
+	item.HasJWT = !strings.IsEmpty(jwtStr)
+	item.JWTIssued = !strings.IsEmpty(jwtStr)
 	return item, jwtStr, nil
 }
 
@@ -190,7 +110,7 @@ func decodeTimeRanges(raw []byte) []NATSUserTimeRange {
 		return []NATSUserTimeRange{}
 	}
 	var out []NATSUserTimeRange
-	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
+	if err := serializer.Unmarshal(raw, &out); err != nil || out == nil {
 		return []NATSUserTimeRange{}
 	}
 	return out
@@ -200,28 +120,15 @@ func encodeTimeRanges(in []NATSUserTimeRange) []byte {
 	if in == nil {
 		in = []NATSUserTimeRange{}
 	}
-	raw, err := json.Marshal(in)
+	raw, err := serializer.Marshal(in)
 	if err != nil {
-		return []byte("[]")
+		return strings.StringToBytes("[]")
 	}
 	return raw
 }
 
-//nolint:govet // fieldalignment conflicts with embedded-first rule for NATSAccountUser
-type NATSAccountUserCreds struct {
-	NATSAccountUser
-
-	Seed string `json:"seed,omitempty"`
-	JWT  string `json:"jwt,omitempty"`
-	Cred string `json:"creds,omitempty"`
-}
-
 func (s *Store) ListNATSAccountUsers(ctx context.Context, clusterID, accountName string) ([]NATSAccountUser, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT `+natsUserSelectCols+`
-		FROM nats_account_users
-		WHERE cluster_id = $1 AND account_name = $2
-		ORDER BY name ASC`, clusterID, accountName)
+	rows, err := s.pool.Query(ctx, queryListNATSAccountUsers, clusterID, accountName)
 	if err != nil {
 		return nil, err
 	}
@@ -243,14 +150,16 @@ func (s *Store) CreateNATSAccountUser(ctx context.Context, in NATSAccountUserCre
 }
 
 func (s *Store) CreateNATSAccountUserWithSeed(ctx context.Context, in NATSAccountUserCreate, accountSeed string) (NATSAccountUserCreds, error) {
-	if in.SigningGroup == "" {
+	if strings.IsEmpty(in.SigningGroup) {
 		in.SigningGroup = "Default"
 	}
-	if in.AccountName == "" {
+	if strings.IsEmpty(in.AccountName) {
 		in.AccountName = "Default"
 	}
 	normalizeUserCreateLimits(&in)
-	_ = s.EnsureDefaultSigningGroup(ctx, in.ClusterID, in.AccountName)
+	if err := s.EnsureDefaultSigningGroup(ctx, in.ClusterID, in.AccountName); err != nil {
+		return NATSAccountUserCreds{}, err
+	}
 	kp, err := nkeys.CreateUser()
 	if err != nil {
 		return NATSAccountUserCreds{}, err
@@ -263,7 +172,7 @@ func (s *Store) CreateNATSAccountUserWithSeed(ctx context.Context, in NATSAccoun
 	if err != nil {
 		return NATSAccountUserCreds{}, err
 	}
-	encSeed, err := s.encryptToken(string(seed))
+	encSeed, err := s.encryptToken(strings.BytesToString(seed))
 	if err != nil {
 		return NATSAccountUserCreds{}, fmt.Errorf("encrypt seed: %w", err)
 	}
@@ -279,23 +188,16 @@ func (s *Store) CreateNATSAccountUserWithSeed(ctx context.Context, in NATSAccoun
 	}
 
 	userJWT := ""
-	if accountSeed != "" {
-		userJWT, err = mintUserJWT(ctx, s, in.ClusterID, in.AccountName, user, string(seed), accountSeed)
+	if !strings.IsEmpty(accountSeed) {
+		userJWT, err = mintUserJWT(ctx, s, in.ClusterID, in.AccountName, user, strings.BytesToString(seed), accountSeed)
 		if err != nil {
 			return NATSAccountUserCreds{}, err
 		}
 	}
 
-	id := uuid.NewString()
+	id := newID()
 	now := time.Now().UTC()
-	_, err = s.pool.Exec(ctx, `
-		INSERT INTO nats_account_users
-			(id, cluster_id, account_name, name, public_key, seed_encrypted, jwt, signing_group,
-			 tags, pub_allow, pub_deny, sub_allow, sub_deny, max_subs, max_payload, jwt_lifetime_ns,
-			 bearer_token, proxy_required, allowed_connection_types, src_cidrs,
-			 times_locale, time_ranges, resp_max_msgs, resp_ttl_ns, max_data,
-			 created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$26)`,
+	_, err = s.pool.Exec(ctx, queryInsertNATSAccountUser,
 		id, in.ClusterID, in.AccountName, in.Name, pub, encSeed, userJWT, in.SigningGroup,
 		in.Tags, in.PubAllow, in.PubDeny, in.SubAllow, in.SubDeny, in.MaxSubs, in.MaxPayload, in.JWTLifetimeNs,
 		in.BearerToken, in.ProxyRequired, in.AllowedConnectionTypes, in.SrcCIDRs,
@@ -306,19 +208,17 @@ func (s *Store) CreateNATSAccountUserWithSeed(ctx context.Context, in NATSAccoun
 
 	user.ID = id
 	user.PublicKey = pub
-	user.HasJWT = userJWT != ""
-	user.JWTIssued = userJWT != ""
+	user.HasJWT = !strings.IsEmpty(userJWT)
+	user.JWTIssued = !strings.IsEmpty(userJWT)
 	user.CreatedAt = now
 	user.UpdatedAt = now
-	out := NATSAccountUserCreds{NATSAccountUser: user, Seed: string(seed), JWT: userJWT}
-	out.Cred = formatCreds(userJWT, string(seed))
+	out := NATSAccountUserCreds{NATSAccountUser: user, Seed: strings.BytesToString(seed), JWT: userJWT}
+	out.Cred = formatCreds(userJWT, strings.BytesToString(seed))
 	return out, nil
 }
 
 func (s *Store) DeleteNATSAccountUser(ctx context.Context, clusterID, accountName, userID string) error {
-	tag, err := s.pool.Exec(ctx, `
-		DELETE FROM nats_account_users
-		WHERE cluster_id = $1 AND account_name = $2 AND id = $3`, clusterID, accountName, userID)
+	tag, err := s.pool.Exec(ctx, queryDeleteNATSAccountUser, clusterID, accountName, userID)
 	if err != nil {
 		return err
 	}
@@ -329,10 +229,7 @@ func (s *Store) DeleteNATSAccountUser(ctx context.Context, clusterID, accountNam
 }
 
 func (s *Store) GetNATSAccountUser(ctx context.Context, clusterID, accountName, userID string) (NATSAccountUser, error) {
-	item, _, err := scanNATSAccountUser(s.pool.QueryRow(ctx, `
-		SELECT `+natsUserSelectCols+`
-		FROM nats_account_users
-		WHERE cluster_id = $1 AND account_name = $2 AND id = $3`, clusterID, accountName, userID).Scan)
+	item, _, err := scanNATSAccountUser(s.pool.QueryRow(ctx, queryGetNATSAccountUser, clusterID, accountName, userID).Scan)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return NATSAccountUser{}, ErrNotFound
 	}
@@ -346,16 +243,7 @@ func (s *Store) GetNATSAccountUserCreds(ctx context.Context, clusterID, accountN
 	var item NATSAccountUser
 	var encSeed, jwtStr string
 	var timeRangesJSON []byte
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, cluster_id, account_name, name, public_key, seed_encrypted, jwt, signing_group,
-		       COALESCE(assigned_user_id::text, ''),
-		       tags, pub_allow, pub_deny, sub_allow, sub_deny,
-		       max_subs, max_payload, jwt_lifetime_ns,
-		       bearer_token, proxy_required, allowed_connection_types, src_cidrs,
-		       times_locale, time_ranges, resp_max_msgs, resp_ttl_ns, max_data,
-		       created_at, updated_at
-		FROM nats_account_users
-		WHERE cluster_id = $1 AND account_name = $2 AND id = $3`, clusterID, accountName, userID).
+	err := s.pool.QueryRow(ctx, queryGetNATSAccountUserCreds, clusterID, accountName, userID).
 		Scan(
 			&item.ID, &item.ClusterID, &item.AccountName, &item.Name, &item.PublicKey, &encSeed, &jwtStr, &item.SigningGroup,
 			&item.AssignedUserID,
@@ -373,8 +261,8 @@ func (s *Store) GetNATSAccountUserCreds(ctx context.Context, clusterID, accountN
 	}
 	item.TimeRanges = decodeTimeRanges(timeRangesJSON)
 	normalizeNATSUserConfig(&item)
-	item.HasJWT = jwtStr != ""
-	item.JWTIssued = jwtStr != ""
+	item.HasJWT = !strings.IsEmpty(jwtStr)
+	item.JWTIssued = !strings.IsEmpty(jwtStr)
 	seed, err := s.decryptToken(encSeed)
 	if err != nil {
 		return NATSAccountUserCreds{}, err
@@ -385,7 +273,7 @@ func (s *Store) GetNATSAccountUserCreds(ctx context.Context, clusterID, accountN
 }
 
 func (s *Store) UpdateNATSAccountUser(ctx context.Context, clusterID, accountName, userID string, in NATSAccountUserUpdate, accountSeed string) (NATSAccountUser, error) {
-	if in.SigningGroup == "" {
+	if strings.IsEmpty(in.SigningGroup) {
 		in.SigningGroup = "Default"
 	}
 	normalizeUserUpdateLimits(&in)
@@ -394,14 +282,7 @@ func (s *Store) UpdateNATSAccountUser(ctx context.Context, clusterID, accountNam
 		return NATSAccountUser{}, err
 	}
 	now := time.Now().UTC()
-	_, err = s.pool.Exec(ctx, `
-		UPDATE nats_account_users SET
-			signing_group = $4, tags = $5, pub_allow = $6, pub_deny = $7, sub_allow = $8, sub_deny = $9,
-			max_subs = $10, max_payload = $11, jwt_lifetime_ns = $12,
-			bearer_token = $13, proxy_required = $14, allowed_connection_types = $15, src_cidrs = $16,
-			times_locale = $17, time_ranges = $18, resp_max_msgs = $19, resp_ttl_ns = $20, max_data = $21,
-			updated_at = $22
-		WHERE cluster_id = $1 AND account_name = $2 AND id = $3`,
+	_, err = s.pool.Exec(ctx, queryUpdateNATSAccountUser,
 		clusterID, accountName, userID, in.SigningGroup,
 		in.Tags, in.PubAllow, in.PubDeny, in.SubAllow, in.SubDeny,
 		in.MaxSubs, in.MaxPayload, in.JWTLifetimeNs,
@@ -414,14 +295,12 @@ func (s *Store) UpdateNATSAccountUser(ctx context.Context, clusterID, accountNam
 	if err != nil {
 		return NATSAccountUser{}, err
 	}
-	if accountSeed != "" {
+	if !strings.IsEmpty(accountSeed) {
 		userJWT, mintErr := mintUserJWT(ctx, s, clusterID, accountName, updated, existing.Seed, accountSeed)
 		if mintErr != nil {
 			return NATSAccountUser{}, mintErr
 		}
-		_, err = s.pool.Exec(ctx, `
-			UPDATE nats_account_users SET jwt = $4, updated_at = $5
-			WHERE cluster_id = $1 AND account_name = $2 AND id = $3`,
+		_, err = s.pool.Exec(ctx, queryUpdateNATSAccountUserJWT,
 			clusterID, accountName, userID, userJWT, now)
 		if err != nil {
 			return NATSAccountUser{}, err
@@ -450,41 +329,38 @@ func (s *Store) RotateNATSAccountUser(ctx context.Context, clusterID, accountNam
 	if err != nil {
 		return NATSAccountUserCreds{}, err
 	}
-	encSeed, err := s.encryptToken(string(seed))
+	encSeed, err := s.encryptToken(strings.BytesToString(seed))
 	if err != nil {
 		return NATSAccountUserCreds{}, err
 	}
 	userJWT := ""
-	if accountSeed != "" {
-		userJWT, err = mintUserJWT(ctx, s, clusterID, accountName, existing, string(seed), accountSeed)
+	if !strings.IsEmpty(accountSeed) {
+		userJWT, err = mintUserJWT(ctx, s, clusterID, accountName, existing, strings.BytesToString(seed), accountSeed)
 		if err != nil {
 			return NATSAccountUserCreds{}, err
 		}
 	}
 	now := time.Now().UTC()
-	_, err = s.pool.Exec(ctx, `
-		UPDATE nats_account_users
-		SET public_key = $4, seed_encrypted = $5, jwt = $6, updated_at = $7
-		WHERE cluster_id = $1 AND account_name = $2 AND id = $3`,
+	_, err = s.pool.Exec(ctx, queryRotateNATSAccountUser,
 		clusterID, accountName, userID, pub, encSeed, userJWT, now)
 	if err != nil {
 		return NATSAccountUserCreds{}, err
 	}
 	out := NATSAccountUserCreds{
 		NATSAccountUser: existing,
-		Seed:            string(seed),
+		Seed:            strings.BytesToString(seed),
 		JWT:             userJWT,
 	}
 	out.PublicKey = pub
-	out.HasJWT = userJWT != ""
-	out.JWTIssued = userJWT != ""
+	out.HasJWT = !strings.IsEmpty(userJWT)
+	out.JWTIssued = !strings.IsEmpty(userJWT)
 	out.UpdatedAt = now
-	out.Cred = formatCreds(userJWT, string(seed))
+	out.Cred = formatCreds(userJWT, strings.BytesToString(seed))
 	return out, nil
 }
 
 func (s *Store) MintNATSAccountUserJWT(ctx context.Context, clusterID, accountName, userID, accountSeed string) (NATSAccountUserCreds, error) {
-	if accountSeed == "" {
+	if strings.IsEmpty(accountSeed) {
 		return NATSAccountUserCreds{}, errors.New("NATS_ACCOUNT_SEED is not configured")
 	}
 	creds, err := s.GetNATSAccountUserCreds(ctx, clusterID, accountName, userID)
@@ -496,9 +372,7 @@ func (s *Store) MintNATSAccountUserJWT(ctx context.Context, clusterID, accountNa
 		return NATSAccountUserCreds{}, err
 	}
 	now := time.Now().UTC()
-	_, err = s.pool.Exec(ctx, `
-		UPDATE nats_account_users SET jwt = $4, updated_at = $5
-		WHERE cluster_id = $1 AND account_name = $2 AND id = $3`,
+	_, err = s.pool.Exec(ctx, queryUpdateNATSAccountUserJWT,
 		clusterID, accountName, userID, userJWT, now)
 	if err != nil {
 		return NATSAccountUserCreds{}, err
@@ -512,16 +386,25 @@ func (s *Store) MintNATSAccountUserJWT(ctx context.Context, clusterID, accountNa
 }
 
 func (s *Store) AssignNATSAccountUserPerson(ctx context.Context, clusterID, accountName, natsUserID, consoleUserID string) (NATSAccountUser, error) {
+	current, err := s.GetNATSAccountUser(ctx, clusterID, accountName, natsUserID)
+	if err != nil {
+		return NATSAccountUser{}, err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return NATSAccountUser{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	now := time.Now().UTC()
 	var assigned any
-	if consoleUserID == "" {
+	if strings.IsEmpty(consoleUserID) {
 		assigned = nil
 	} else {
 		assigned = consoleUserID
 	}
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE nats_account_users SET assigned_user_id = $4, updated_at = $5
-		WHERE cluster_id = $1 AND account_name = $2 AND id = $3`,
+	tag, err := tx.Exec(ctx, queryAssignNATSAccountUserPerson,
 		clusterID, accountName, natsUserID, assigned, now)
 	if err != nil {
 		return NATSAccountUser{}, err
@@ -529,15 +412,25 @@ func (s *Store) AssignNATSAccountUserPerson(ctx context.Context, clusterID, acco
 	if tag.RowsAffected() == 0 {
 		return NATSAccountUser{}, ErrNotFound
 	}
-	if consoleUserID != "" {
-		if _, err := s.UpsertAccessGrant(ctx, AccessGrantUpsert{
-			UserID:       consoleUserID,
-			ResourceType: ResourceNATSUser,
-			ResourceKey:  domainAccountNATSUserKey(clusterID, accountName, natsUserID),
-			Role:         GrantAdmin,
-		}); err != nil {
+
+	resourceKey := domainAccountNATSUserKey(clusterID, accountName, natsUserID)
+	prevAssignee := current.AssignedUserID
+	if !strings.IsEmpty(prevAssignee) && prevAssignee != consoleUserID {
+		if _, err := tx.Exec(ctx, queryDeleteAccessGrantByResource,
+			prevAssignee, ResourceNATSUser, resourceKey); err != nil {
 			return NATSAccountUser{}, err
 		}
+	}
+	if !strings.IsEmpty(consoleUserID) {
+		grantID := newID()
+		if _, err := tx.Exec(ctx, queryUpsertAccessGrantNoReturning,
+			grantID, consoleUserID, ResourceNATSUser, resourceKey, GrantAdmin, now); err != nil {
+			return NATSAccountUser{}, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return NATSAccountUser{}, err
 	}
 	return s.GetNATSAccountUser(ctx, clusterID, accountName, natsUserID)
 }
@@ -547,39 +440,14 @@ func domainAccountNATSUserKey(clusterID, accountName, natsUserID string) string 
 }
 
 func formatCreds(userJWT, seed string) string {
-	if userJWT == "" {
+	if strings.IsEmpty(userJWT) {
 		return fmt.Sprintf("-----BEGIN NATS USER SEED-----\n%s\n-----END NATS USER SEED-----\n", seed)
 	}
 	return fmt.Sprintf("-----BEGIN NATS USER JWT-----\n%s\n------END NATS USER JWT------\n\n-----BEGIN USER NKEY SEED-----\n%s\n------END USER NKEY SEED------\n", userJWT, seed)
 }
 
-type NATSAccountExport struct {
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-	ID          string    `json:"id"`
-	ClusterID   string    `json:"clusterId"`
-	AccountName string    `json:"accountName"`
-	Kind        string    `json:"kind"`
-	Name        string    `json:"name"`
-	Subject     string    `json:"subject"`
-	Description string    `json:"description"`
-}
-
-type NATSAccountExportCreate struct {
-	ClusterID   string
-	AccountName string
-	Kind        string
-	Name        string
-	Subject     string
-	Description string
-}
-
 func (s *Store) ListNATSAccountExports(ctx context.Context, clusterID, accountName, kind string) ([]NATSAccountExport, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, cluster_id, account_name, kind, name, subject, description, created_at, updated_at
-		FROM nats_account_exports
-		WHERE cluster_id = $1 AND account_name = $2 AND ($3 = '' OR kind = $3)
-		ORDER BY name ASC`, clusterID, accountName, kind)
+	rows, err := s.pool.Query(ctx, queryListNATSAccountExports, clusterID, accountName, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -596,17 +464,13 @@ func (s *Store) ListNATSAccountExports(ctx context.Context, clusterID, accountNa
 }
 
 func (s *Store) CreateNATSAccountExport(ctx context.Context, in NATSAccountExportCreate) (NATSAccountExport, error) {
-	if in.AccountName == "" {
+	if strings.IsEmpty(in.AccountName) {
 		in.AccountName = "Default"
 	}
-	id := uuid.NewString()
+	id := newID()
 	now := time.Now().UTC()
 	var item NATSAccountExport
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO nats_account_exports
-			(id, cluster_id, account_name, kind, name, subject, description, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		RETURNING id, cluster_id, account_name, kind, name, subject, description, created_at, updated_at`,
+	err := s.pool.QueryRow(ctx, queryInsertNATSAccountExport,
 		id, in.ClusterID, in.AccountName, in.Kind, in.Name, in.Subject, in.Description, now, now).
 		Scan(&item.ID, &item.ClusterID, &item.AccountName, &item.Kind, &item.Name, &item.Subject, &item.Description, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
@@ -615,20 +479,10 @@ func (s *Store) CreateNATSAccountExport(ctx context.Context, in NATSAccountExpor
 	return item, nil
 }
 
-type NATSAccountExportUpdate struct {
-	Name        string
-	Subject     string
-	Description string
-}
-
 func (s *Store) UpdateNATSAccountExport(ctx context.Context, clusterID, accountName, exportID string, in NATSAccountExportUpdate) (NATSAccountExport, error) {
 	now := time.Now().UTC()
 	var item NATSAccountExport
-	err := s.pool.QueryRow(ctx, `
-		UPDATE nats_account_exports SET
-			name = $4, subject = $5, description = $6, updated_at = $7
-		WHERE cluster_id = $1 AND account_name = $2 AND id = $3
-		RETURNING id, cluster_id, account_name, kind, name, subject, description, created_at, updated_at`,
+	err := s.pool.QueryRow(ctx, queryUpdateNATSAccountExport,
 		clusterID, accountName, exportID, in.Name, in.Subject, in.Description, now).
 		Scan(&item.ID, &item.ClusterID, &item.AccountName, &item.Kind, &item.Name, &item.Subject, &item.Description, &item.CreatedAt, &item.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -641,9 +495,7 @@ func (s *Store) UpdateNATSAccountExport(ctx context.Context, clusterID, accountN
 }
 
 func (s *Store) DeleteNATSAccountExport(ctx context.Context, clusterID, accountName, exportID string) error {
-	tag, err := s.pool.Exec(ctx, `
-		DELETE FROM nats_account_exports
-		WHERE cluster_id = $1 AND account_name = $2 AND id = $3`, clusterID, accountName, exportID)
+	tag, err := s.pool.Exec(ctx, queryDeleteNATSAccountExport, clusterID, accountName, exportID)
 	if err != nil {
 		return err
 	}

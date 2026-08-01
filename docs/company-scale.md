@@ -10,7 +10,7 @@ Use **one** NATS Consol as a company control plane for many NATS systems and tea
 |------------|--------------|
 | **Many systems** | Unbounded rows in Postgres `clusters` (UI “Systems”); no hard product cap |
 | **Team isolation** | `accessRules.clusterIds` + Access grants (`system` / `account` / `nats_user`) |
-| **HA** | Stateless app replicas + shared Postgres + shared `SESSION_SECRET` — see [DevOps setup](./devops-setup.md) and the [Helm chart](../deploy/helm/nats-consol/) |
+| **HA** | Stateless app replicas + shared Postgres + shared RSA session key pair — see [DevOps setup](./devops-setup.md) and the [Helm chart](../deploy/helm/nats-consol/) |
 
 There is **no** organization / project / service object in the product. Map company structure onto **systems + NATS accounts/streams**.
 
@@ -56,7 +56,7 @@ flowchart TB
 
 ### Playbook
 
-1. **Deploy once** — Helm, managed Postgres, 2+ consol replicas, strong `ENCRYPTION_KEY` / `SESSION_SECRET` ([DevOps setup](./devops-setup.md)).
+1. **Deploy once** — Helm, managed Postgres, 2+ consol replicas, strong `ENCRYPTION_KEY` and RSA session keys ([DevOps setup](./devops-setup.md)).
 2. **Register each NATS deployment** as a system (DevOps: env bootstrap when the registry is empty, then Postgres / ops tooling — cluster CRUD is not exposed as a public product API; see [Connecting to NATS clusters](./devops-setup.md#connecting-to-nats-clusters)).
 3. **Invite teams** with scoped `clusterIds` (only systems they own).
 4. **Isolate services on NATS** — subject/stream naming (`payments.>`, `orders.>`) and/or real NATS accounts; do not expect consol “projects.”

@@ -20,27 +20,6 @@ ingress:
           pathType: Prefix
   tls: []
 
-http3:
-  enabled: false
-  host: nats-consol.example.com
-  tlsSecretName: nats-consol-tls
-  replicas: 1
-  image:
-    repository: caddy
-    tag: "2.9-alpine"
-    pullPolicy: IfNotPresent
-  service:
-    type: LoadBalancer
-    port: 443
-    annotations: {}
-  resources:
-    limits:
-      cpu: 200m
-      memory: 128Mi
-    requests:
-      cpu: 50m
-      memory: 64Mi
-
 resources:
   limits:
     cpu: 500m
@@ -51,17 +30,16 @@ resources:
 
 env:
   ENV: production
-  AUTH_ENABLED: "true"
   LOG_JSON: "true"
   LOG_LEVEL: warn
   METRICS_SNAPSHOT_INTERVAL: 120s
-  TEL_ENABLE: "true"
   TEL_COLLECTOR_GRPC_ADDR: "otel-collector:4317"
 
 secrets:
   databaseUrl: ""
   encryptionKey: ""
-  sessionSecret: ""
+  sessionPrivateKey: ""
+  sessionPublicKey: ""
   adminPassword: ""
 
 config:
@@ -69,6 +47,8 @@ config:
   monitoringUrl: https://nats:8222
   adminUsername: admin
   defaultClusterName: default
+  # Empty: omit (app default http://localhost:8080). Set to your public HTTPS URL in production.
+  publicBaseUrl: ""
   corsAllowedOrigins: ""
   natsTlsCaFile: ""
   natsTlsCertFile: ""

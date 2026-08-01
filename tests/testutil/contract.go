@@ -5,13 +5,16 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 // AssertCamelCaseKeys fails if any JSON object key contains an underscore (snake_case).
 func AssertCamelCaseKeys(t *testing.T, data []byte) {
 	t.Helper()
 	var v any
-	if err := json.Unmarshal(data, &v); err != nil {
+	if err := serializer.Unmarshal(data, &v); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	assertKeysCamelCase(t, v, "$")
@@ -37,6 +40,8 @@ func assertKeysCamelCase(t *testing.T, v any, path string) {
 // AssertJSONArrayNotNull fails if a top-level JSON key is null instead of an array.
 func AssertJSONArrayNotNull(t *testing.T, data []byte, keys ...string) {
 	t.Helper()
+	// encoding/json.RawMessage keeps nested values as raw JSON; sonic cannot
+	// unmarshal object values into []byte the same way.
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(data, &obj); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -44,9 +49,9 @@ func AssertJSONArrayNotNull(t *testing.T, data []byte, keys ...string) {
 	for _, key := range keys {
 		raw, ok := obj[key]
 		if !ok {
-			t.Fatalf("missing key %q in response: %s", key, string(data))
+			t.Fatalf("missing key %q in response: %s", key, commonstrings.BytesToString(data))
 		}
-		if string(raw) == "null" {
+		if commonstrings.BytesToString(raw) == "null" {
 			t.Fatalf("key %q is JSON null, expected array", key)
 		}
 	}
@@ -55,12 +60,12 @@ func AssertJSONArrayNotNull(t *testing.T, data []byte, keys ...string) {
 func AssertHasKeys(t *testing.T, data []byte, keys ...string) {
 	t.Helper()
 	var obj map[string]any
-	if err := json.Unmarshal(data, &obj); err != nil {
+	if err := serializer.Unmarshal(data, &obj); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	for _, key := range keys {
 		if _, ok := obj[key]; !ok {
-			t.Fatalf("missing key %q in response: %s", key, string(data))
+			t.Fatalf("missing key %q in response: %s", key, commonstrings.BytesToString(data))
 		}
 	}
 }
@@ -69,7 +74,7 @@ func AssertHasKeys(t *testing.T, data []byte, keys ...string) {
 func AssertNoKeys(t *testing.T, data []byte, forbidden ...string) {
 	t.Helper()
 	var v any
-	if err := json.Unmarshal(data, &v); err != nil {
+	if err := serializer.Unmarshal(data, &v); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	for _, key := range forbidden {

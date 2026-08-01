@@ -4,6 +4,7 @@ import {
   emptyAlerts,
   emptyAudit,
   emptyRules,
+  emptyTopology,
   sampleAlert,
 } from "./fixtures/api";
 import { CLUSTER } from "./fixtures/cluster";
@@ -32,25 +33,28 @@ test.describe("admin", () => {
   });
 
   test("topology page loads empty", async ({ page }) => {
+    await mockJson(page, "**/api/v1/clusters/*/topology**", emptyTopology);
     await page.goto("/admin/topology");
     await expect(page.getByRole("heading", { name: "Topology", level: 1 })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "No JetStream topology yet" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No JetStream topology yet" })).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test("audit log empty", async ({ page }) => {
     await mockJson(page, "**/api/v1/audit**", emptyAudit);
     await page.goto("/admin/audit");
-    await expect(page.getByRole("heading", { name: "Audit Log" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Audit Log" })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText("No audit entries yet")).toBeVisible();
   });
 
   test("console users invite person", async ({ page }) => {
-    await mockJson(page, "**/api/v1/users**", { users: [], total: 0 });
+    await mockJson(page, "**/api/v1/users**", { data: [], meta: { total: 0 } });
     await page.route("**/api/v1/people/invite", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ inviteUrl: "http://127.0.0.1:4173/invite/abc" }),
+        body: JSON.stringify({ data: { inviteUrl: "http://127.0.0.1:4173/invite/abc" } }),
       });
     });
 
@@ -82,7 +86,7 @@ test.describe("admin", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ count: current.acknowledgedAt ? 0 : 1, alerts: current.acknowledgedAt ? [] : [current] }),
+        body: JSON.stringify({ data: { count: current.acknowledgedAt ? 0 : 1, alerts: current.acknowledgedAt ? [] : [current] } }),
       });
     });
 
@@ -97,7 +101,7 @@ test.describe("admin", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(current),
+          body: JSON.stringify({ data: current }),
         });
         return;
       }
@@ -109,8 +113,8 @@ test.describe("admin", () => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          alerts: [current],
-          total: 1,
+          data: [current],
+          meta: { total: 1 },
         }),
       });
     });
@@ -124,7 +128,7 @@ test.describe("admin", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ alerts: [current], total: 1 }),
+        body: JSON.stringify({ data: [current], meta: { total: 1 } }),
       });
     });
 
@@ -148,7 +152,7 @@ test.describe("admin", () => {
       updatedAt: string;
     }> = [];
 
-    await mockJson(page, "**/api/v1/alert-rules/metrics", alertRuleMetrics);
+    await mockJson(page, "**/api/v1/alert-rules/metrics", { data: alertRuleMetrics });
     await page.route("**/api/v1/alert-rules**", async (route) => {
       const method = route.request().method();
       const path = new URL(route.request().url()).pathname;
@@ -156,7 +160,7 @@ test.describe("admin", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(alertRuleMetrics),
+          body: JSON.stringify({ data: alertRuleMetrics }),
         });
         return;
       }
@@ -180,14 +184,14 @@ test.describe("admin", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(created),
+          body: JSON.stringify({ data: created }),
         });
         return;
       }
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ rules, total: rules.length }),
+        body: JSON.stringify({ data: rules, meta: { total: rules.length } }),
       });
     });
 

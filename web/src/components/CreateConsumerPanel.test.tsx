@@ -7,6 +7,7 @@ import { TestProviders } from "../test/mocks";
 
 vi.mock("../lib/themeStyles", () => ({
   loadThemeStyles: vi.fn(async () => undefined),
+  preloadThemeStyles: vi.fn(async () => undefined),
 }));
 
 const stream: StreamConfig = {
@@ -35,8 +36,8 @@ describe("CreateConsumerPanel", () => {
 
     expect(screen.getByLabelText("Durable name")).toHaveValue("ORDERS-worker");
     expect(screen.getByText("orders.>")).toBeInTheDocument();
-    expect(screen.getByLabelText("Deliver policy")).toHaveValue("all");
-    expect(screen.getByLabelText("Ack policy")).toHaveValue("explicit");
+    expect(screen.getByRole("button", { name: "all", pressed: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "explicit", pressed: true })).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
   });
 

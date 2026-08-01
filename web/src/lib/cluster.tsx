@@ -1,7 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api, Cluster, ClusterListResponse, getSelectedClusterId, setSelectedClusterId } from "../lib/api";
+import { useSnapshotEvents } from "../hooks/useSnapshotEvents";
+import { api, Cluster, getSelectedClusterId, setSelectedClusterId } from "../lib/api";
 import { clusterQueryKey } from "./query";
+
+/** Keeps snapshot SSE connected for the selected cluster (invalidates monitoring queries). */
+function SnapshotEventsBridge({ clusterId }: { clusterId: string | null }) {
+  useSnapshotEvents(clusterId);
+  return null;
+}
 
 type ClusterContextValue = {
   clusters: Cluster[];
@@ -20,11 +27,17 @@ export function ClusterProvider({ children }: { children: ReactNode }) {
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: clusterQueryKey(null, "list"),
-    queryFn: () => api<ClusterListResponse>("/api/v1/clusters"),
+    queryFn: async () => {
+      const res = await api<Cluster[] | { clusters?: Cluster[] }>("/api/v1/clusters");
+      const raw = res.data;
+      if (Array.isArray(raw)) return raw;
+      if (raw && typeof raw === "object" && Array.isArray(raw.clusters)) return raw.clusters;
+      return [];
+    },
     staleTime: 60_000,
   });
 
-  const clusters = useMemo(() => data?.clusters ?? [], [data?.clusters]);
+  const clusters = useMemo(() => data ?? [], [data]);
 
   useEffect(() => {
     if (clusters.length === 0) return;
@@ -65,7 +78,12 @@ export function ClusterProvider({ children }: { children: ReactNode }) {
     [clusters, clusterId, cluster, setClusterId, reload, isLoading, error],
   );
 
-  return <ClusterContext.Provider value={value}>{children}</ClusterContext.Provider>;
+  return (
+    <ClusterContext.Provider value={value}>
+      <SnapshotEventsBridge clusterId={clusterId} />
+      {children}
+    </ClusterContext.Provider>
+  );
 }
 
 export function useCluster() {

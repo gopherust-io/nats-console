@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Alert from "../components/ui/Alert";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { api, clusterPath } from "../lib/api";
 import { useCluster } from "../lib/cluster";
 import { clusterQueryKey } from "../lib/query";
@@ -20,8 +21,10 @@ type KindId = "service" | "stream" | "feed";
 
 export default function SharingPage() {
   const { t } = useTranslation();
-  const { accountName } = useParams();
-  const { clusterId } = useCluster();
+  const { askConfirm, confirmDialog } = useConfirmDialog();
+  const { accountName, clusterId: routeCluster } = useParams();
+  const { clusterId: contextClusterId } = useCluster();
+  const clusterId = routeCluster ?? contextClusterId;
   const qc = useQueryClient();
   const account = accountName ?? "Default";
   const [kind, setKind] = useState<KindId>("service");
@@ -40,13 +43,15 @@ export default function SharingPage() {
 
   const exportsQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, `exports:${account}:${kind}`),
-    queryFn: () =>
-      api<{ exports: ExportItem[]; total: number }>(
-        clusterPath(
-          clusterId!,
-          `/sharing/exports?account=${encodeURIComponent(account)}&kind=${kind}`,
-        ),
-      ),
+    queryFn: async () =>
+      (
+        await api<ExportItem[]>(
+          clusterPath(
+            clusterId!,
+            `/sharing/exports?account=${encodeURIComponent(account)}&kind=${kind}`,
+          ),
+        )
+      ).data ?? [],
     enabled: Boolean(clusterId),
   });
 
@@ -123,7 +128,7 @@ export default function SharingPage() {
     onError: (e: Error) => setError(e.message),
   });
 
-  const items = exportsQuery.data?.exports ?? [];
+  const items = exportsQuery.data ?? [];
   const createLabel =
     kind === "service"
       ? t("sharing.exportService")
@@ -140,6 +145,7 @@ export default function SharingPage() {
 
   return (
     <div>
+      {confirmDialog}
       <div className="nc-page-header">
         <div className="nc-page-header__text">
           <h1 className="nc-page-title">{t("sharing.title")}</h1>
@@ -149,10 +155,8 @@ export default function SharingPage() {
 
       {error && <Alert variant="error">{error}</Alert>}
 
-      <div className="nc-page-header">
-        <div>
-          <h3 className="nc-page-title" style={{ fontSize: "1.1rem" }}>{t("sharing.exports")}</h3>
-        </div>
+      <div className="nc-toolbar">
+        <h3 className="nc-section-title" style={{ marginBottom: 0 }}>{t("sharing.exports")}</h3>
         <button type="button" className="btn" onClick={openCreate}>
           {createLabel}
         </button>
@@ -201,51 +205,58 @@ export default function SharingPage() {
         </form>
       )}
 
-      {items.length === 0 ? (
-        <div className="nc-empty">{t("sharing.empty")}</div>
-      ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>{t("common.name")}</th>
-                <th>{t("common.subject")}</th>
-                <th>{t("common.description")}</th>
-                <th>{t("common.created")}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item.id}>
-                  <td>{item.name}</td>
-                  <td className="mono">{item.subject}</td>
-                  <td>{item.description || t("common.emDash")}</td>
-                  <td>{new Date(item.createdAt).toLocaleString()}</td>
-                  <td>
-                    <div className="actions">
-                      <button type="button" className="btn secondary" onClick={() => openEdit(item)}>
-                        {t("common.edit")}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn danger"
-                        onClick={() => {
-                          if (!window.confirm(t("sharing.confirmDelete", { name: item.name }))) return;
-                          setError("");
-                          deleteMutation.mutate(item.id);
-                        }}
-                      >
-                        {t("common.delete")}
-                      </button>
-                    </div>
-                  </td>
+      <div className="nc-settings-section">
+        {items.length === 0 ? (
+          <p className="nc-settings-section__empty">{t("sharing.empty")}</p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>{t("common.name")}</th>
+                  <th>{t("common.subject")}</th>
+                  <th>{t("common.description")}</th>
+                  <th>{t("common.created")}</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.name}</td>
+                    <td className="mono">{item.subject}</td>
+                    <td>{item.description || t("common.emDash")}</td>
+                    <td>{new Date(item.createdAt).toLocaleString()}</td>
+                    <td>
+                      <div className="actions">
+                        <button type="button" className="btn secondary btn--small" onClick={() => openEdit(item)}>
+                          {t("common.edit")}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn danger btn--small"
+                          onClick={() =>
+                            askConfirm({
+                              title: t("sharing.confirmDeleteTitle"),
+                              description: t("sharing.confirmDelete", { name: item.name }),
+                              action: () => {
+                                setError("");
+                                deleteMutation.mutate(item.id);
+                              },
+                            })
+                          }
+                        >
+                          {t("common.delete")}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

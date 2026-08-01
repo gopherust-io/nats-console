@@ -8,10 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 const (
@@ -24,40 +25,14 @@ const (
 	GrantCredentialDownloader = domain.GrantCredentialDownloader
 )
 
-type AccessGrant struct {
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
-	ID           string    `json:"id"`
-	UserID       string    `json:"userId"`
-	ResourceType string    `json:"resourceType"`
-	ResourceKey  string    `json:"resourceKey"`
-	Role         string    `json:"role"`
-	Username     string    `json:"username,omitempty"`
-	Email        string    `json:"email,omitempty"`
-}
-
-type AccessGrantUpsert struct {
-	UserID       string
-	ResourceType string
-	ResourceKey  string
-	Role         string
-}
-
-type UserInvite struct {
-	CreatedAt  time.Time  `json:"createdAt"`
-	ExpiresAt  time.Time  `json:"expiresAt"`
-	AcceptedAt *time.Time `json:"acceptedAt,omitempty"`
-	Token      string     `json:"token"`
-	UserID     string     `json:"userId"`
-	Username   string     `json:"username,omitempty"`
-	Email      string     `json:"email,omitempty"`
-}
+type (
+	AccessGrant       = domain.AccessGrant
+	AccessGrantUpsert = domain.AccessGrantUpsert
+	UserInvite        = domain.UserInvite
+)
 
 func (s *Store) ListAccessGrantsByUser(ctx context.Context, userID string) ([]AccessGrant, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, user_id, resource_type, resource_key, role, created_at, updated_at
-		FROM access_grants WHERE user_id = $1
-		ORDER BY resource_type, resource_key`, userID)
+	rows, err := s.pool.Query(ctx, queryListAccessGrantsByUser, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -66,13 +41,7 @@ func (s *Store) ListAccessGrantsByUser(ctx context.Context, userID string) ([]Ac
 }
 
 func (s *Store) ListAccessGrantsByResource(ctx context.Context, resourceType, resourceKey string) ([]AccessGrant, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT g.id, g.user_id, g.resource_type, g.resource_key, g.role, g.created_at, g.updated_at,
-		       u.username, u.email
-		FROM access_grants g
-		JOIN users u ON u.id = g.user_id
-		WHERE g.resource_type = $1 AND g.resource_key = $2
-		ORDER BY u.username`, resourceType, resourceKey)
+	rows, err := s.pool.Query(ctx, queryListAccessGrantsByResource, resourceType, resourceKey)
 	if err != nil {
 		return nil, err
 	}
@@ -93,13 +62,8 @@ func (s *Store) UpsertAccessGrant(ctx context.Context, in AccessGrantUpsert) (Ac
 		return AccessGrant{}, err
 	}
 	now := time.Now().UTC()
-	id := uuid.NewString()
-	row := s.pool.QueryRow(ctx, `
-		INSERT INTO access_grants (id, user_id, resource_type, resource_key, role, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $6)
-		ON CONFLICT (user_id, resource_type, resource_key) DO UPDATE
-		SET role = EXCLUDED.role, updated_at = EXCLUDED.updated_at
-		RETURNING id, user_id, resource_type, resource_key, role, created_at, updated_at`,
+	id := newID()
+	row := s.pool.QueryRow(ctx, queryUpsertAccessGrant,
 		id, in.UserID, in.ResourceType, in.ResourceKey, in.Role, now)
 	var g AccessGrant
 	if err := row.Scan(&g.ID, &g.UserID, &g.ResourceType, &g.ResourceKey, &g.Role, &g.CreatedAt, &g.UpdatedAt); err != nil {
@@ -109,7 +73,7 @@ func (s *Store) UpsertAccessGrant(ctx context.Context, in AccessGrantUpsert) (Ac
 }
 
 func (s *Store) DeleteAccessGrant(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM access_grants WHERE id = $1`, id)
+	tag, err := s.pool.Exec(ctx, queryDeleteAccessGrant, id)
 	if err != nil {
 		return err
 	}
@@ -119,10 +83,18 @@ func (s *Store) DeleteAccessGrant(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeleteAccessGrantScoped deletes a grant only when it matches the given resource.
+// Returns the affected user ID for session invalidation.
+func (s *Store) DeleteAccessGrantScoped(ctx context.Context, id, resourceType, resourceKey string) (userID string, err error) {
+	err = s.pool.QueryRow(ctx, queryDeleteAccessGrantScoped, id, resourceType, resourceKey).Scan(&userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return userID, err
+}
+
 func (s *Store) DeleteAccessGrantByResource(ctx context.Context, userID, resourceType, resourceKey string) error {
-	tag, err := s.pool.Exec(ctx, `
-		DELETE FROM access_grants
-		WHERE user_id = $1 AND resource_type = $2 AND resource_key = $3`, userID, resourceType, resourceKey)
+	tag, err := s.pool.Exec(ctx, queryDeleteAccessGrantByResource, userID, resourceType, resourceKey)
 	if err != nil {
 		return err
 	}
@@ -147,9 +119,7 @@ func (s *Store) CreateUserInvite(ctx context.Context, userID string, ttl time.Du
 		ExpiresAt: now.Add(ttl),
 		CreatedAt: now,
 	}
-	_, err = s.pool.Exec(ctx, `
-		INSERT INTO user_invites (token, user_id, expires_at, created_at)
-		VALUES ($1, $2, $3, $4)`, inv.Token, inv.UserID, inv.ExpiresAt, inv.CreatedAt)
+	_, err = s.pool.Exec(ctx, queryInsertUserInvite, inv.Token, inv.UserID, inv.ExpiresAt, inv.CreatedAt)
 	if err != nil {
 		return UserInvite{}, err
 	}
@@ -158,11 +128,7 @@ func (s *Store) CreateUserInvite(ctx context.Context, userID string, ttl time.Du
 
 func (s *Store) GetUserInvite(ctx context.Context, token string) (UserInvite, error) {
 	var inv UserInvite
-	err := s.pool.QueryRow(ctx, `
-		SELECT i.token, i.user_id, i.expires_at, i.accepted_at, i.created_at, u.username, u.email
-		FROM user_invites i
-		JOIN users u ON u.id = i.user_id
-		WHERE i.token = $1`, token).
+	err := s.pool.QueryRow(ctx, queryGetUserInvite, token).
 		Scan(&inv.Token, &inv.UserID, &inv.ExpiresAt, &inv.AcceptedAt, &inv.CreatedAt, &inv.Username, &inv.Email)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return UserInvite{}, ErrNotFound
@@ -184,9 +150,16 @@ func (s *Store) AcceptUserInvite(ctx context.Context, token, password string) (U
 	if time.Now().UTC().After(inv.ExpiresAt) {
 		return User{}, ErrNotFound
 	}
-	if strings.TrimSpace(password) == "" {
+	if commonstrings.IsEmpty(strings.TrimSpace(password)) {
 		return User{}, errors.New("password required")
 	}
+	// Hash before opening the transaction: bcrypt is expensive and doesn't
+	// touch the DB, so there's no reason to hold the tx open for it.
+	hash, err := bcrypt.GenerateFromPassword(commonstrings.StringToBytes(password), bcrypt.DefaultCost)
+	if err != nil {
+		return User{}, err
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return User{}, err
@@ -194,20 +167,23 @@ func (s *Store) AcceptUserInvite(ctx context.Context, token, password string) (U
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	now := time.Now().UTC()
-	tag, err := tx.Exec(ctx, `
-		UPDATE user_invites SET accepted_at = $2
-		WHERE token = $1 AND accepted_at IS NULL AND expires_at > $2`, token, now)
+	tag, err := tx.Exec(ctx, queryAcceptUserInvite, token, now)
 	if err != nil {
 		return User{}, err
 	}
 	if tag.RowsAffected() == 0 {
 		return User{}, ErrConflict
 	}
+	// Set the password in the SAME transaction as marking the invite accepted
+	// (Medium: invite accept TX), so a failure here can't leave a burned
+	// invite with the user's password unchanged.
+	if _, err := tx.Exec(ctx, queryUpdateUserPassword, inv.UserID, commonstrings.BytesToString(hash)); err != nil {
+		return User{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return User{}, err
 	}
-	pwd := password
-	return s.UpdateUser(ctx, inv.UserID, UserUpdate{Password: &pwd})
+	return s.GetUserByID(ctx, inv.UserID)
 }
 
 func (s *Store) attachGrants(ctx context.Context, users []User) error {
@@ -221,10 +197,7 @@ func (s *Store) attachGrants(ctx context.Context, users []User) error {
 		index[u.ID] = i
 		users[i].Grants = []AccessGrant{}
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, user_id, resource_type, resource_key, role, created_at, updated_at
-		FROM access_grants WHERE user_id = ANY($1)
-		ORDER BY user_id, resource_type, resource_key`, ids)
+	rows, err := s.pool.Query(ctx, queryListAccessGrantsByUserIDs, ids)
 	if err != nil {
 		return err
 	}
@@ -268,7 +241,7 @@ func validateGrant(in AccessGrantUpsert) error {
 	default:
 		return errors.New("invalid grant role")
 	}
-	if strings.TrimSpace(in.UserID) == "" || strings.TrimSpace(in.ResourceKey) == "" {
+	if commonstrings.IsEmpty(strings.TrimSpace(in.UserID)) || commonstrings.IsEmpty(strings.TrimSpace(in.ResourceKey)) {
 		return errors.New("userId and resourceKey required")
 	}
 	return nil

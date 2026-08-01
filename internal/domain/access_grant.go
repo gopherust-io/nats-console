@@ -25,6 +25,23 @@ type AccessGrant struct {
 	Email        string    `json:"email,omitempty"`
 }
 
+type AccessGrantUpsert struct {
+	UserID       string
+	ResourceType string
+	ResourceKey  string
+	Role         string
+}
+
+type UserInvite struct {
+	CreatedAt  time.Time  `json:"createdAt"`
+	ExpiresAt  time.Time  `json:"expiresAt"`
+	AcceptedAt *time.Time `json:"acceptedAt,omitempty"`
+	Token      string     `json:"token"`
+	UserID     string     `json:"userId"`
+	Username   string     `json:"username,omitempty"`
+	Email      string     `json:"email,omitempty"`
+}
+
 // AccountResourceKey builds "{clusterId}:{accountName}".
 func AccountResourceKey(clusterID, accountName string) string {
 	return clusterID + ":" + accountName

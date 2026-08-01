@@ -82,8 +82,8 @@ func (m *Manager) InvalidateViews(clusterID string) {
 }
 
 func (m *Manager) clientCacheTTL() time.Duration {
-	if m.cfg.NATSClientCacheTTL > 0 {
-		return m.cfg.NATSClientCacheTTL
+	if m.cfg.NATS.ClientCacheTTL > 0 {
+		return m.cfg.NATS.ClientCacheTTL
 	}
 	return defaultClientCacheTTL
 }
@@ -99,10 +99,10 @@ func (m *Manager) BootstrapDefaultCluster(ctx context.Context) error {
 
 	_, err = m.store.CreateCluster(ctx, store.ClusterCreate{
 		Name:          m.cfg.DefaultClusterName,
-		NATSURL:       m.cfg.NATSURL,
-		MonitoringURL: m.cfg.MonitoringURL,
-		CredsFilePath: m.cfg.NATSCredsFile,
-		Token:         m.cfg.NATSToken,
+		NATSURL:       m.cfg.NATS.URL,
+		MonitoringURL: m.cfg.NATS.MonitoringURL,
+		CredsFilePath: m.cfg.NATS.CredsFile,
+		Token:         m.cfg.NATS.Token,
 		IsDefault:     true,
 	})
 	return err
@@ -113,7 +113,7 @@ func (m *Manager) Get(ctx context.Context, clusterID string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return m.connect(cluster)
+	return m.connect(ctx, cluster)
 }
 
 func (m *Manager) Test(ctx context.Context, clusterID string) (serverName string, jetstream bool, err error) {
@@ -167,12 +167,16 @@ func (m *Manager) Close() {
 		close(m.sweepStop)
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	toClose := make([]*Client, 0, len(m.cache))
 	for id, entry := range m.cache {
-		entry.client.Close()
+		toClose = append(toClose, entry.client)
 		delete(m.cache, id)
 	}
 	m.credCache = make(map[string]cachedCredentials)
+	m.mu.Unlock()
+	for _, client := range toClose {
+		client.Close()
+	}
 	metrics.SetNATSConnectionsActive(0)
 }
 
@@ -196,7 +200,7 @@ func (m *Manager) clusterCredentials(ctx context.Context, clusterID string) (sto
 	return cluster, nil
 }
 
-func (m *Manager) connect(cluster store.Cluster) (*Client, error) {
+func (m *Manager) connect(ctx context.Context, cluster store.Cluster) (*Client, error) {
 	// Fast path: read lock + atomic touch (same pattern as Touch).
 	m.mu.RLock()
 	if entry, ok := m.cache[cluster.ID]; ok && time.Since(entry.lastUsed()) < m.clientCacheTTL() {
@@ -227,20 +231,24 @@ func (m *Manager) connect(cluster store.Cluster) (*Client, error) {
 			m.mu.RUnlock()
 		}
 
-		client, err := ConnectCluster(context.Background(), m.cfg, cluster, m.connectionHooks(cluster.ID))
+		client, err := ConnectCluster(ctx, m.cfg, cluster, m.connectionHooks(cluster.ID))
 		if err != nil {
 			metrics.IncNATSDialError(cluster.ID)
 			return nil, err
 		}
 
+		var oldClient *Client
 		m.mu.Lock()
 		if old, ok := m.cache[cluster.ID]; ok {
-			old.client.Close()
+			oldClient = old.client
 		}
 		entry := &cachedClient{client: client}
 		entry.touch()
 		m.cache[cluster.ID] = entry
 		m.mu.Unlock()
+		if oldClient != nil {
+			oldClient.Close()
+		}
 
 		m.markConnected(cluster.ID, client)
 		metrics.SetNATSConnectionsActive(m.activeConnectionCount())
@@ -254,11 +262,15 @@ func (m *Manager) connect(cluster store.Cluster) (*Client, error) {
 
 func (m *Manager) evict(clusterID string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	var toClose *Client
 	if entry, ok := m.cache[clusterID]; ok {
-		entry.client.Close()
+		toClose = entry.client
 		delete(m.cache, clusterID)
 	}
 	delete(m.credCache, clusterID)
 	delete(m.status, clusterID)
+	m.mu.Unlock()
+	if toClose != nil {
+		toClose.Close()
+	}
 }

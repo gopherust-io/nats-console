@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { QUERY_GC_TIME_MS, QUERY_STALE_TIME_MS } from "./constants";
 
 export const queryClient = new QueryClient({
@@ -25,16 +25,6 @@ export function visibilityAwareInterval(ms: number): number | false | (() => num
 }
 
 export function QueryProvider({ children }: { children: ReactNode }) {
-  useEffect(() => {
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") {
-        void queryClient.invalidateQueries({ type: "active" });
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, []);
-
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
 

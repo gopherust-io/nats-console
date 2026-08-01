@@ -2,19 +2,25 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
+	"strconv"
 	"strings"
+	"sync"
+	"unicode"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
 
 	"github.com/gopherust-io/nats-consol/internal/crypto"
-	"github.com/jackc/pgx/v5/pgxpool"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 type Store struct {
-	pool      *pgxpool.Pool
-	encryptor *crypto.Encryptor
+	pool              *pgxpool.Pool
+	encryptor         *crypto.Encryptor
+	ensuredPartitions sync.Map // parent|YYYY-MM-DD -> struct{}
 }
 
 func Open(ctx context.Context, databaseURL, migrationsDir string, encryptor *crypto.Encryptor, poolCfg PoolConfig) (*Store, error) {
@@ -41,7 +47,7 @@ func Open(ctx context.Context, databaseURL, migrationsDir string, encryptor *cry
 	}
 
 	s := &Store{pool: dbPool, encryptor: encryptor}
-	if err := s.migrate(ctx, migrationsDir); err != nil {
+	if err := migrate(ctx, databaseURL, migrationsDir); err != nil {
 		dbPool.Close()
 		return nil, err
 	}
@@ -68,80 +74,126 @@ func (s *Store) Pool() *pgxpool.Pool {
 	return s.pool
 }
 
-func (s *Store) migrate(ctx context.Context, dir string) error {
-	entries, err := os.ReadDir(dir)
+// migrate applies pending goose SQL migrations from dir.
+// Goose wraps each Up in a transaction by default; use -- +goose NO TRANSACTION
+// in a SQL file only when Postgres forbids transactional DDL (e.g. CONCURRENTLY).
+func migrate(ctx context.Context, databaseURL, dir string) error {
+	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
-		return fmt.Errorf("read migrations dir: %w", err)
+		return fmt.Errorf("open migrate db: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("ping migrate db: %w", err)
 	}
 
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
-			names = append(names, e.Name())
-		}
+	if err := goose.SetDialect("postgres"); err != nil {
+		return fmt.Errorf("set goose dialect: %w", err)
 	}
-	sort.Strings(names)
 
-	for _, name := range names {
-		version := strings.TrimSuffix(name, ".sql")
-		applied, err := s.isMigrationApplied(ctx, version)
-		if err != nil {
-			return err
-		}
-		if applied {
-			continue
-		}
+	if err := bridgeLegacySchemaMigrations(ctx, db); err != nil {
+		return err
+	}
 
-		// Migration files are read from the configured migrations directory only.
-		sql, err := os.ReadFile(filepath.Join(dir, name)) //nolint:gosec // G304: controlled migration dir
-		if err != nil {
-			return fmt.Errorf("read migration %s: %w", name, err)
-		}
-		if _, err := s.pool.Exec(ctx, string(sql)); err != nil {
-			return fmt.Errorf("apply migration %s: %w", name, err)
-		}
-		if _, err := s.pool.Exec(ctx,
-			`INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING`, version); err != nil {
-			return fmt.Errorf("record migration %s: %w", name, err)
-		}
+	if err := goose.UpContext(ctx, db, dir); err != nil {
+		return fmt.Errorf("goose up: %w", err)
 	}
 	return nil
 }
 
-func (s *Store) isMigrationApplied(ctx context.Context, version string) (bool, error) {
-	if version == "000_schema_migrations" {
-		return false, nil
-	}
-
+// bridgeLegacySchemaMigrations seeds goose_db_version from the old
+// schema_migrations table (if present), then drops it so goose owns versioning.
+func bridgeLegacySchemaMigrations(ctx context.Context, db *sql.DB) error {
 	var exists bool
-	err := s.pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM information_schema.tables WHERE table_name = 'schema_migrations'
-		)`).Scan(&exists)
+	err := db.QueryRowContext(ctx, querySchemaMigrationsTableExists).Scan(&exists)
 	if err != nil {
-		return false, err
+		return fmt.Errorf("check schema_migrations: %w", err)
 	}
 	if !exists {
-		return false, nil
+		return nil
 	}
 
-	var count int
-	err = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = $1`, version).Scan(&count)
+	rows, err := db.QueryContext(ctx, queryListSchemaMigrationVersions)
 	if err != nil {
-		return false, err
+		return fmt.Errorf("list schema_migrations: %w", err)
 	}
-	return count > 0, nil
+	defer func() { _ = rows.Close() }()
+
+	versions := make([]int64, 0)
+	seen := make(map[int64]struct{})
+	for rows.Next() {
+		var version string
+		if err := rows.Scan(&version); err != nil {
+			return fmt.Errorf("scan schema_migrations: %w", err)
+		}
+		n, ok := legacyMigrationVersion(version)
+		if !ok {
+			continue
+		}
+		if _, dup := seen[n]; dup {
+			continue
+		}
+		seen[n] = struct{}{}
+		versions = append(versions, n)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate schema_migrations: %w", err)
+	}
+
+	if _, err := goose.EnsureDBVersion(db); err != nil {
+		return fmt.Errorf("ensure goose version table: %w", err)
+	}
+
+	for _, v := range versions {
+		var applied bool
+		err := db.QueryRowContext(ctx, queryGooseVersionApplied, v).Scan(&applied)
+		if err != nil {
+			return fmt.Errorf("check goose version %d: %w", v, err)
+		}
+		if applied {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, queryInsertGooseVersion, v); err != nil {
+			return fmt.Errorf("seed goose version %d: %w", v, err)
+		}
+	}
+
+	if _, err := db.ExecContext(ctx, queryDropSchemaMigrations); err != nil {
+		return fmt.Errorf("drop schema_migrations: %w", err)
+	}
+	return nil
+}
+
+// legacyMigrationVersion parses "001_clusters" → 1. Skips "000_*" and non-numeric stems.
+func legacyMigrationVersion(version string) (int64, bool) {
+	version = strings.TrimSpace(version)
+	if commonstrings.IsEmpty(version) {
+		return 0, false
+	}
+	i := 0
+	for i < len(version) && unicode.IsDigit(rune(version[i])) {
+		i++
+	}
+	if i == 0 {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(version[:i], 10, 64)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 func (s *Store) encryptToken(token string) (string, error) {
-	if token == "" || s.encryptor == nil {
+	if commonstrings.IsEmpty(token) || s.encryptor == nil {
 		return token, nil
 	}
 	return s.encryptor.Encrypt(token)
 }
 
 func (s *Store) decryptToken(token string) (string, error) {
-	if token == "" || s.encryptor == nil {
+	if commonstrings.IsEmpty(token) || s.encryptor == nil {
 		return token, nil
 	}
 	return s.encryptor.Decrypt(token)
@@ -152,7 +204,7 @@ func (s *Store) DecryptCredential(value string) (string, error) {
 }
 
 func (s *Store) ReencryptCredentials(ctx context.Context) error {
-	rows, err := s.pool.Query(ctx, `SELECT id, token FROM clusters WHERE token <> ''`)
+	rows, err := s.pool.Query(ctx, queryListClusterTokens)
 	if err != nil {
 		return err
 	}
@@ -166,11 +218,12 @@ func (s *Store) ReencryptCredentials(ctx context.Context) error {
 		if crypto.IsEncrypted(token) {
 			continue
 		}
+
 		encrypted, err := s.encryptor.Encrypt(token)
 		if err != nil {
 			return fmt.Errorf("encrypt cluster %s token: %w", id, err)
 		}
-		if _, err := s.pool.Exec(ctx, `UPDATE clusters SET token = $2, updated_at = NOW() WHERE id = $1`, id, encrypted); err != nil {
+		if _, err := s.pool.Exec(ctx, queryUpdateClusterToken, id, encrypted); err != nil {
 			return err
 		}
 	}

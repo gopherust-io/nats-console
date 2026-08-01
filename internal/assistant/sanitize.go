@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 var (
@@ -55,7 +57,7 @@ func SanitizeReply(reply string) string {
 
 func ValidateUserMessage(msg string) error {
 	msg = strings.TrimSpace(msg)
-	if msg == "" {
+	if commonstrings.IsEmpty(msg) {
 		return errors.New("message is required")
 	}
 	if len(msg) > 8000 {
@@ -97,7 +99,7 @@ func isSensitiveKey(key string) bool {
 }
 
 func redactString(s string) string {
-	if s == "" {
+	if commonstrings.IsEmpty(s) {
 		return s
 	}
 	out := s

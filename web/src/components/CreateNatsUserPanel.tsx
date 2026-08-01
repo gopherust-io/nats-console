@@ -365,7 +365,7 @@ export default function CreateNatsUserPanel({
     try {
       await onSubmit(body);
     } catch {
-      // Parent surfaces API error.
+      // onSubmit surfaces errors to the panel
     }
   }
 

@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Console access grants and people invite tokens.
 
 CREATE TABLE IF NOT EXISTS access_grants (
@@ -23,3 +25,9 @@ CREATE TABLE IF NOT EXISTS user_invites (
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_invites_user ON user_invites (user_id);
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+SELECT 1;
+-- +goose StatementEnd

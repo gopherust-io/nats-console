@@ -1,19 +1,22 @@
-.PHONY: dev dev-web build run docker-up docker-down tidy generate \
+.PHONY: dev dev-web build run docker-up docker-down \
+	nats-up nats-down nats-auth-up nats-cluster-up nats-cluster-down nats-down-all tidy generate \
 	test test-unit test-integration test-contract test-security test-regression \
-	test-e2e test-smoke test-performance test-stress test-web ci lint lint-go lint-go-fix lint-web lint-web-docker lint-web-local align
+	test-e2e test-smoke test-performance test-stress test-web ci lint lint-go lint-go-fix lint-web lint-web-docker lint-web-local align reload-api
+
+NATS_COMPOSE := docker/nats/single/docker-compose.yml
+NATS_CLUSTER_COMPOSE := docker/nats/cluster/docker-compose.yml
+NATS_AUTH_COMPOSE := docker/nats/auth/docker-compose.yml
+NATS_SUPERCLUSTER_COMPOSE := docker/nats/supercluster/docker-compose.yml
+NATS_HEALTHZ := http://127.0.0.1:8222/healthz
 
 NODE_IMAGE ?= node:22-alpine
 WEB_DIR := web
-GOALIGN_VERSION := v1.1.0
-GOALIGN_BIN := $(CURDIR)/.cache/goalign-$(GOALIGN_VERSION)
+GOALIGN_VERSION := v1.3.0
+GOALIGN_BIN := $(HOME)/go/bin/goalign
 GOALIGN_FLAGS := analyze -r --arch=amd64 --fail-on-findings --min-waste=1 -e web/,bin/,node_modules/ .
 
 $(GOALIGN_BIN):
-	@mkdir -p $(dir $@)
-	@tmpdir=$$(mktemp -d) && \
-		curl -fsSL https://github.com/gopherust-io/goalign/archive/refs/tags/$(GOALIGN_VERSION).tar.gz | tar -xz -C $$tmpdir && \
-		(cd $$tmpdir/goalign-$(patsubst v%,%,$(GOALIGN_VERSION)) && go build -o $(GOALIGN_BIN) .) && \
-		rm -rf $$tmpdir
+	go install github.com/gopherust-io/goalign@$(GOALIGN_VERSION)
 
 align: $(GOALIGN_BIN)
 	$(GOALIGN_BIN) $(GOALIGN_FLAGS)
@@ -25,14 +28,39 @@ generate:
 	go generate ./...
 
 dev:
-	go run ./cmd/server
+	go run ./cmd
 
 dev-web:
 	cd $(WEB_DIR) && npm install && npm run dev
 
+dev-web-docker:
+	docker stop nats-consol-web-dev 2>/dev/null || true
+	docker rm nats-consol-web-dev 2>/dev/null || true
+	CONSOLE_PORT=8081 docker compose up -d --force-recreate console
+	docker run -d --name nats-consol-web-dev \
+		--network nats-consol_default \
+		-v "$(CURDIR)/$(WEB_DIR):/web" -w /web \
+		-p 8080:8080 \
+		-e VITE_API_PROXY_TARGET=http://console:8080 \
+		$(NODE_IMAGE) sh -lc "npm install && npm run dev -- --host 0.0.0.0"
+
+reload-front: dev-web-docker
+
+# Rebuild the Linux API binary and hot-swap it into the running compose console
+# (useful when Dockerfile build can't resolve the local nats replace).
+# Migrations are copied too: the server reads them from disk at startup, so a
+# binary with new endpoints would otherwise run against a stale schema.
+reload-api:
+	CGO_ENABLED=0 GOOS=linux GOARCH=$$(docker exec nats-consol-console-1 uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
+		go build -o bin/nats-consol-linux ./cmd
+	docker cp bin/nats-consol-linux nats-consol-console-1:/app/nats-consol
+	docker exec nats-consol-console-1 sh -c 'rm -f /app/migrations/*.sql'
+	docker cp migrations/. nats-consol-console-1:/app/migrations/
+	docker restart nats-consol-console-1
+
 build:
 	cd $(WEB_DIR) && npm install && npm run build
-	go build -o bin/nats-consol ./cmd/server
+	go build -o bin/nats-consol ./cmd
 
 run: build
 	STATIC_DIR=web/dist DATABASE_URL=postgres://natsconsol:natsconsol@localhost:5432/natsconsol?sslmode=disable \
@@ -43,6 +71,42 @@ docker-up:
 
 docker-down:
 	docker compose down
+
+nats-up:
+	docker compose -f $(NATS_COMPOSE) up -d
+	@echo "Waiting for JetStream healthz..."
+	@i=0; \
+	while [ $$i -lt 30 ]; do \
+		if curl -sf $(NATS_HEALTHZ) >/dev/null 2>&1; then \
+			echo "NATS ready: nats://127.0.0.1:4222  monitor $(NATS_HEALTHZ)"; \
+			exit 0; \
+		fi; \
+		i=$$((i+1)); \
+		sleep 1; \
+	done; \
+	echo "Timed out waiting for $(NATS_HEALTHZ)"; \
+	exit 1
+
+nats-down:
+	docker compose -f $(NATS_COMPOSE) down
+
+nats-auth-up:
+	docker compose -f $(NATS_AUTH_COMPOSE) up -d
+	@echo "Auth lab up. Users: orders-pub/pubpass, orders-worker/workerpass, js-admin/adminpass"
+
+nats-cluster-up:
+	docker compose -f $(NATS_CLUSTER_COMPOSE) up -d
+	@echo "Cluster lab up (ports 4222-4226 / 8222-8226). See docker/nats/cluster/README.md"
+	@echo "Stop root compose nats first if ports clash: docker compose stop nats"
+
+nats-cluster-down:
+	docker compose -f $(NATS_CLUSTER_COMPOSE) down -v
+
+nats-down-all:
+	-docker compose -f $(NATS_COMPOSE) down -v
+	-docker compose -f $(NATS_CLUSTER_COMPOSE) down -v
+	-docker compose -f $(NATS_AUTH_COMPOSE) down -v
+	-docker compose -f $(NATS_SUPERCLUSTER_COMPOSE) down -v
 
 seed-demo:
 	chmod +x scripts/seed-demo-topology.sh
@@ -81,6 +145,7 @@ test-stress:
 
 # Targets run on every pull request in GitHub Actions (.github/workflows/test.yml).
 # Smoke needs a running compose stack (CI starts it); run `make test-smoke` separately locally.
+# HTTPS/HTTP/3: BASE_URL=https://localhost HTTP3_INSECURE=1 make test-smoke
 ci: lint-go lint-web test-unit test-regression
 
 lint: lint-go lint-web

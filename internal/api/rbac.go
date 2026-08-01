@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 var staticClusterPathSegments = map[string]struct{}{
@@ -16,11 +17,11 @@ func clusterIDFromPath(path string) string {
 		return ""
 	}
 	rest := strings.TrimPrefix(path, prefix)
-	if rest == "" {
+	if commonstrings.IsEmpty(rest) {
 		return ""
 	}
 	clusterID, _, _ := strings.Cut(rest, "/")
-	if clusterID == "" {
+	if commonstrings.IsEmpty(clusterID) {
 		return ""
 	}
 	if _, ok := staticClusterPathSegments[clusterID]; ok {
@@ -35,22 +36,30 @@ func clusterIDFromPath(path string) string {
 // isJetStreamResourcePath reports whether a cluster API path mutates streams,
 // consumers, KV, or object stores (and thus requires CanManageJetStream).
 func isJetStreamResourcePath(path string) bool {
-	const prefix = "/api/v1/clusters/"
-	if !strings.HasPrefix(path, prefix) {
-		return false
-	}
-	rest := strings.TrimPrefix(path, prefix)
-	_, after, ok := strings.Cut(rest, "/")
-	if !ok || after == "" {
-		return false
-	}
-	seg, _, _ := strings.Cut(after, "/")
+	seg := clusterSubResource(path)
 	switch seg {
-	case "streams", "kv", "objects":
+	case "streams", "kv", "objects", "request-reply", "zombies", "subject-naming", "event-genome", "event-catalog", "event-wikipedia":
 		return true
 	default:
 		return false
 	}
+}
+
+// clusterSubResource extracts the first path segment following the
+// clusterId in a /api/v1/clusters/{clusterId}/... path, or "" when the path
+// is exactly /api/v1/clusters/{clusterId} (no sub-resource). Returns "" also
+// when path does not match the cluster prefix at all; callers that need to
+// distinguish "no sub-resource" from "not a cluster path" should call
+// clusterIDFromPath first.
+func clusterSubResource(path string) string {
+	const prefix = "/api/v1/clusters/"
+	if !strings.HasPrefix(path, prefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(path, prefix)
+	_, after, _ := strings.Cut(rest, "/")
+	seg, _, _ := strings.Cut(after, "/")
+	return seg
 }
 
 func filterClustersForActor(clusters []domain.Cluster, actor domain.User) []domain.Cluster {
@@ -103,7 +112,7 @@ func allowsClusterWithGrants(actor domain.User, clusterID string) bool {
 func auditFilterForActor(actor domain.User, clusterID string) (domain.AuditFilter, error) {
 	perms := domain.PermissionsFor(actor)
 	filter := domain.AuditFilter{}
-	if clusterID != "" {
+	if !commonstrings.IsEmpty(clusterID) {
 		if !allowsClusterWithGrants(actor, clusterID) {
 			return filter, domain.ErrForbidden
 		}
@@ -133,7 +142,7 @@ func clusterIDsForActor(actor domain.User) []string {
 		if i := strings.IndexByte(id, ':'); i >= 0 {
 			id = id[:i]
 		}
-		if id == "" {
+		if commonstrings.IsEmpty(id) {
 			continue
 		}
 		if _, ok := seen[id]; ok {

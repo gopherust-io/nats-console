@@ -80,8 +80,9 @@ func (p Permissions) CanAssignAccessRules(rules *AccessRules) bool {
 	if p.IsRoot {
 		return true
 	}
+	// Non-root must never clear access rules (nil ⇒ legacy full admin).
 	if rules == nil {
-		return true
+		return false
 	}
 	if rules.ManageUsers && !p.ManageUsers {
 		return false

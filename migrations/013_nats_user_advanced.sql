@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Extended NATS user JWT fields beyond Synadia create-panel parity.
 
 ALTER TABLE nats_account_users
@@ -10,3 +12,9 @@ ALTER TABLE nats_account_users
     ADD COLUMN IF NOT EXISTS resp_max_msgs INT NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS resp_ttl_ns BIGINT NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS max_data BIGINT NOT NULL DEFAULT -1;
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+SELECT 1;
+-- +goose StatementEnd

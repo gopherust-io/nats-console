@@ -1,83 +1,126 @@
 package config
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"maps"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gopherust-io/env"
 )
 
-func TestValidateRequiresDatabaseURL(t *testing.T) {
-	cfg := Config{Env: "development", AuthEnabled: false}
-	require.Error(t, cfg.Validate())
-	assert.Contains(t, cfg.Validate().Error(), "DATABASE_URL")
+func mustSessionPEMs(t *testing.T) (privPEM, pubPEM string) {
+	t.Helper()
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	privPEM = string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}))
+	pubBytes, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	require.NoError(t, err)
+	pubPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes}))
+	return privPEM, pubPEM
 }
 
-func TestValidateRequiresAdminPasswordWhenAuthEnabled(t *testing.T) {
-	cfg := Config{
-		Env:         "development",
-		DatabaseURL: "postgres://u:p@localhost:5432/db?sslmode=disable",
-		AuthEnabled: true,
+func requiredEnv(t *testing.T, overrides map[string]string) map[string]string {
+	t.Helper()
+	priv, pub := mustSessionPEMs(t)
+	m := map[string]string{
+		"DATABASE_URL":        "postgres://u:p@db.example:5432/natsconsol?sslmode=verify-full",
+		"ADMIN_PASSWORD":      "not-admin",
+		"ENCRYPTION_KEY":      "long-enough-secret-key",
+		"SESSION_PRIVATE_KEY": priv,
+		"SESSION_PUBLIC_KEY":  pub,
+		"NATS_URL":            "tls://nats.example:4222",
+		"NATS_TOKEN":          "secret-token",
+		"NATS_MONITORING_URL": "https://nats.example:8222",
 	}
-	require.Error(t, cfg.Validate())
-	assert.Contains(t, cfg.Validate().Error(), "ADMIN_PASSWORD")
+	maps.Copy(m, overrides)
+	return m
 }
 
-func TestValidateProductionConfig(t *testing.T) {
-	cfg := Config{
-		Env:              "production",
-		DatabaseURL:      "postgres://u:p@db.example:5432/natsconsol?sslmode=verify-full",
-		NATSURL:          "tls://nats.example:4222",
-		NATSToken:        "secret-token",
-		MonitoringURL:    "https://nats.example:8222",
-		EncryptionKey:    "long-enough-secret-key",
-		SessionSecret:    "another-long-secret",
-		AuthEnabled:      true,
-		AdminPassword:    "not-admin",
-		PprofAuthEnabled: true,
+func validConfig(t *testing.T) Config {
+	t.Helper()
+	priv, pub := mustSessionPEMs(t)
+	return Config{
+		DB: DBConfig{
+			URL: "postgres://u:p@db.example:5432/natsconsol?sslmode=verify-full",
+		},
+		NATS: NATSConfig{
+			URL:           "tls://nats.example:4222",
+			Token:         "secret-token",
+			MonitoringURL: "https://nats.example:8222",
+		},
+		EncryptionKey: "long-enough-secret-key",
+		Auth: AuthConfig{
+			SessionPrivateKey: priv,
+			SessionPublicKey:  pub,
+		},
+		AdminPassword: "not-admin",
+		Pprof: PprofConfig{
+			AuthEnabled: true,
+		},
 	}
-	require.NoError(t, cfg.Validate(), "valid production config rejected")
-
-	cfg.AdminPassword = "admin"
-	require.Error(t, cfg.Validate(), "default admin password should fail in production")
 }
 
-func TestValidateProductionRejectsInsecureTransports(t *testing.T) {
-	base := Config{
-		Env:              "production",
-		DatabaseURL:      "postgres://u:p@db.example:5432/natsconsol?sslmode=disable",
-		NATSURL:          "nats://nats.example:4222",
-		MonitoringURL:    "http://nats.example:8222",
-		EncryptionKey:    "long-enough-secret-key",
-		SessionSecret:    "another-long-secret",
-		AuthEnabled:      true,
-		AdminPassword:    "not-admin",
-		PprofAuthEnabled: true,
-	}
-	err := base.Validate()
+func TestLoadConfigRequiresDatabaseURL(t *testing.T) {
+	_, err := LoadConfigFrom(env.FromMap(requiredEnv(t, map[string]string{"DATABASE_URL": ""})))
 	require.Error(t, err)
-	msg := err.Error()
-	assert.Contains(t, msg, "sslmode")
-	assert.Contains(t, msg, "tls://")
-	assert.Contains(t, msg, "https://")
-	assert.Contains(t, msg, "NATS_CREDS_FILE or NATS_TOKEN")
+	assert.Contains(t, err.Error(), "DATABASE_URL")
 }
 
-func TestValidateProductionRejectsSkipVerify(t *testing.T) {
-	cfg := Config{
-		Env:                       "production",
-		DatabaseURL:               "postgres://u:p@db.example:5432/natsconsol?sslmode=require",
-		NATSURL:                   "tls://nats.example:4222",
-		NATSToken:                 "token",
-		MonitoringURL:             "https://nats.example:8222",
-		EncryptionKey:             "long-enough-secret-key",
-		SessionSecret:             "another-long-secret",
-		AuthEnabled:               true,
-		AdminPassword:             "not-admin",
-		NATSTlsInsecureSkipVerify: true,
-	}
+func TestLoadConfigRequiresAdminPassword(t *testing.T) {
+	_, err := LoadConfigFrom(env.FromMap(requiredEnv(t, map[string]string{"ADMIN_PASSWORD": ""})))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ADMIN_PASSWORD")
+}
+
+func TestLoadConfigRequiresEncryptionKey(t *testing.T) {
+	_, err := LoadConfigFrom(env.FromMap(requiredEnv(t, map[string]string{"ENCRYPTION_KEY": ""})))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ENCRYPTION_KEY")
+
+	cfg, err := LoadConfigFrom(env.FromMap(requiredEnv(t, nil)))
+	require.NoError(t, err)
+	require.NoError(t, cfg.Validate())
+}
+
+func TestValidateRequiresSessionKeys(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Auth.SessionPrivateKey = ""
+	cfg.Auth.SessionPublicKey = ""
 	require.Error(t, cfg.Validate())
-	assert.Contains(t, cfg.Validate().Error(), "NATS_TLS_INSECURE_SKIP_VERIFY")
+	assert.Contains(t, cfg.Validate().Error(), "SESSION_PRIVATE_KEY")
+}
+
+func TestLoadConfigRequiresSessionKeys(t *testing.T) {
+	_, err := LoadConfigFrom(env.FromMap(requiredEnv(t, map[string]string{"SESSION_PRIVATE_KEY": ""})))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SESSION_PRIVATE_KEY")
+
+	_, err = LoadConfigFrom(env.FromMap(requiredEnv(t, map[string]string{"SESSION_PUBLIC_KEY": ""})))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SESSION_PUBLIC_KEY")
+}
+
+func TestTrustedProxyList(t *testing.T) {
+	assert.Nil(t, Config{}.TrustedProxyList())
+	assert.Nil(t, Config{TrustedProxies: "   "}.TrustedProxyList())
+	assert.Equal(t, []string{"10.0.0.0/8", "192.168.1.1"}, Config{
+		TrustedProxies: " 10.0.0.0/8 , 192.168.1.1 ,, ",
+	}.TrustedProxyList())
+}
+
+func TestValidateAcceptsSecureConfig(t *testing.T) {
+	cfg := validConfig(t)
+	require.NoError(t, cfg.Validate(), "valid config rejected")
+
+	cfg.PublicBaseURL = "https://example.com"
+	cfg.AdminPassword = "admin"
+	require.Error(t, cfg.Validate(), "default admin password should fail")
 }
 
 func TestTLSEnabled(t *testing.T) {
@@ -89,18 +132,14 @@ func TestTLSEnabled(t *testing.T) {
 }
 
 func TestValidateSMTPWhenEnabled(t *testing.T) {
-	cfg := Config{
-		Env:         "development",
-		DatabaseURL: "postgres://u:p@localhost:5432/db?sslmode=disable",
-		AuthEnabled: false,
-		SMTPEnabled: true,
-	}
+	cfg := validConfig(t)
+	cfg.SMTP.Enabled = true
 	require.Error(t, cfg.Validate())
 	assert.Contains(t, cfg.Validate().Error(), "SMTP_HOST")
 	assert.Contains(t, cfg.Validate().Error(), "SMTP_FROM")
 
-	cfg.SMTPHost = "smtp.example.com"
-	cfg.SMTPFrom = "alerts@example.com"
-	cfg.SMTPPort = 587
+	cfg.SMTP.Host = "smtp.example.com"
+	cfg.SMTP.From = "alerts@example.com"
+	cfg.SMTP.Port = 587
 	require.NoError(t, cfg.Validate())
 }

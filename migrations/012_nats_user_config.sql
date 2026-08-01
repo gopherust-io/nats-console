@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Per-user NATS JWT config (Synadia-parity create/edit fields).
 
 ALTER TABLE nats_account_users
@@ -9,3 +11,9 @@ ALTER TABLE nats_account_users
     ADD COLUMN IF NOT EXISTS max_subs BIGINT NOT NULL DEFAULT -1,
     ADD COLUMN IF NOT EXISTS max_payload BIGINT NOT NULL DEFAULT -1,
     ADD COLUMN IF NOT EXISTS jwt_lifetime_ns BIGINT NOT NULL DEFAULT 0;
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+SELECT 1;
+-- +goose StatementEnd
