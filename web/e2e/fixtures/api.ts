@@ -21,7 +21,15 @@ export const emptyObjects = { objects: [], total: 0, offset: 0, limit: 50 };
 export const emptyGrants = { grants: [] };
 export const emptyPeople = { users: [], total: 0 };
 export const emptyAlerts = { alerts: [], total: 0 };
-export const emptyAudit = { entries: [], total: 0 };
+export const emptyAudit = { data: [], meta: { total: 0 } };
+export const emptyTopology = {
+  data: {
+    id: "cluster:root",
+    kind: "cluster",
+    name: "Cluster",
+    children: [],
+  },
+};
 export const emptyRules = { rules: [], total: 0 };
 export const emptyExports = { exports: [], total: 0 };
 export const emptyNatsUsers = { users: [], total: 0 };

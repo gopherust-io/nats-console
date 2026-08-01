@@ -122,7 +122,9 @@ jobs:
       - name: Prepare compose env
         run: |
           cp .env.example .env
-          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env
+          sed -i 's|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=http://localhost:8080|' .env
+          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=ci-admin-password/' .env
+          sed -i 's/^PPROF_ENABLED=.*/PPROF_ENABLED=false/' .env
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -146,7 +148,7 @@ jobs:
         run: make test-smoke
         env:
           BASE_URL: http://localhost:8080
-          AUTH: admin:admin
+          AUTH: admin:ci-admin-password
 
   performance:
     name: Performance baseline
@@ -172,7 +174,9 @@ jobs:
       - name: Prepare compose env
         run: |
           cp .env.example .env
-          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env
+          sed -i 's|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=http://localhost:8080|' .env
+          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=ci-admin-password/' .env
+          sed -i 's/^PPROF_ENABLED=.*/PPROF_ENABLED=false/' .env
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -219,7 +223,9 @@ jobs:
       - name: Prepare compose env
         run: |
           cp .env.example .env
-          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env
+          sed -i 's|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=http://localhost:8080|' .env
+          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=ci-admin-password/' .env
+          sed -i 's/^PPROF_ENABLED=.*/PPROF_ENABLED=false/' .env
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:

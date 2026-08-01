@@ -4,6 +4,7 @@ import {
   emptyAlerts,
   emptyAudit,
   emptyRules,
+  emptyTopology,
   sampleAlert,
 } from "./fixtures/api";
 import { CLUSTER } from "./fixtures/cluster";
@@ -32,15 +33,18 @@ test.describe("admin", () => {
   });
 
   test("topology page loads empty", async ({ page }) => {
+    await mockJson(page, "**/api/v1/clusters/*/topology**", emptyTopology);
     await page.goto("/admin/topology");
     await expect(page.getByRole("heading", { name: "Topology", level: 1 })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "No JetStream topology yet" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No JetStream topology yet" })).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test("audit log empty", async ({ page }) => {
     await mockJson(page, "**/api/v1/audit**", emptyAudit);
     await page.goto("/admin/audit");
-    await expect(page.getByRole("heading", { name: "Audit Log" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Audit Log" })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText("No audit entries yet")).toBeVisible();
   });
 
