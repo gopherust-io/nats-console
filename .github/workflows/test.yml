@@ -198,6 +198,9 @@ jobs:
           exit 1
       - name: Performance baseline
         run: bash ./tests/performance/load.sh
+        env:
+          BASE_URL: http://localhost:8080
+          AUTH: admin:ci-admin-password
 
   stress:
     name: Stress baseline
@@ -247,6 +250,9 @@ jobs:
           exit 1
       - name: Stress baseline
         run: make test-stress
+        env:
+          BASE_URL: http://localhost:8080
+          AUTH: admin:ci-admin-password
 
   ci-success:
     name: All checks passed
