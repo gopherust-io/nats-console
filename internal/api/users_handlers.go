@@ -1,8 +1,6 @@
 package api
 
 import (
-	"encoding/json"
-	"errors"
 	"strconv"
 
 	"github.com/valyala/fasthttp"
@@ -12,7 +10,9 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
+	"github.com/gopherust-io/nats-consol/internal/httpctx/httpstatus"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 type UsersHandler struct {
@@ -27,24 +27,22 @@ func NewUsersHandler(svc *app.Services, cfg config.Config) *UsersHandler {
 func (h *UsersHandler) List(ctx *fasthttp.RequestCtx) {
 	actor, ok := actorFromContext(ctx)
 	if !ok {
-		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 	users, err := h.svc.Users.List(httpctx.FromRequest(ctx), actor)
 	if err != nil {
-		writeUserMgmtError(ctx, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, UsersListResponse{
-		Users: nonNilSlice(users),
-		Total: len(users),
-	})
+	items := toUserResponses(users)
+	httpstatus.WriteDataMeta(ctx, fasthttp.StatusOK, items, totalMeta(len(items)))
 }
 
 func (h *UsersHandler) Create(ctx *fasthttp.RequestCtx) {
 	actor, ok := actorFromContext(ctx)
 	if !ok {
-		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 	var req struct {
@@ -54,20 +52,20 @@ func (h *UsersHandler) Create(ctx *fasthttp.RequestCtx) {
 		Password    string              `json:"password"`
 		Roles       []string            `json:"roles"`
 	}
-	if err := parseJSONBody(ctx, &req); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.Unmarshal(ctx.PostBody(), &req); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if req.Username == "" {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("username"))
+	if strings.IsEmpty(req.Username) {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("username"))
 		return
 	}
-	if req.Password == "" {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("password"))
+	if strings.IsEmpty(req.Password) {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("password"))
 		return
 	}
 	if len(req.Roles) == 0 {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("roles"))
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("roles"))
 		return
 	}
 	user, err := h.svc.Users.Create(httpctx.FromRequest(ctx), actor, domain.UserCreate{
@@ -78,31 +76,31 @@ func (h *UsersHandler) Create(ctx *fasthttp.RequestCtx) {
 		AccessRules: req.AccessRules,
 	})
 	if err != nil {
-		writeUserMgmtError(ctx, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusCreated, user)
+	httpstatus.WriteData(ctx, fasthttp.StatusCreated, userResponseFromDomain(user))
 }
 
 func (h *UsersHandler) Update(ctx *fasthttp.RequestCtx) {
 	actor, ok := actorFromContext(ctx)
 	if !ok {
-		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 	userID := httpctx.RouteParam(ctx, "userId")
 	if err := validateUUID(userID); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	var req struct {
-		Email       *string         `json:"email"`
-		Password    *string         `json:"password"`
-		Roles       []string        `json:"roles"`
-		AccessRules json.RawMessage `json:"accessRules"`
+		Email       *string  `json:"email"`
+		Password    *string  `json:"password"`
+		Roles       []string `json:"roles"`
+		AccessRules []byte   `json:"accessRules"`
 	}
-	if err := parseJSONBody(ctx, &req); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.Unmarshal(ctx.PostBody(), &req); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	update := domain.UserUpdate{}
@@ -114,7 +112,7 @@ func (h *UsersHandler) Update(ctx *fasthttp.RequestCtx) {
 	}
 	if req.Roles != nil {
 		if len(req.Roles) == 0 {
-			serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("roles"))
+			httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("roles"))
 			return
 		}
 		update.Roles = req.Roles
@@ -122,12 +120,12 @@ func (h *UsersHandler) Update(ctx *fasthttp.RequestCtx) {
 	}
 	if len(req.AccessRules) > 0 {
 		update.SetRules = true
-		if string(req.AccessRules) == "null" {
+		if strings.BytesToString(req.AccessRules) == "null" {
 			update.AccessRules = nil
 		} else {
 			var rules domain.AccessRules
-			if err := json.Unmarshal(req.AccessRules, &rules); err != nil {
-				serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+			if err := serializer.Unmarshal(req.AccessRules, &rules); err != nil {
+				httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 				return
 			}
 			update.AccessRules = &rules
@@ -135,61 +133,61 @@ func (h *UsersHandler) Update(ctx *fasthttp.RequestCtx) {
 	}
 	user, err := h.svc.Users.Update(httpctx.FromRequest(ctx), actor, userID, update)
 	if err != nil {
-		writeUserMgmtError(ctx, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	h.svc.Auth.InvalidateUser(userID)
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, user)
+	h.svc.Auth.InvalidateUser(httpctx.FromRequest(ctx), userID)
+	httpstatus.WriteData(ctx, fasthttp.StatusOK, userResponseFromDomain(user))
 }
 
 func (h *UsersHandler) Delete(ctx *fasthttp.RequestCtx) {
 	actor, ok := actorFromContext(ctx)
 	if !ok {
-		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 	userID := httpctx.RouteParam(ctx, "userId")
 	if err := validateUUID(userID); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	if err := h.svc.Users.Delete(httpctx.FromRequest(ctx), actor, userID); err != nil {
-		writeUserMgmtError(ctx, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	h.svc.Auth.InvalidateUser(userID)
+	h.svc.Auth.InvalidateUser(httpctx.FromRequest(ctx), userID)
 	ctx.SetStatusCode(fasthttp.StatusNoContent)
 }
 
 func (h *UsersHandler) SetRoles(ctx *fasthttp.RequestCtx) {
 	actor, ok := actorFromContext(ctx)
 	if !ok {
-		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 	userID := httpctx.RouteParam(ctx, "userId")
 	var req struct {
 		Roles []string `json:"roles"`
 	}
-	if err := parseJSONBody(ctx, &req); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+	if err := serializer.Unmarshal(ctx.PostBody(), &req); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	if len(req.Roles) == 0 {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("roles"))
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("roles"))
 		return
 	}
 	if err := validateUUID(userID); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	user, err := h.svc.Users.SetRoles(httpctx.FromRequest(ctx), actor, userID, req.Roles)
 	if err != nil {
-		writeUserMgmtError(ctx, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	h.svc.Auth.InvalidateUser(userID)
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, user)
+	h.svc.Auth.InvalidateUser(httpctx.FromRequest(ctx), userID)
+	httpstatus.WriteData(ctx, fasthttp.StatusOK, userResponseFromDomain(user))
 }
 
 func actorFromContext(ctx *fasthttp.RequestCtx) (domain.User, bool) {
@@ -199,17 +197,6 @@ func actorFromContext(ctx *fasthttp.RequestCtx) (domain.User, bool) {
 		return domain.User{}, false
 	}
 	return auth.StoreUserToDomain(user), true
-}
-
-func writeUserMgmtError(ctx *fasthttp.RequestCtx, err error) {
-	switch {
-	case errors.Is(err, domain.ErrNotFound):
-		serializer.WriteError(ctx, fasthttp.StatusNotFound, err)
-	case errors.Is(err, domain.ErrForbidden), errors.Is(err, domain.ErrRootProtected), errors.Is(err, domain.ErrCannotEscalate):
-		serializer.WriteError(ctx, fasthttp.StatusForbidden, err)
-	default:
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
-	}
 }
 
 type AuditHandler struct {
@@ -224,21 +211,21 @@ func NewAuditHandler(svc *app.Services, cfg config.Config) *AuditHandler {
 func (h *AuditHandler) List(ctx *fasthttp.RequestCtx) {
 	actor, ok := actorFromContext(ctx)
 	if !ok {
-		ctx.SetStatusCode(fasthttp.StatusUnauthorized)
+		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 
-	offset, _ := strconv.Atoi(string(ctx.QueryArgs().Peek("offset")))
-	limit, _ := strconv.Atoi(string(ctx.QueryArgs().Peek("limit")))
+	offset, _ := strconv.Atoi(strings.BytesToString(ctx.QueryArgs().Peek("offset")))
+	limit, _ := strconv.Atoi(strings.BytesToString(ctx.QueryArgs().Peek("limit")))
 	limit = h.cfg.NormalizeAuditLimit(limit)
 	if offset < 0 {
 		offset = 0
 	}
-	clusterID := string(ctx.QueryArgs().Peek("clusterId"))
+	clusterID := strings.BytesToString(ctx.QueryArgs().Peek("clusterId"))
 
 	scope, err := auditFilterForActor(actor, clusterID)
 	if err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusForbidden, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusForbidden, err)
 		return
 	}
 	scope.Limit = limit
@@ -246,11 +233,8 @@ func (h *AuditHandler) List(ctx *fasthttp.RequestCtx) {
 
 	entries, total, err := h.svc.Audit.List(httpctx.FromRequest(ctx), scope)
 	if err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, err)
+		writeAPIError(ctx, err)
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, AuditListResponse{
-		Entries: nonNilSlice(entries),
-		Total:   total,
-	})
+	httpstatus.WriteDataMeta(ctx, fasthttp.StatusOK, nonNilSlice(entries), pageMeta(total, offset, limit))
 }

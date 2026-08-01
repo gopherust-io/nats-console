@@ -3,9 +3,10 @@ package api
 import (
 	"testing"
 
-	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gopherust-io/nats-consol/internal/domain"
 )
 
 func TestClusterIDFromPath(t *testing.T) {
@@ -35,6 +36,14 @@ func TestIsJetStreamResourcePath(t *testing.T) {
 	assert.True(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/streams/ORDERS/consumers"))
 	assert.True(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/kv/buckets"))
 	assert.True(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/objects/buckets/x"))
+	assert.True(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/request-reply"))
+	assert.True(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/request-reply/probes"))
+	assert.True(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/zombies"))
+	assert.True(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/subject-naming"))
+	assert.True(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/event-genome"))
+	assert.True(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/event-catalog"))
+	assert.True(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/event-catalog/orders.created"))
+	assert.True(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/event-wikipedia"))
 	assert.False(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/account"))
 	assert.False(t, isJetStreamResourcePath("/api/v1/clusters/"+id+"/nats-users"))
 	assert.False(t, isJetStreamResourcePath("/api/v1/clusters"))

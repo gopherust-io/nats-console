@@ -1,14 +1,11 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
+import Alert from "../components/ui/Alert";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { api, clusterPath, decodeBase64, jetStreamUIBase, KVEntry, tryParseJSON } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
-
-type HistoryResponse = {
-  entries: KVEntry[];
-  total: number;
-};
 
 function encodeValue(raw: string): string {
   return btoa(unescape(encodeURIComponent(raw)));
@@ -16,9 +13,11 @@ function encodeValue(raw: string): string {
 
 export default function KVKeyPage() {
   const { t } = useTranslation();
-  const { bucket = "", key = "", accountName } = useParams();
-  const decodedKey = decodeURIComponent(key);
-  const { clusterId } = useCluster();
+  const { askConfirm, confirmDialog } = useConfirmDialog();
+  const { bucket = "", key = "", accountName, clusterId: routeCluster } = useParams();
+  const decodedKey = key;
+  const { clusterId: contextClusterId } = useCluster();
+  const clusterId = routeCluster ?? contextClusterId;
   const { canManageJetStream } = useAuth();
   const navigate = useNavigate();
   const jsBase = clusterId ? jetStreamUIBase(clusterId, accountName) : "";
@@ -33,22 +32,23 @@ export default function KVKeyPage() {
     if (!clusterId || !bucket || !decodedKey) return;
     setError("");
     try {
-      const [entryData, historyData] = await Promise.all([
+      const [entryRes, historyRes] = await Promise.all([
         api<KVEntry>(
           clusterPath(
             clusterId,
             `/kv/buckets/${encodeURIComponent(bucket)}/keys/${encodeURIComponent(decodedKey)}`,
           ),
         ),
-        api<HistoryResponse>(
+        api<KVEntry[]>(
           clusterPath(
             clusterId,
             `/kv/buckets/${encodeURIComponent(bucket)}/keys/${encodeURIComponent(decodedKey)}/history`,
           ),
         ),
       ]);
+      const entryData = entryRes.data;
       setEntry(entryData);
-      setHistory(historyData.entries ?? []);
+      setHistory(historyRes.data ?? []);
       setEditValue(decodeBase64(entryData.value));
       setMissing(false);
     } catch (err) {
@@ -84,24 +84,29 @@ export default function KVKeyPage() {
     }
   }
 
-  async function onDelete() {
+  function onDelete() {
     if (!clusterId || !canManageJetStream) return;
-    if (!window.confirm(t("kv.confirmDeleteKey", { key: decodedKey }))) return;
-    setSaving(true);
-    setError("");
-    try {
-      await api(
-        clusterPath(
-          clusterId,
-          `/kv/buckets/${encodeURIComponent(bucket)}/keys/${encodeURIComponent(decodedKey)}`,
-        ),
-        { method: "DELETE" },
-      );
-      navigate(`${jsBase}/kv/${encodeURIComponent(bucket)}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("kv.deleteFailed"));
-      setSaving(false);
-    }
+    askConfirm({
+      title: t("kv.confirmDeleteKeyTitle"),
+      description: t("kv.confirmDeleteKey", { key: decodedKey }),
+      action: async () => {
+        setSaving(true);
+        setError("");
+        try {
+          await api(
+            clusterPath(
+              clusterId,
+              `/kv/buckets/${encodeURIComponent(bucket)}/keys/${encodeURIComponent(decodedKey)}`,
+            ),
+            { method: "DELETE" },
+          );
+          navigate(`${jsBase}/kv/${encodeURIComponent(bucket)}`);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : t("kv.deleteFailed"));
+          setSaving(false);
+        }
+      },
+    });
   }
 
   if (!clusterId) {
@@ -117,6 +122,7 @@ export default function KVKeyPage() {
 
   return (
     <div>
+      {confirmDialog}
       <div className="page-header">
         <div>
           <Link to={`${jsBase}/kv/${encodeURIComponent(bucket)}`} className="link-back">
@@ -125,13 +131,13 @@ export default function KVKeyPage() {
           <h1>{decodedKey}</h1>
         </div>
         {canManageJetStream && entry && (
-          <button type="button" className="btn danger" disabled={saving} onClick={() => void onDelete()}>
+          <button type="button" className="btn danger" disabled={saving} onClick={onDelete}>
             {t("common.delete")}
           </button>
         )}
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {error && <Alert variant="error">{error}</Alert>}
 
       {entry && (
         <div className="card">
@@ -155,15 +161,17 @@ export default function KVKeyPage() {
               required
             />
           </div>
-          <button className="btn" type="submit" disabled={saving}>
-            {t("common.save")}
-          </button>
+          <div className="actions">
+            <button className="btn" type="submit" disabled={saving}>
+              {t("common.save")}
+            </button>
+          </div>
         </form>
       )}
 
       {history.length > 1 && (
         <>
-          <h2 className="mt-24">{t("common.history")}</h2>
+          <h2 className="nc-section-title mt-24">{t("common.history")}</h2>
           <div className="table-wrap">
             <table>
               <thead>

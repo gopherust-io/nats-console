@@ -109,10 +109,9 @@ test.describe("kv", () => {
 
     await page.goto(kvBase);
     await expect(page.getByRole("link", { name: "CONFIG" })).toBeVisible();
-    page.once("dialog", (dialog) => {
-      void dialog.accept();
-    });
     await page.getByRole("button", { name: "Delete" }).click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Delete" }).click();
     await expect.poll(() => deleted).toBe(true);
     await expect(page.getByText("No KV buckets")).toBeVisible();
   });

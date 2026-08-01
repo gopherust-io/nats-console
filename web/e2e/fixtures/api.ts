@@ -46,6 +46,13 @@ export const emptyConnz = {
   num_connections: 0,
 };
 
+export const emptyRequestReply = {
+  patterns: [],
+  connections: [],
+  requesters: 0,
+  responders: 0,
+};
+
 export const emptyJsz = {
   account_details: [],
   total: { streams: 0, consumers: 0 },
@@ -92,9 +99,20 @@ export function sampleConsumer(name = "worker", streamName = "ORDERS") {
       deliverPolicy: "all",
       ackPolicy: "explicit",
       replayPolicy: "instant",
+      ackWaitNs: 30_000_000_000,
     },
-    numPending: 0,
-    numAckPending: 0,
+    numPending: 3,
+    numAckPending: 1,
+    numWaiting: 0,
+    numRedelivered: 2,
+    delivered: {
+      consumerSeq: 10,
+      streamSeq: 97,
+    },
+    ackFloor: {
+      consumerSeq: 9,
+      streamSeq: 96,
+    },
   };
 }
 

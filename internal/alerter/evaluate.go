@@ -10,6 +10,7 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/mail"
 	"github.com/gopherust-io/nats-consol/internal/store"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/tel"
 )
 
@@ -33,7 +34,7 @@ var (
 
 // Evaluate compares the latest metric samples for a cluster against enabled alert rules.
 func Evaluate(ctx context.Context, st *store.Store, clusterID string, samples []domain.MetricSample, opts Options) {
-	if st == nil || clusterID == "" || len(samples) == 0 {
+	if st == nil || commonstrings.IsEmpty(clusterID) || len(samples) == 0 {
 		return
 	}
 
@@ -96,20 +97,14 @@ func notifyNewAlert(ctx context.Context, st *store.Store, opts Options, alertID 
 		return
 	}
 
-	release := func() {
-		if err := st.ReleaseAlertEmailNotify(ctx, alertID); err != nil {
-			tel.Warn().Err(err).Str("component", "alerter").Str("alert_id", alertID).Msg("release email notify claim failed")
-		}
-	}
-
 	recipients, err := recipientEmails(ctx, st, clusterID)
 	if err != nil {
 		tel.Warn().Err(err).Str("component", "alerter").Msg("list alert email recipients failed")
-		release()
+		releaseAlertEmailClaim(ctx, st, alertID)
 		return
 	}
 	if len(recipients) == 0 {
-		release()
+		releaseAlertEmailClaim(ctx, st, alertID)
 		return
 	}
 
@@ -119,7 +114,7 @@ func notifyNewAlert(ctx context.Context, st *store.Store, opts Options, alertID 
 	}
 
 	message := rule.Message
-	if message == "" {
+	if commonstrings.IsEmpty(message) {
 		message = rule.Name
 	}
 	alert := domain.Alert{
@@ -136,16 +131,23 @@ func notifyNewAlert(ctx context.Context, st *store.Store, opts Options, alertID 
 		LastSeenAt:  at,
 		RuleName:    rule.Name,
 	}
-	content := mail.BuildAlertEmail(alert, clusterName, opts.PublicBaseURL)
+	// Claim is released by the mail worker on send failure / queue drop.
+	enqueueAlertEmail(mailJob{
+		st:          st,
+		mailer:      opts.Mailer,
+		baseURL:     opts.PublicBaseURL,
+		alertID:     alertID,
+		clusterID:   clusterID,
+		clusterName: clusterName,
+		recipients:  recipients,
+		alert:       alert,
+	})
+}
 
-	mailCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	if err := opts.Mailer.Send(mailCtx, recipients, content.Subject, content.TextBody, content.HTMLBody); err != nil {
-		tel.Warn().Err(err).Str("component", "alerter").Str("alert_id", alertID).Int("recipients", len(recipients)).Msg("send alert email failed")
-		release()
-		return
+func releaseAlertEmailClaim(ctx context.Context, st *store.Store, alertID string) {
+	if err := st.ReleaseAlertEmailNotify(ctx, alertID); err != nil {
+		tel.Warn().Err(err).Str("component", "alerter").Str("alert_id", alertID).Msg("release email notify claim failed")
 	}
-	tel.Info().Str("component", "alerter").Str("alert_id", alertID).Int("recipients", len(recipients)).Msg("alert email sent")
 }
 
 func recipientEmails(ctx context.Context, st *store.Store, clusterID string) ([]string, error) {
@@ -169,7 +171,7 @@ func recipientEmails(ctx context.Context, st *store.Store, clusterID string) ([]
 		if mail.IsPlaceholderEmail(email) {
 			continue
 		}
-		if !auth.CanAccessCluster(user, clusterID) {
+		if !auth.CanAccessClusterOrAccount(user, clusterID) {
 			continue
 		}
 		key := strings.ToLower(email)

@@ -82,12 +82,14 @@
     opacity var(--nc-duration, 150ms) var(--nc-ease, cubic-bezier(0.4, 0, 0.2, 1));
 }
 
+[data-theme="control"] .btn--secondary,
 [data-theme="control"] .btn.secondary {
   background: transparent;
   border: 1px solid var(--border);
   box-shadow: none;
 }
 
+[data-theme="control"] .btn--secondary:hover:not(:disabled),
 [data-theme="control"] .btn.secondary:hover:not(:disabled) {
   background: var(--btn-secondary-bg-hover);
   border-color: var(--btn-secondary-border-hover);

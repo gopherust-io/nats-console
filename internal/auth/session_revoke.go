@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"sync"
 	"time"
+
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 // sessionRevocations is an in-process denylist of logged-out JWTs.
@@ -21,12 +23,12 @@ func newSessionRevocations() *sessionRevocations {
 }
 
 func hashSessionToken(token string) string {
-	sum := sha256.Sum256([]byte(token))
+	sum := sha256.Sum256(commonstrings.StringToBytes(token))
 	return hex.EncodeToString(sum[:])
 }
 
 func (r *sessionRevocations) Revoke(token string, until time.Time) {
-	if token == "" || until.IsZero() {
+	if commonstrings.IsEmpty(token) || until.IsZero() {
 		return
 	}
 	key := hashSessionToken(token)
@@ -40,7 +42,7 @@ func (r *sessionRevocations) Revoke(token string, until time.Time) {
 }
 
 func (r *sessionRevocations) IsRevoked(token string) bool {
-	if token == "" {
+	if commonstrings.IsEmpty(token) {
 		return false
 	}
 	key := hashSessionToken(token)

@@ -36,15 +36,13 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/go/bin/goalign
-          key: goalign-v1.1.0-${{ runner.os }}
+          key: goalign-v1.3.0-${{ runner.os }}
       - name: Install goalign
         if: steps.goalign-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          ver=v1.1.0
           mkdir -p "${HOME}/go/bin"
-          curl -fsSL "https://github.com/gopherust-io/goalign/archive/refs/tags/${ver}.tar.gz" | tar -xz -C /tmp
-          (cd "/tmp/goalign-${ver#v}" && go build -o "${HOME}/go/bin/goalign" .)
+          go install github.com/gopherust-io/goalign@v1.3.0
       - name: Run goalign
         run: |
           echo "${HOME}/go/bin" >> "${GITHUB_PATH}"
@@ -52,7 +50,7 @@ jobs:
       - name: Unit tests
         run: make test-unit
       - name: Build server
-        run: go build -o /dev/null ./cmd/server
+        run: go build -o /dev/null ./cmd
 
   web:
     name: Web

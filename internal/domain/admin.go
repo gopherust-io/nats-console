@@ -11,3 +11,7 @@ type RotateEncryptionKeyResult struct {
 	ClustersUpdated int    `json:"clustersUpdated"`
 	DryRun          bool   `json:"dryRun"`
 }
+
+type EncryptionRotationStats struct {
+	ClustersUpdated int
+}

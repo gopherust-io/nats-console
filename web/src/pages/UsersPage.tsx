@@ -1,5 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import Alert from "../components/ui/Alert";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { api, AccessRules, UserRecord } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
@@ -16,6 +18,7 @@ const emptyRules: AccessRules = {
 
 export default function UsersPage() {
   const { t } = useTranslation();
+  const { askConfirm, confirmDialog } = useConfirmDialog();
   const { user: currentUser, canManageUsers, isRoot } = useAuth();
   const { clusters } = useCluster();
   const [users, setUsers] = useState<UserRecord[]>([]);
@@ -71,8 +74,8 @@ export default function UsersPage() {
   const load = useCallback(async () => {
     setError("");
     try {
-      const data = await api<{ users: UserRecord[] }>("/api/v1/users");
-      setUsers(data.users ?? []);
+      const data = await api<UserRecord[]>("/api/v1/users");
+      setUsers(data.data ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("users.loadFailed"));
     }
@@ -116,18 +119,23 @@ export default function UsersPage() {
     }
   }
 
-  async function deleteUser(user: UserRecord) {
-    if (!window.confirm(t("users.confirmDelete", { username: user.username }))) return;
-    setSaving(user.id);
-    setError("");
-    try {
-      await api(`/api/v1/users/${user.id}`, { method: "DELETE" });
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("users.deleteFailed"));
-    } finally {
-      setSaving(null);
-    }
+  function deleteUser(user: UserRecord) {
+    askConfirm({
+      title: t("users.confirmDeleteTitle"),
+      description: t("users.confirmDelete", { username: user.username }),
+      action: async () => {
+        setSaving(user.id);
+        setError("");
+        try {
+          await api(`/api/v1/users/${user.id}`, { method: "DELETE" });
+          await load();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : t("users.deleteFailed"));
+        } finally {
+          setSaving(null);
+        }
+      },
+    });
   }
 
   async function createUser(event: FormEvent) {
@@ -202,15 +210,17 @@ export default function UsersPage() {
     setError("");
     setInviteUrl("");
     try {
+      const inviteClusterId = clusters.find((c) => c.isDefault)?.id ?? clusters[0]?.id;
       const res = await api<{ inviteUrl: string }>("/api/v1/people/invite", {
         method: "POST",
         body: JSON.stringify({
           username: inviteForm.username,
           email: inviteForm.email,
           roles: ["viewer"],
+          clusterIds: inviteClusterId ? [inviteClusterId] : [],
         }),
       });
-      setInviteUrl(res.inviteUrl);
+      setInviteUrl(res.data.inviteUrl);
       setInviteForm({ username: "", email: "" });
       await load();
     } catch (err) {
@@ -222,11 +232,12 @@ export default function UsersPage() {
 
   return (
     <div>
+      {confirmDialog}
       <div className="page-header">
         <h1>{t("users.title")}</h1>
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {error && <Alert variant="error">{error}</Alert>}
 
       <div className="card" style={{ marginBottom: "1rem" }}>
         <h2>{t("users.inviteTitle")}</h2>
@@ -248,9 +259,11 @@ export default function UsersPage() {
               onChange={(e) => setInviteForm((f) => ({ ...f, email: e.target.value }))}
             />
           </label>
-          <button className="btn btn--primary" type="submit" disabled={inviting}>
-{inviting ? t("users.inviting") : t("users.createInvite")}
-          </button>
+          <div className="actions">
+            <button className="btn" type="submit" disabled={inviting}>
+              {inviting ? t("users.inviting") : t("users.createInvite")}
+            </button>
+          </div>
         </form>
         {inviteUrl && (
           <p className="mt-16">
@@ -373,15 +386,18 @@ export default function UsersPage() {
                 />
               </label>
             )}
-            <button className="btn btn--primary" type="submit" disabled={creating}>
-{creating ? t("users.creating") : t("users.createUser")}
-            </button>
+            <div className="actions">
+              <button className="btn" type="submit" disabled={creating}>
+                {creating ? t("users.creating") : t("users.createUser")}
+              </button>
+            </div>
           </form>
         </div>
       )}
 
       <div className="card">
-        <table className="table">
+        <div className="table-wrap">
+        <table>
           <thead>
             <tr>
               <th>{t("common.username")}</th>
@@ -498,7 +514,8 @@ export default function UsersPage() {
             ))}
           </tbody>
         </table>
-{users.length === 0 && <div className="muted">{t("users.empty")}</div>}
+        </div>
+        {users.length === 0 && <div className="muted">{t("users.empty")}</div>}
       </div>
     </div>
   );

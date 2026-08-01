@@ -11,6 +11,7 @@ var scratchPool = sync.Pool{New: func() any {
 }}
 
 // EncodeToString encodes src using a pooled scratch buffer when possible.
+// The returned string owns its bytes (copied); the pool buffer is never aliased.
 func EncodeToString(src []byte) string {
 	if len(src) == 0 {
 		return ""

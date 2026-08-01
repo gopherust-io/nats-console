@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 const defaultUserCacheTTL = 45 * time.Second
@@ -24,14 +25,14 @@ func (c *userCache) Get(userID string) (store.User, bool) {
 }
 
 func (c *userCache) Set(user store.User) {
-	if user.ID == "" {
+	if strings.IsEmpty(user.ID) {
 		return
 	}
 	c.cache.Set(user.ID, user)
 }
 
 func (c *userCache) Invalidate(userID string) {
-	if userID == "" {
+	if strings.IsEmpty(userID) {
 		return
 	}
 	c.cache.Invalidate(userID)

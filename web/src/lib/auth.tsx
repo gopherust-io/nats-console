@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { api, AccessRules, clearAuth, setAuth } from "./api";
+import { useTranslation } from "react-i18next";
+import { ApiError, api, AccessRules, clearAuth, UnauthorizedError, userFacingError } from "./api";
 
 export type AuthUser = {
   id?: string;
@@ -13,6 +14,7 @@ export type AuthUser = {
 type AuthContextValue = {
   user: AuthUser | null;
   loading: boolean;
+  sessionError: string | null;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   reload: () => Promise<void>;
@@ -33,48 +35,42 @@ function hasRole(roles: string[], role: string) {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const { t } = useTranslation();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sessionError, setSessionError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
-    let authEnabled = true;
-    try {
-      const config = await api<{
-        authEnabled: boolean;
-      }>("/api/v1/auth/config");
-      authEnabled = config.authEnabled;
-      if (!authEnabled) {
-        setUser({ username: "dev", roles: ["admin"], isRoot: true });
-        return;
-      }
-    } catch {
-      // fall through to /me
-    }
-
     try {
       const me = await api<AuthUser>("/api/v1/auth/me");
-      setUser(me);
-    } catch {
+      setUser(me.data);
+      setSessionError(null);
+    } catch (err) {
+      if (err instanceof UnauthorizedError) {
+        setUser(null);
+        setSessionError(null);
+        return;
+      }
+      if (err instanceof ApiError && err.code === "network") {
+        setSessionError(userFacingError(err, t));
+        return;
+      }
       setUser(null);
+      setSessionError(null);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     reload().finally(() => setLoading(false));
   }, [reload]);
 
   const login = useCallback(async (username: string, password: string) => {
-    setAuth(username, password);
-    try {
-      const me = await api<AuthUser>("/api/v1/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ username, password }),
-      });
-      setUser(me);
-    } catch (err) {
-      clearAuth();
-      throw err;
-    }
+    const me = await api<AuthUser>("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    setUser(me.data);
+    setSessionError(null);
   }, []);
 
   const logout = useCallback(async () => {
@@ -85,6 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     clearAuth();
     setUser(null);
+    setSessionError(null);
   }, []);
 
   const value = useMemo<AuthContextValue>(() => {
@@ -99,6 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return {
       user,
       loading,
+      sessionError,
       login,
       logout,
       reload,
@@ -111,9 +109,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       canDeleteClusters,
       canManageAlertRules,
     };
-  }, [user, loading, login, logout, reload]);
+  }, [user, loading, sessionError, login, logout, reload]);
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {sessionError && (
+        <div className="nc-session-error" role="alert">
+          <span>{sessionError || t("errors.sessionRecover")}</span>
+          <button type="button" className="btn btn--small" onClick={() => void reload()}>
+            {t("common.retry")}
+          </button>
+        </div>
+      )}
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {

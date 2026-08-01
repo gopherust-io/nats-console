@@ -74,6 +74,19 @@ func TestCannotEscalateAccessRules(t *testing.T) {
 	assert.False(t, perms.CanAssignAccessRules(rules), "should not allow escalating audit access")
 }
 
+func TestCanAssignAccessRulesRejectsNilForNonRoot(t *testing.T) {
+	perms := domain.PermissionsFor(domain.User{
+		Roles: []string{domain.RoleAdmin},
+		AccessRules: &domain.AccessRules{
+			ClusterIDs:      []string{"cluster-a"},
+			ManageUsers:     true,
+			AssignableRoles: []string{domain.RoleViewer},
+		},
+	})
+	assert.False(t, perms.CanAssignAccessRules(nil), "non-root must not clear access rules")
+	assert.True(t, domain.FullPermissions().CanAssignAccessRules(nil), "root may clear access rules")
+}
+
 func TestValidateAccessRulesRequiresAssignableRoles(t *testing.T) {
 	err := domain.ValidateAccessRules(&domain.AccessRules{ManageUsers: true, ClusterIDs: []string{"cluster-a"}})
 	require.Error(t, err, "expected validation error")

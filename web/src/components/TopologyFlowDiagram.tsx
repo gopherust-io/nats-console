@@ -1,32 +1,78 @@
-import { useId, useMemo } from "react";
-import { Link } from "react-router";
+import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import type { TopologyNode } from "../lib/topology";
 import { TOPOLOGY_FLOW_VISIBLE, useTopologyMotion } from "../lib/topologyMotion";
-import { TOPOLOGY_LOCATION_STATE } from "../lib/topology";
+
+export type TopologyFlowVariant = "panel" | "fullscreen";
 
 type TopologyFlowDiagramProps = {
   root?: TopologyNode;
   streams?: TopologyNode[];
   maxStreams?: number;
   highlightNodeId?: string | null;
+  variant?: TopologyFlowVariant;
+  hideHeader?: boolean;
+  onSelectNode?: (node: TopologyNode) => void;
 };
 
-const VIEW_W = 640;
-const VIEW_H = 360;
-const HUB_X = 320;
-const HUB_Y = 180;
-const LEFT_X = 88;
-const RIGHT_X = 552;
-const NODE_R = 18;
+type StageLayout = {
+  viewW: number;
+  viewH: number;
+  hubX: number;
+  hubY: number;
+  leftX: number;
+  rightX: number;
+  nodeR: number;
+  hubR: number;
+  hubRingR: number;
+  hubGlowR: number;
+  labelMax: number;
+};
+
+const PANEL_LAYOUT: StageLayout = {
+  viewW: 640,
+  viewH: 360,
+  hubX: 320,
+  hubY: 180,
+  leftX: 88,
+  rightX: 552,
+  nodeR: 18,
+  hubR: 28,
+  hubRingR: 34,
+  hubGlowR: 72,
+  labelMax: 16,
+};
+
+/** Match container pixels so meet fills with no letterbox and no stretch. */
+function buildFullscreenLayout(viewW: number, viewH: number): StageLayout {
+  const w = Math.max(Math.round(viewW), 320);
+  const h = Math.max(Math.round(viewH), 200);
+  const sideInset = Math.max(160, Math.min(w * 0.15, 280));
+  const s = Math.max(0.72, Math.min(w / 1400, h / 820));
+  const nodeR = Math.round(30 * s);
+  const hubR = Math.round(56 * s);
+  return {
+    viewW: w,
+    viewH: h,
+    hubX: w / 2,
+    hubY: h / 2,
+    leftX: sideInset,
+    rightX: w - sideInset,
+    nodeR,
+    hubR,
+    hubRingR: hubR + 12,
+    hubGlowR: Math.round(hubR * 2.5),
+    labelMax: 28,
+  };
+}
 
 function truncateLabel(name: string, max = 18): string {
   if (name.length <= max) return name;
   return `${name.slice(0, max - 1)}…`;
 }
 
-function laneYs(count: number, height = VIEW_H, pad = 48): number[] {
+function laneYs(count: number, height: number, pad = 48): number[] {
   if (count <= 0) return [];
   if (count === 1) return [height / 2];
   const usable = height - pad * 2;
@@ -38,38 +84,50 @@ function curvePath(x1: number, y1: number, x2: number, y2: number): string {
   return `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
 }
 
-function SignalDot({
-  pathId,
-  delay,
-  duration,
-  reduceMotion,
-}: {
-  pathId: string;
-  delay: number;
-  duration: number;
-  reduceMotion: boolean;
-}) {
-  if (reduceMotion) return null;
-
-  return (
-    <circle r="3.5" className="topo-signal-dot" aria-hidden>
-      <animateMotion dur={`${duration}s`} begin={`${delay}s`} repeatCount="indefinite" rotate="auto">
-        <mpath href={`#${pathId}`} />
-      </animateMotion>
-    </circle>
-  );
-}
-
 function SignalStage({
   stream,
   highlightNodeId,
+  layout: baseLayout,
+  fullscreen,
+  onSelectNode,
 }: {
   stream: TopologyNode;
   highlightNodeId?: string | null;
+  layout: StageLayout;
+  fullscreen: boolean;
+  onSelectNode?: (node: TopologyNode) => void;
 }) {
   const { t } = useTranslation();
   const uid = useId().replace(/:/g, "");
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [stageBox, setStageBox] = useState({ w: 1400, h: 820 });
   const { reduceMotion, pathDraw, softSpring } = useTopologyMotion();
+
+  useLayoutEffect(() => {
+    if (!fullscreen) return;
+    const el = stageRef.current;
+    if (!el) return;
+    const measure = () => {
+      const { width, height } = el.getBoundingClientRect();
+      if (width < 2 || height < 2) return;
+      setStageBox((prev) =>
+        Math.abs(prev.w - width) < 1 && Math.abs(prev.h - height) < 1
+          ? prev
+          : { w: width, h: height },
+      );
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fullscreen]);
+
+  const layout = useMemo(
+    () => (fullscreen ? buildFullscreenLayout(stageBox.w, stageBox.h) : baseLayout),
+    [fullscreen, stageBox.w, stageBox.h, baseLayout],
+  );
+  const { viewW, viewH, hubX, hubY, leftX, rightX, nodeR, hubR, hubRingR, hubGlowR, labelMax } = layout;
+  const lanePad = fullscreen ? Math.max(64, Math.round(viewH * 0.12)) : 48;
 
   const subjectsAll = stream.children.filter((node) => node.kind === "subject");
   const consumersAll = stream.children.filter((node) => node.kind === "consumer");
@@ -78,29 +136,48 @@ function SignalStage({
   const subjectOverflow = subjectsAll.length - subjects.length;
   const consumerOverflow = consumersAll.length - consumers.length;
 
-  const subjectYs = laneYs(Math.max(subjects.length, 1));
-  const consumerYs = laneYs(Math.max(consumers.length, 1));
+  const subjectYs = laneYs(Math.max(subjects.length, 1), viewH, lanePad);
+  const consumerYs = laneYs(Math.max(consumers.length, 1), viewH, lanePad);
 
   const subjectPaths = subjects.map((subject, index) => {
-    const y = subjectYs[index] ?? HUB_Y;
-    const d = curvePath(LEFT_X + NODE_R + 8, y, HUB_X - 36, HUB_Y);
+    const y = subjectYs[index] ?? hubY;
+    const d = curvePath(leftX + nodeR + 8, y, hubX - hubRingR - 2, hubY);
     return { id: `${uid}-s-${index}`, node: subject, y, d };
   });
 
   const consumerPaths = consumers.map((consumer, index) => {
-    const y = consumerYs[index] ?? HUB_Y;
-    const d = curvePath(HUB_X + 36, HUB_Y, RIGHT_X - NODE_R - 8, y);
+    const y = consumerYs[index] ?? hubY;
+    const d = curvePath(hubX + hubRingR + 2, hubY, rightX - nodeR - 8, y);
     return { id: `${uid}-c-${index}`, node: consumer, y, d };
   });
 
   const emptySubject = subjects.length === 0;
   const emptyConsumer = consumers.length === 0;
+  const hubStatus = stream.status ?? "healthy";
+  const raftCaption =
+    stream.raft && (stream.raft.clusterSize ?? 0) > 1
+      ? [
+          stream.role === "leader"
+            ? t("topology.roleLeader")
+            : stream.role === "replica"
+              ? t("topology.roleReplica")
+              : null,
+          stream.raft.leader || t("topology.raftNoLeader"),
+          `R${stream.raft.clusterSize}`,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : null;
 
   return (
-    <div className="topo-signal-stage">
+    <div
+      ref={stageRef}
+      className={`topo-signal-stage${fullscreen ? " topo-signal-stage--fullscreen" : ""}`}
+    >
       <svg
         className="topo-signal-stage__svg"
-        viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+        viewBox={`0 0 ${viewW} ${viewH}`}
+        preserveAspectRatio="xMidYMid meet"
         role="img"
         aria-label={t("topology.signalStageAria", { stream: stream.name })}
       >
@@ -109,6 +186,14 @@ function SignalStage({
             <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.35" />
             <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
           </radialGradient>
+          <linearGradient id={`${uid}-lane-left`} x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="var(--success)" stopOpacity="0.12" />
+            <stop offset="100%" stopColor="var(--success)" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id={`${uid}-lane-right`} x1="100%" y1="0%" x2="0%" y2="0%">
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.1" />
+            <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+          </linearGradient>
           <filter id={`${uid}-soft`} x="-40%" y="-40%" width="180%" height="180%">
             <feGaussianBlur stdDeviation="2.5" result="b" />
             <feMerge>
@@ -118,11 +203,26 @@ function SignalStage({
           </filter>
         </defs>
 
-        <circle cx={HUB_X} cy={HUB_Y} r="72" fill={`url(#${uid}-hub-glow)`} aria-hidden />
+        {/* Lane washes only in panel — they read as side frames under fullscreen letterbox/stretch. */}
+        {!fullscreen && (
+          <>
+            <rect x={0} y={0} width={viewW * 0.28} height={viewH} fill={`url(#${uid}-lane-left)`} aria-hidden />
+            <rect
+              x={viewW * 0.72}
+              y={0}
+              width={viewW * 0.28}
+              height={viewH}
+              fill={`url(#${uid}-lane-right)`}
+              aria-hidden
+            />
+          </>
+        )}
+
+        <circle cx={hubX} cy={hubY} r={hubGlowR} fill={`url(#${uid}-hub-glow)`} aria-hidden />
 
         {emptySubject && (
           <motion.path
-            d={curvePath(LEFT_X + 24, HUB_Y, HUB_X - 36, HUB_Y)}
+            d={curvePath(leftX + 24, hubY, hubX - hubRingR - 2, hubY)}
             className="topo-signal-path topo-signal-path--ghost"
             initial={{ pathLength: 0, opacity: 0 }}
             animate={{ pathLength: 1, opacity: 0.35 }}
@@ -132,7 +232,7 @@ function SignalStage({
         )}
         {emptyConsumer && (
           <motion.path
-            d={curvePath(HUB_X + 36, HUB_Y, RIGHT_X - 24, HUB_Y)}
+            d={curvePath(hubX + hubRingR + 2, hubY, rightX - 24, hubY)}
             className="topo-signal-path topo-signal-path--ghost"
             initial={{ pathLength: 0, opacity: 0 }}
             animate={{ pathLength: 1, opacity: 0.35 }}
@@ -152,126 +252,172 @@ function SignalStage({
               transition={{ ...pathDraw, delay: reduceMotion ? 0 : index * 0.06 }}
               fill="none"
             />
-            <SignalDot pathId={edge.id} delay={index * 0.35} duration={2.2 + index * 0.15} reduceMotion={reduceMotion} />
           </g>
         ))}
 
-        {consumerPaths.map((edge, index) => (
-          <g key={edge.id}>
-            <motion.path
-              id={edge.id}
-              d={edge.d}
-              className={`topo-signal-path${highlightNodeId === edge.node.id ? " topo-signal-path--hot" : ""}`}
-              initial={{ pathLength: 0, opacity: 0 }}
-              animate={{ pathLength: 1, opacity: 1 }}
-              transition={{ ...pathDraw, delay: reduceMotion ? 0 : 0.12 + index * 0.06 }}
-              fill="none"
-            />
-            <SignalDot
-              pathId={edge.id}
-              delay={0.4 + index * 0.35}
-              duration={2.3 + index * 0.12}
-              reduceMotion={reduceMotion}
-            />
-          </g>
-        ))}
+        {consumerPaths.map((edge, index) => {
+          const hasAckPending = Boolean(edge.node.meta?.includes("ack pending"));
+          return (
+            <g key={edge.id}>
+              <motion.path
+                id={edge.id}
+                d={edge.d}
+                className={`topo-signal-path${highlightNodeId === edge.node.id ? " topo-signal-path--hot" : ""}${hasAckPending ? " topo-signal-path--nack" : ""}`}
+                initial={{ pathLength: 0, opacity: 0 }}
+                animate={{ pathLength: 1, opacity: 1 }}
+                transition={{ ...pathDraw, delay: reduceMotion ? 0 : 0.12 + index * 0.06 }}
+                fill="none"
+              />
+            </g>
+          );
+        })}
 
-        {/* Subjects */}
-        {(emptySubject ? [{ id: "empty-s", name: "—", y: HUB_Y, hot: false }] : subjectPaths.map((p) => ({
-          id: p.node.id,
-          name: p.node.name,
-          y: p.y,
-          hot: highlightNodeId === p.node.id,
-        }))).map((node, index) => (
+        {(emptySubject
+          ? [{ id: "empty-s", name: "—", y: hubY, hot: false, node: null as TopologyNode | null }]
+          : subjectPaths.map((p) => ({
+              id: p.node.id,
+              name: p.node.name,
+              y: p.y,
+              hot: highlightNodeId === p.node.id,
+              node: p.node,
+            }))
+        ).map((node, index) => (
           <motion.g
             key={node.id}
+            className={node.node && onSelectNode ? "topo-signal-hit" : undefined}
             initial={reduceMotion ? false : { opacity: 0, scale: 0.85 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ ...softSpring, delay: reduceMotion ? 0 : index * 0.04 }}
+            onClick={node.node && onSelectNode ? () => onSelectNode(node.node!) : undefined}
+            style={node.node && onSelectNode ? { cursor: "pointer" } : undefined}
           >
             <circle
-              cx={LEFT_X}
+              cx={leftX}
               cy={node.y}
-              r={NODE_R + (node.hot ? 4 : 0)}
+              r={nodeR + (node.hot ? 4 : 0)}
               className={`topo-signal-node topo-signal-node--subject${node.hot ? " is-hot" : ""}`}
               filter={node.hot ? `url(#${uid}-soft)` : undefined}
             />
-            <text x={LEFT_X} y={node.y + 1} className="topo-signal-node__glyph" textAnchor="middle" dominantBaseline="middle">
+            <text x={leftX} y={node.y + 1} className="topo-signal-node__glyph" textAnchor="middle" dominantBaseline="middle">
               ◎
             </text>
-            <text x={LEFT_X} y={node.y + NODE_R + 16} className="topo-signal-label" textAnchor="middle">
-              {truncateLabel(node.name, 16)}
+            <text x={leftX} y={node.y + nodeR + 18} className="topo-signal-label" textAnchor="middle">
+              {truncateLabel(node.name, labelMax)}
             </text>
+            {node.node && onSelectNode && (
+              <circle cx={leftX} cy={node.y} r={nodeR + 10} fill="transparent">
+                <title>{node.name}</title>
+              </circle>
+            )}
           </motion.g>
         ))}
 
-        {/* Hub */}
         <motion.g
+          className={onSelectNode ? "topo-signal-hit" : undefined}
           initial={reduceMotion ? false : { opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={softSpring}
+          onClick={onSelectNode ? () => onSelectNode(stream) : undefined}
+          style={onSelectNode ? { cursor: "pointer" } : undefined}
         >
           <motion.circle
-            cx={HUB_X}
-            cy={HUB_Y}
-            r="34"
-            className="topo-signal-hub-ring"
-            animate={reduceMotion ? undefined : { scale: [1, 1.06, 1] }}
-            transition={reduceMotion ? undefined : { duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
-            style={{ transformOrigin: `${HUB_X}px ${HUB_Y}px` }}
+            cx={hubX}
+            cy={hubY}
+            r={hubRingR}
+            className={`topo-signal-hub-ring topo-signal-hub-ring--${hubStatus}`}
+            initial={reduceMotion ? false : { scale: 0.96 }}
+            animate={{ scale: 1 }}
+            transition={reduceMotion ? undefined : { duration: 0.45, ease: "easeOut" }}
+            style={{ transformOrigin: `${hubX}px ${hubY}px` }}
           />
           <circle
-            cx={HUB_X}
-            cy={HUB_Y}
-            r="28"
-            className={`topo-signal-hub${highlightNodeId === stream.id ? " is-hot" : ""}`}
+            cx={hubX}
+            cy={hubY}
+            r={hubR}
+            className={`topo-signal-hub topo-signal-hub--${hubStatus}${highlightNodeId === stream.id ? " is-hot" : ""}`}
           />
-          <text x={HUB_X} y={HUB_Y - 2} className="topo-signal-hub__label" textAnchor="middle" dominantBaseline="middle">
+          <text x={hubX} y={hubY - 2} className="topo-signal-hub__label" textAnchor="middle" dominantBaseline="middle">
             JS
           </text>
-          <text x={HUB_X} y={HUB_Y + 48} className="topo-signal-label topo-signal-label--hub" textAnchor="middle">
-            {truncateLabel(stream.name, 22)}
+          <text x={hubX} y={hubY + hubR + 22} className="topo-signal-label topo-signal-label--hub" textAnchor="middle">
+            {truncateLabel(stream.name, labelMax + 4)}
           </text>
-          {stream.href && (
-            <Link to={stream.href} state={TOPOLOGY_LOCATION_STATE} className="topo-signal-hub-link">
+          {raftCaption && (
+            <text x={hubX} y={hubY + hubR + 40} className="topo-signal-label topo-signal-label--raft" textAnchor="middle">
+              {raftCaption}
+            </text>
+          )}
+          {onSelectNode && (
+            <circle cx={hubX} cy={hubY} r={hubRingR} fill="transparent" className="topo-signal-hub-link">
               <title>{stream.name}</title>
-              <circle cx={HUB_X} cy={HUB_Y} r="34" fill="transparent" />
-            </Link>
+            </circle>
           )}
         </motion.g>
 
-        {/* Consumers */}
-        {(emptyConsumer ? [{ id: "empty-c", name: "—", y: HUB_Y, hot: false, href: undefined as string | undefined }] : consumerPaths.map((p) => ({
-          id: p.node.id,
-          name: p.node.name,
-          y: p.y,
-          hot: highlightNodeId === p.node.id,
-          href: p.node.href,
-        }))).map((node, index) => (
+        {(emptyConsumer
+          ? [
+              {
+                id: "empty-c",
+                name: "—",
+                y: hubY,
+                hot: false,
+                status: undefined as TopologyNode["status"],
+                node: null as TopologyNode | null,
+              },
+            ]
+          : consumerPaths.map((p) => {
+              const metaWarn = Boolean(
+                p.node.meta?.some(
+                  (item) =>
+                    item === "pending" ||
+                    item === "ack pending" ||
+                    item === "waiting" ||
+                    item === "redelivered" ||
+                    item.startsWith("lag "),
+                ),
+              );
+              const status =
+                p.node.status === "unhealthy"
+                  ? "unhealthy"
+                  : p.node.status === "warning" || metaWarn
+                    ? "warning"
+                    : p.node.status;
+              return {
+                id: p.node.id,
+                name: p.node.name,
+                y: p.y,
+                hot: highlightNodeId === p.node.id,
+                status,
+                node: p.node,
+              };
+            })
+        ).map((node, index) => (
           <motion.g
             key={node.id}
+            className={node.node && onSelectNode ? "topo-signal-hit" : undefined}
             initial={reduceMotion ? false : { opacity: 0, scale: 0.85 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ ...softSpring, delay: reduceMotion ? 0 : 0.08 + index * 0.04 }}
+            onClick={node.node && onSelectNode ? () => onSelectNode(node.node!) : undefined}
+            style={node.node && onSelectNode ? { cursor: "pointer" } : undefined}
           >
             <circle
-              cx={RIGHT_X}
+              cx={rightX}
               cy={node.y}
-              r={NODE_R + (node.hot ? 4 : 0)}
-              className={`topo-signal-node topo-signal-node--consumer${node.hot ? " is-hot" : ""}`}
+              r={nodeR + (node.hot ? 4 : 0)}
+              className={`topo-signal-node topo-signal-node--consumer${node.status ? ` topo-signal-node--${node.status}` : ""}${node.hot ? " is-hot" : ""}`}
               filter={node.hot ? `url(#${uid}-soft)` : undefined}
             />
-            <text x={RIGHT_X} y={node.y + 1} className="topo-signal-node__glyph" textAnchor="middle" dominantBaseline="middle">
+            <text x={rightX} y={node.y + 1} className="topo-signal-node__glyph" textAnchor="middle" dominantBaseline="middle">
               ◉
             </text>
-            <text x={RIGHT_X} y={node.y + NODE_R + 16} className="topo-signal-label" textAnchor="middle">
-              {truncateLabel(node.name, 16)}
+            <text x={rightX} y={node.y + nodeR + 18} className="topo-signal-label" textAnchor="middle">
+              {truncateLabel(node.name, labelMax)}
             </text>
-            {node.href && (
-              <Link to={node.href} state={TOPOLOGY_LOCATION_STATE}>
+            {node.node && onSelectNode && (
+              <circle cx={rightX} cy={node.y} r={nodeR + 10} fill="transparent">
                 <title>{node.name}</title>
-                <circle cx={RIGHT_X} cy={node.y} r={NODE_R + 6} fill="transparent" />
-              </Link>
+              </circle>
             )}
           </motion.g>
         ))}
@@ -295,8 +441,13 @@ export default function TopologyFlowDiagram({
   streams: streamsProp,
   maxStreams = 1,
   highlightNodeId = null,
+  variant = "panel",
+  hideHeader = false,
+  onSelectNode,
 }: TopologyFlowDiagramProps) {
   const { t } = useTranslation();
+  const fullscreen = variant === "fullscreen";
+  const layout = PANEL_LAYOUT;
   const streams = useMemo(() => {
     if (streamsProp) return streamsProp;
     if (root) return root.children.filter((node) => node.kind === "stream");
@@ -310,13 +461,24 @@ export default function TopologyFlowDiagram({
   }
 
   return (
-    <section className="topo-flow-section topo-flow-section--signal">
-      <div className="topo-flow-section__head">
-        <h2 className="topo-flow-section__title">{t("topology.signalTitle")}</h2>
-        <p className="topo-flow-section__desc">{t("topology.signalDesc")}</p>
-      </div>
+    <section
+      className={`topo-flow-section topo-flow-section--signal${fullscreen ? " topo-flow-section--fullscreen" : ""}`}
+    >
+      {!hideHeader && (
+        <div className="topo-flow-section__head">
+          <h2 className="topo-flow-section__title">{t("topology.signalTitle")}</h2>
+          <p className="topo-flow-section__desc">{t("topology.signalDesc")}</p>
+        </div>
+      )}
       {visibleStreams.map((stream) => (
-        <SignalStage key={stream.id} stream={stream} highlightNodeId={highlightNodeId} />
+        <SignalStage
+          key={stream.id}
+          stream={stream}
+          highlightNodeId={highlightNodeId}
+          layout={layout}
+          fullscreen={fullscreen}
+          onSelectNode={onSelectNode}
+        />
       ))}
     </section>
   );

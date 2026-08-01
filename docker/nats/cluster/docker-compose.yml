@@ -1,0 +1,84 @@
+# 5-node NATS JetStream cluster — HA / Replicas: 5 testing (Consol Replicas page).
+#
+#   docker compose -f docker/nats/cluster/docker-compose.yml up -d
+#   # or: make nats-cluster-up
+#   Client: nats://127.0.0.1:4222,nats://127.0.0.1:4223,nats://127.0.0.1:4224,nats://127.0.0.1:4225,nats://127.0.0.1:4226
+#
+# Start all nodes together (no healthy-gate): JetStream /healthz waits for
+# cluster routes, so peers must not wait on nats-1 becoming healthy first.
+# Do not run alongside the root compose "nats" service (port clash on 4222/8222).
+
+x-nats-node: &nats-node
+  image: nats:2.14
+  command: ["-c", "/etc/nats/nats.conf"]
+  networks:
+    - nats-cluster
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz?js-server-only=true"]
+    interval: 5s
+    timeout: 3s
+    retries: 24
+    start_period: 20s
+  restart: unless-stopped
+
+services:
+  nats-1:
+    <<: *nats-node
+    container_name: nats-cluster-1
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - ./n1.conf:/etc/nats/nats.conf:ro
+      - js-n1:/data
+
+  nats-2:
+    <<: *nats-node
+    container_name: nats-cluster-2
+    ports:
+      - "4223:4222"
+      - "8223:8222"
+    volumes:
+      - ./n2.conf:/etc/nats/nats.conf:ro
+      - js-n2:/data
+
+  nats-3:
+    <<: *nats-node
+    container_name: nats-cluster-3
+    ports:
+      - "4224:4222"
+      - "8224:8222"
+    volumes:
+      - ./n3.conf:/etc/nats/nats.conf:ro
+      - js-n3:/data
+
+  nats-4:
+    <<: *nats-node
+    container_name: nats-cluster-4
+    ports:
+      - "4225:4222"
+      - "8225:8222"
+    volumes:
+      - ./n4.conf:/etc/nats/nats.conf:ro
+      - js-n4:/data
+
+  nats-5:
+    <<: *nats-node
+    container_name: nats-cluster-5
+    ports:
+      - "4226:4222"
+      - "8226:8222"
+    volumes:
+      - ./n5.conf:/etc/nats/nats.conf:ro
+      - js-n5:/data
+
+networks:
+  nats-cluster:
+    name: nats-cluster
+
+volumes:
+  js-n1:
+  js-n2:
+  js-n3:
+  js-n4:
+  js-n5:

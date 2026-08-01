@@ -8,75 +8,6 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/store"
 )
 
-type paginationMeta struct {
-	Total  int `json:"total"`
-	Offset int `json:"offset"`
-	Limit  int `json:"limit"`
-}
-
-type StreamsListResponse struct {
-	Streams []domain.StreamInfo `json:"streams"`
-	Total   int                 `json:"total"`
-	Offset  int                 `json:"offset"`
-	Limit   int                 `json:"limit"`
-}
-
-type ConsumersListResponse struct {
-	Consumers []domain.ConsumerInfo `json:"consumers"`
-	Total     int                   `json:"total"`
-	Offset    int                   `json:"offset"`
-	Limit     int                   `json:"limit"`
-}
-
-type KeysListResponse struct {
-	Keys   []string `json:"keys"`
-	Total  int      `json:"total"`
-	Offset int      `json:"offset"`
-	Limit  int      `json:"limit"`
-}
-
-type ObjectsListResponse struct {
-	Objects []string `json:"objects"`
-	Total   int      `json:"total"`
-	Offset  int      `json:"offset"`
-	Limit   int      `json:"limit"`
-}
-
-type KVBucketsListResponse struct {
-	Buckets []domain.KVBucketInfo `json:"buckets"`
-	Total   int                   `json:"total"`
-}
-
-type ObjectBucketsListResponse struct {
-	Buckets []domain.ObjectBucketInfo `json:"buckets"`
-	Total   int                       `json:"total"`
-}
-
-type KVHistoryResponse struct {
-	Entries []domain.KVEntry `json:"entries"`
-	Total   int              `json:"total"`
-}
-
-type UsersListResponse struct {
-	Users []domain.User `json:"users"`
-	Total int           `json:"total"`
-}
-
-type AuditListResponse struct {
-	Entries []domain.AuditEntry `json:"entries"`
-	Total   int                 `json:"total"`
-}
-
-type ClustersListResponse struct {
-	Clusters []domain.Cluster `json:"clusters"`
-	Total    int              `json:"total"`
-}
-
-type ConnectionsListResponse struct {
-	Connections []domain.NATSConnectionStatus `json:"connections"`
-	Total       int                           `json:"total"`
-}
-
 // goalign:ignore
 type AuthConfigResponse struct {
 	BasicEnabled bool `json:"basicEnabled"`
@@ -97,13 +28,17 @@ type UserResponse struct {
 }
 
 func toUserResponse(user store.User) UserResponse {
+	return userResponseFromDomain(auth.StoreUserToDomain(user))
+}
+
+func userResponseFromDomain(user domain.User) UserResponse {
 	resp := UserResponse{
 		ID:       user.ID,
 		Username: user.Username,
 		Email:    user.Email,
 		Roles:    nonNilSlice(user.Roles),
 		IsRoot:   user.IsRoot,
-		Grants:   nonNilSlice(auth.StoreUserToDomain(user).Grants),
+		Grants:   nonNilSlice(user.Grants),
 	}
 	if user.AccessRules != nil {
 		resp.AccessRules = &domain.AccessRules{
@@ -120,17 +55,17 @@ func toUserResponse(user store.User) UserResponse {
 	return resp
 }
 
+func toUserResponses(users []domain.User) []UserResponse {
+	out := make([]UserResponse, 0, len(users))
+	for _, u := range users {
+		out = append(out, userResponseFromDomain(u))
+	}
+	return out
+}
+
 // goalign:ignore
 type AssistantConfigResponse struct {
 	AIProvider string `json:"aiProvider,omitempty"`
 	AIModel    string `json:"aiModel,omitempty"`
 	AIEnabled  bool   `json:"aiEnabled"`
-}
-
-// goalign:ignore
-type AssistantErrorResponse struct {
-	Error             string `json:"error"`
-	Code              string `json:"code"`
-	Retryable         bool   `json:"retryable"`
-	RetryAfterSeconds int    `json:"retryAfterSeconds,omitempty"`
 }

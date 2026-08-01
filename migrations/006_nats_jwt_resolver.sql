@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- JWT resolver account imports (encrypted at rest).
 
 CREATE TABLE IF NOT EXISTS nats_jwt_accounts (
@@ -12,3 +14,9 @@ CREATE TABLE IF NOT EXISTS nats_jwt_accounts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_nats_jwt_accounts_cluster ON nats_jwt_accounts (cluster_id);
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+SELECT 1;
+-- +goose StatementEnd

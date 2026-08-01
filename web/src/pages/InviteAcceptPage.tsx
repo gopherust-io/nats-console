@@ -1,9 +1,10 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router";
 import LoginSplitLayout from "../components/LoginSplitLayout";
 import Alert from "../components/ui/Alert";
-import { api } from "../lib/api";
+import QueryErrorState from "../components/ui/QueryErrorState";
+import { ApiError, api, userFacingError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
 type InviteInfo = {
@@ -21,7 +22,9 @@ export default function InviteAcceptPage() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
+  const [csrfHint, setCsrfHint] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -29,18 +32,30 @@ export default function InviteAcceptPage() {
     }
   }, [user, navigate]);
 
-  useEffect(() => {
+  const loadInvite = useCallback(() => {
     if (!token) return;
     setLoading(true);
+    setLoadError(null);
     api<InviteInfo>(`/api/v1/auth/invite/${encodeURIComponent(token)}`)
-      .then(setInfo)
-      .catch((err) => setError(err instanceof Error ? err.message : t("auth.invalidInvite")))
+      .then((r) => {
+        setInfo(r.data);
+        setLoadError(null);
+      })
+      .catch((err) => {
+        setInfo(null);
+        setLoadError(err);
+      })
       .finally(() => setLoading(false));
-  }, [token, t]);
+  }, [token]);
+
+  useEffect(() => {
+    loadInvite();
+  }, [loadInvite]);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setError("");
+    setCsrfHint(false);
     if (password.length < 8) {
       setError(t("auth.passwordMin"));
       return;
@@ -57,15 +72,31 @@ export default function InviteAcceptPage() {
       await reload();
       navigate("/", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("auth.acceptFailed"));
+      if (err instanceof ApiError && err.code === "csrf_invalid") {
+        setCsrfHint(true);
+      }
+      if (err instanceof ApiError && err.code === "gone") {
+        setError(t("auth.inviteGone"));
+        return;
+      }
+      setError(err instanceof ApiError ? userFacingError(err, t) : err instanceof Error ? err.message : t("auth.acceptFailed"));
     }
   }
+
+  const inviteGone = loadError instanceof ApiError && loadError.code === "gone";
 
   return (
     <LoginSplitLayout>
       <h1 className="login-pane__title">{t("auth.acceptInvite")}</h1>
       <div className="login-stack">
         {loading && <p className="login-help-copy">{t("auth.loadingInvite")}</p>}
+        {!loading && loadError ? (
+          <QueryErrorState
+            error={inviteGone ? new ApiError(t("auth.inviteGone"), { code: "gone", status: 410 }) : loadError}
+            onRetry={inviteGone ? undefined : () => loadInvite()}
+            title={inviteGone ? t("auth.inviteGone") : t("errors.loadFailed")}
+          />
+        ) : null}
         {!loading && info && (
           <>
             <p className="login-help-copy">
@@ -108,6 +139,11 @@ export default function InviteAcceptPage() {
           </>
         )}
         <Alert variant="error">{error}</Alert>
+        {csrfHint && (
+          <button type="button" className="login-help-link" onClick={() => window.location.reload()}>
+            {t("auth.csrfReload")}
+          </button>
+        )}
         <Link className="login-help-link" to="/login">
           {t("auth.backToSignIn")}
         </Link>

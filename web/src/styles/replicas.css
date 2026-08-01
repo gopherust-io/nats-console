@@ -1,0 +1,447 @@
+/* Replicas page — nested dark-card language (summary, RAFT stage, detail, table) */
+
+.replicas-page {
+  --raft-lift: 0 4px 12px color-mix(in srgb, var(--text, #000) 16%, transparent);
+  --raft-fill: color-mix(in srgb, var(--bg-card, var(--surface, #161616)) 82%, var(--bg, #070707));
+  --raft-inner: color-mix(in srgb, var(--bg, #070707) 92%, var(--bg-card, #161616));
+  --raft-radius: 8px;
+  --raft-border: 1px solid color-mix(in srgb, var(--border, #555) 72%, var(--text, #fff) 4%);
+  --raft-ink: #fff;
+}
+
+[data-theme="control-light"] .replicas-page {
+  --raft-lift: none;
+  --raft-fill: var(--bg-card);
+  --raft-inner: var(--bg-input);
+  --raft-border: 1px solid var(--border);
+  --raft-ink: var(--text-primary);
+}
+
+.replicas-page .nc-page-header {
+  margin-bottom: 1.35rem;
+}
+
+.replicas-page .nc-page-title {
+  letter-spacing: -0.03em;
+}
+
+/* Shared shell: summary tiles, section panels, peer buttons */
+.replicas-card,
+.replicas-panel,
+.raft-election,
+.raft-node {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--raft-radius);
+  border: var(--raft-border);
+  background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--raft-ink) 3%, var(--raft-fill)) 0%,
+      var(--raft-fill) 100%
+    );
+  box-shadow: var(--raft-lift);
+}
+
+/* —— Summary tiles —— */
+
+.replicas-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 1.25rem;
+  align-items: stretch;
+}
+
+.replicas-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 168px;
+  padding: 0.75rem 0.85rem 1rem;
+  text-align: center;
+}
+
+.replicas-card__badge {
+  position: relative;
+  z-index: 1;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: calc(100% - 0.5rem);
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: var(--fs-2xs, 0.625rem);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #9ca3af);
+  border: 1px solid color-mix(in srgb, var(--border, #555) 55%, transparent);
+  background: var(--raft-inner);
+  white-space: nowrap;
+}
+
+.replicas-card__body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  width: 100%;
+  padding-top: 0.35rem;
+}
+
+.replicas-stat-card__value {
+  margin: 0;
+  font-size: var(--fs-2xl, 1.5rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  word-break: break-word;
+}
+
+.replicas-gauge {
+  --gauge-pct: 0;
+  --gauge-fill: var(--success, #10b981);
+  width: 96px;
+  height: 96px;
+  margin: 0 auto;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(closest-side, var(--raft-fill) 82%, transparent 83% 100%),
+    conic-gradient(var(--gauge-fill) calc(var(--gauge-pct) * 1%), var(--border, #333) 0);
+}
+
+.replicas-gauge--ok {
+  --gauge-fill: var(--success, #10b981);
+}
+
+.replicas-gauge--warn {
+  --gauge-fill: var(--warning, #d97706);
+}
+
+.replicas-gauge--danger {
+  --gauge-fill: var(--danger, #ef4444);
+}
+
+.replicas-gauge__value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.05em;
+  font-size: var(--fs-lg, 0.9375rem);
+  font-weight: 650;
+}
+
+.replicas-gauge__sep {
+  margin: 0 0.05em;
+  opacity: 0.7;
+}
+
+@media (max-width: 900px) {
+  .replicas-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* —— Section panels (RAFT stage + peers table) —— */
+
+.replicas-panel,
+.raft-election {
+  margin: 0 0 1.25rem;
+  padding: 1rem 1.1rem 1.15rem;
+}
+
+.replicas-panel__head,
+.raft-election__toolbar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.35rem;
+}
+
+.replicas-panel__title,
+.raft-election__title {
+  margin: 0;
+  font-size: var(--fs-lg, 0.9375rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.raft-election__caption {
+  position: relative;
+  z-index: 1;
+  margin: 0 0 0.85rem;
+  color: var(--text-muted, #6b7280);
+  font-size: var(--fs-sm, 0.75rem);
+}
+
+.raft-election__stage {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  width: 100%;
+}
+
+/* —— Peer buttons (nested cards inside RAFT panel) —— */
+
+.raft-node {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 8rem;
+  min-height: 7.25rem;
+  padding: 0.75rem 0.85rem 1rem;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease,
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.raft-node__shell {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  min-width: 0;
+  width: 100%;
+  min-height: 5.5rem;
+}
+
+.raft-node__badge {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: calc(100% - 0.5rem);
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: var(--fs-2xs, 0.625rem);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #9ca3af);
+  border: 1px solid color-mix(in srgb, var(--border, #555) 55%, transparent);
+  background: var(--raft-inner);
+  white-space: nowrap;
+}
+
+.raft-node__dot {
+  flex: 0 0 auto;
+  width: 0.38rem;
+  height: 0.38rem;
+  border-radius: 50%;
+  background: var(--text-muted, #6b7280);
+}
+
+.raft-node__dot--leader {
+  background: var(--success, #10b981);
+}
+
+.raft-node__dot--candidate {
+  background: var(--accent, #3b82f6);
+}
+
+.raft-node__dot--offline {
+  background: var(--danger, #ef4444);
+}
+
+.raft-node__name {
+  display: block;
+  max-width: 100%;
+  margin: 0;
+  padding: 1.35rem 0.15rem 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-lg, 1rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--text, inherit);
+  text-align: center;
+}
+
+.raft-node:hover,
+.raft-node:focus-visible {
+  border-color: color-mix(in srgb, var(--accent, #3b82f6) 40%, var(--border-subtle, #888));
+  outline: none;
+  opacity: 1;
+  z-index: 1;
+  transform: translateY(-1px);
+}
+
+.raft-node--selected {
+  border-color: color-mix(in srgb, var(--accent, #3b82f6) 55%, var(--border-subtle, #888));
+  background: color-mix(in srgb, var(--accent, #3b82f6) 8%, var(--raft-fill));
+}
+
+.raft-node--leader {
+  border-color: color-mix(in srgb, var(--success, #10b981) 18%, var(--border-subtle, #444));
+}
+
+.raft-node__badge--leader {
+  color: color-mix(in srgb, var(--success, #10b981) 85%, var(--raft-ink));
+  border-color: color-mix(in srgb, var(--success, #10b981) 36%, transparent);
+  background: color-mix(in srgb, var(--success, #10b981) 14%, var(--raft-inner));
+}
+
+.raft-node__badge--candidate {
+  color: color-mix(in srgb, var(--accent, #3b82f6) 85%, var(--raft-ink));
+  border-color: color-mix(in srgb, var(--accent, #3b82f6) 36%, transparent);
+  background: color-mix(in srgb, var(--accent, #3b82f6) 14%, var(--raft-inner));
+}
+
+.raft-node__badge--hotStandby,
+.raft-node__badge--follower {
+  color: var(--text-secondary, #9ca3af);
+  border-color: color-mix(in srgb, var(--text-secondary, #9ca3af) 22%, transparent);
+}
+
+.raft-node--follower {
+  opacity: 0.95;
+}
+
+.raft-node--offline {
+  opacity: 0.55;
+  filter: saturate(0.75);
+}
+
+.raft-node__badge--offline {
+  color: color-mix(in srgb, var(--danger, #ef4444) 78%, var(--text-secondary, #9ca3af));
+  border-color: color-mix(in srgb, var(--danger, #ef4444) 30%, transparent);
+  background: color-mix(in srgb, var(--danger, #ef4444) 12%, var(--raft-inner));
+}
+
+/* —— Detail well (nested inside RAFT panel) —— */
+
+.raft-peer-detail {
+  position: relative;
+  z-index: 1;
+  margin-top: 0.95rem;
+  padding: 0.85rem 0.95rem 0.95rem;
+  border-radius: var(--raft-radius);
+  border: 1px solid color-mix(in srgb, var(--border, #555) 55%, transparent);
+  background: var(--raft-inner);
+}
+
+.raft-peer-detail__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+.raft-peer-detail__title {
+  margin: 0;
+  font-size: var(--fs-md, 0.8125rem);
+  font-weight: 600;
+}
+
+.raft-peer-detail__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.55rem 0.85rem;
+  margin: 0;
+}
+
+.raft-peer-detail__grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  padding: 0.4rem 0.5rem;
+  border-radius: 4px;
+  background: var(--raft-fill);
+  border: 1px solid color-mix(in srgb, var(--border, #555) 45%, transparent);
+}
+
+.raft-peer-detail__grid dt {
+  margin: 0;
+  color: var(--text-muted, #6b7280);
+  font-size: var(--fs-2xs, 0.625rem);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.raft-peer-detail__grid dd {
+  margin: 0;
+  font-size: var(--fs-sm, 0.75rem);
+  word-break: break-word;
+}
+
+/* —— Peers table panel —— */
+
+.replicas-table-panel {
+  padding-bottom: 0.65rem;
+}
+
+.replicas-table-wrap {
+  position: relative;
+  z-index: 1;
+  margin: 0.55rem 0 0;
+  border-radius: var(--raft-radius);
+  border: 1px solid color-mix(in srgb, var(--border, #555) 55%, transparent);
+  background: var(--raft-inner);
+  overflow: auto;
+}
+
+.replicas-page .replicas-table-wrap table {
+  margin: 0;
+}
+
+.replicas-page .replicas-table-wrap thead th {
+  background: var(--raft-fill);
+  border-bottom-color: color-mix(in srgb, var(--border, #555) 60%, transparent);
+  color: var(--text-secondary, #9ca3af);
+}
+
+.replicas-page .replicas-table-wrap tr:hover td {
+  background: color-mix(in srgb, var(--success, #10b981) 14%, var(--raft-inner));
+}
+
+.raft-peer-row--selected td,
+.replicas-page .replicas-table-wrap tr.raft-peer-row--selected:hover td {
+  background: color-mix(in srgb, var(--success, #10b981) 20%, var(--raft-inner));
+}
+
+.replicas-page .table-wrap table td.mono,
+.replicas-page .table-wrap table th {
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .raft-node {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  .raft-node:hover,
+  .raft-node:focus-visible {
+    transform: none;
+  }
+}

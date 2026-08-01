@@ -6,6 +6,7 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/config"
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
 	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 type ChatRequest struct {
@@ -25,7 +26,7 @@ type Service struct {
 }
 
 func NewService(cfg config.Config, st *store.Store, nats *natsclient.Manager) (*Service, error) {
-	if !cfg.AIEnabled {
+	if !cfg.AI.Enabled {
 		return nil, nil
 	}
 	llm, err := NewLLM(cfg)
@@ -35,7 +36,7 @@ func NewService(cfg config.Config, st *store.Store, nats *natsclient.Manager) (*
 	return &Service{
 		cfg:     cfg,
 		llm:     llm,
-		context: NewContextBuilder(st, nats, cfg.AIContextCacheTTL),
+		context: NewContextBuilder(st, nats, cfg.AI.ContextCacheTTL),
 	}, nil
 }
 
@@ -54,8 +55,8 @@ func (s *Service) Model() string {
 	if s == nil {
 		return ""
 	}
-	if s.cfg.AIModel != "" {
-		return s.cfg.AIModel
+	if !strings.IsEmpty(s.cfg.AI.Model) {
+		return s.cfg.AI.Model
 	}
 	return "gemini-2.5-flash"
 }

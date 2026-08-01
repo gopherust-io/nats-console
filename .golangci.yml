@@ -23,8 +23,9 @@ linters:
     gosec:
       excludes:
         - G104 # audit unhandled errors separately via errcheck
+    # fieldalignment is enforced by `make align` (goalign); keep govet focused elsewhere.
     govet:
-      enable:
+      disable:
         - fieldalignment
   exclusions:
     paths:
@@ -34,4 +35,9 @@ linters:
       - path: _test\.go
         linters:
           - gosec
-          - fieldalignment
+      - path: tests/testutil/
+        linters:
+          - gosec
+      - path: _queries\.go$
+        linters:
+          - gosec

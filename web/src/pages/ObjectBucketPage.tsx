@@ -7,17 +7,12 @@ import Pager, { DEFAULT_PAGE_SIZE, pageQuery } from "../components/Pager";
 import VirtualTable from "../components/VirtualTable";
 import Alert from "../components/ui/Alert";
 import PageHeader from "../components/ui/PageHeader";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { api, clusterPath, decodeBase64, jetStreamUIBase, ObjectBucketInfo, ObjectInfo, tryParseJSON } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
-import { clusterQueryKey } from "../lib/query";
-
-type ObjectListResponse = {
-  objects: string[];
-  total: number;
-  offset: number;
-  limit: number;
-};
+import { HUB_LIST_POLL_MS } from "../lib/constants";
+import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
 
 const PREVIEW_LIMIT = 8192;
 
@@ -27,8 +22,10 @@ function encodeData(raw: string): string {
 
 export default function ObjectBucketPage() {
   const { t } = useTranslation();
-  const { bucket = "", accountName } = useParams();
-  const { clusterId } = useCluster();
+  const { askConfirm, confirmDialog } = useConfirmDialog();
+  const { bucket = "", accountName, clusterId: routeCluster } = useParams();
+  const { clusterId: contextClusterId } = useCluster();
+  const clusterId = routeCluster ?? contextClusterId;
   const { canManageJetStream } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -47,18 +44,22 @@ export default function ObjectBucketPage() {
 
   const bucketQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, `object-bucket:${bucket}`),
-    queryFn: () =>
-      api<ObjectBucketInfo>(clusterPath(clusterId!, `/objects/buckets/${encodeURIComponent(bucket)}`)),
+    queryFn: async () =>
+      (await api<ObjectBucketInfo>(clusterPath(clusterId!, `/objects/buckets/${encodeURIComponent(bucket)}`))).data,
     enabled: Boolean(clusterId && bucket),
+    refetchInterval: visibilityAwareInterval(HUB_LIST_POLL_MS),
   });
 
   const objectsQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, `objects:${bucket}:${offset}`),
-    queryFn: () =>
-      api<ObjectListResponse>(
+    queryFn: async () => {
+      const r = await api<string[]>(
         clusterPath(clusterId!, `/objects/buckets/${encodeURIComponent(bucket)}/objects${pageQuery(offset, limit)}`),
-      ),
+      );
+      return { objects: r.data ?? [], total: r.meta?.total ?? 0 };
+    },
     enabled: Boolean(clusterId && bucket),
+    refetchInterval: visibilityAwareInterval(HUB_LIST_POLL_MS),
   });
 
   const updateMutation = useMutation({
@@ -102,9 +103,11 @@ export default function ObjectBucketPage() {
   async function loadObject(name: string) {
     if (!clusterId) return;
     try {
-      const info = await api<ObjectInfo>(
-        clusterPath(clusterId, `/objects/buckets/${encodeURIComponent(bucket)}/objects/${encodeURIComponent(name)}`),
-      );
+      const info = (
+        await api<ObjectInfo>(
+          clusterPath(clusterId, `/objects/buckets/${encodeURIComponent(bucket)}/objects/${encodeURIComponent(name)}`),
+        )
+      ).data;
       setSelected(info);
       setShowFull(false);
       setActionError("");
@@ -137,23 +140,28 @@ export default function ObjectBucketPage() {
     }
   }
 
-  async function onDeleteObject(name: string) {
+  function onDeleteObject(name: string) {
     if (!clusterId || !canManageJetStream) return;
-    if (!window.confirm(t("objects.confirmDeleteObject", { name }))) return;
-    setActionError("");
-    try {
-      await api(
-        clusterPath(
-          clusterId,
-          `/objects/buckets/${encodeURIComponent(bucket)}/objects/${encodeURIComponent(name)}`,
-        ),
-        { method: "DELETE" },
-      );
-      if (selected?.name === name) setSelected(null);
-      await qc.invalidateQueries({ queryKey: clusterQueryKey(clusterId, `objects:${bucket}`) });
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : t("objects.deleteFailed"));
-    }
+    askConfirm({
+      title: t("objects.confirmDeleteObjectTitle"),
+      description: t("objects.confirmDeleteObject", { name }),
+      action: async () => {
+        setActionError("");
+        try {
+          await api(
+            clusterPath(
+              clusterId,
+              `/objects/buckets/${encodeURIComponent(bucket)}/objects/${encodeURIComponent(name)}`,
+            ),
+            { method: "DELETE" },
+          );
+          if (selected?.name === name) setSelected(null);
+          await qc.invalidateQueries({ queryKey: clusterQueryKey(clusterId, `objects:${bucket}`) });
+        } catch (err) {
+          setActionError(err instanceof Error ? err.message : t("objects.deleteFailed"));
+        }
+      },
+    });
   }
 
   const payload = useMemo(() => (selected ? decodeBase64(selected.data) : ""), [selected]);
@@ -163,6 +171,7 @@ export default function ObjectBucketPage() {
 
   return (
     <div className="page">
+      {confirmDialog}
       <PageHeader
         eyebrow="Object store"
         title={bucket}
@@ -195,10 +204,13 @@ export default function ObjectBucketPage() {
                   type="button"
                   className="btn danger"
                   disabled={deleteBucketMutation.isPending}
-                  onClick={() => {
-                    if (!window.confirm(t("objects.confirmDeleteBucket", { name: bucket }))) return;
-                    deleteBucketMutation.mutate();
-                  }}
+                  onClick={() =>
+                    askConfirm({
+                      title: t("objects.confirmDeleteBucketTitle"),
+                      description: t("objects.confirmDeleteBucket", { name: bucket }),
+                      action: () => deleteBucketMutation.mutate(),
+                    })
+                  }
                 >
                   {t("common.delete")}
                 </button>
@@ -254,7 +266,7 @@ export default function ObjectBucketPage() {
       {objectsQuery.isLoading && <div className="skeleton skeleton--table" />}
 
       {!objectsQuery.isLoading && (
-        <div className="split-view">
+        <div className={selected ? "split-view" : undefined}>
           <div className="table-wrap">
             <VirtualTable
               columns={[
@@ -266,11 +278,15 @@ export default function ObjectBucketPage() {
               getKey={(name) => name}
               renderCell={(name, columnId) => {
                 if (columnId === "object") {
-                  return <span className="mono virtual-table__truncate">{name}</span>;
+                  return (
+                    <button type="button" className="link-btn mono virtual-table__truncate" onClick={() => loadObject(name)}>
+                      {name}
+                    </button>
+                  );
                 }
                 return (
                   <div className="actions">
-                    <button className="btn btn--secondary btn--small" type="button" onClick={() => loadObject(name)}>
+                    <button className="btn secondary btn--small" type="button" onClick={() => loadObject(name)}>
                       {t("common.view")}
                     </button>
                     {canManageJetStream && (
@@ -290,12 +306,12 @@ export default function ObjectBucketPage() {
           </div>
 
           {selected && (
-            <div className="card panel">
+            <div className="card">
               <div className="card-label">
                 {selected.name} · {selected.size} bytes · {selected.modified}
               </div>
               {truncated && (
-                <button className="btn btn--secondary btn--small" type="button" onClick={() => setShowFull(true)}>
+                <button className="btn secondary btn--small" type="button" onClick={() => setShowFull(true)}>
                   Show full payload
                 </button>
               )}

@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/tel"
 )
 
@@ -83,7 +84,7 @@ func ObserveHTTP(method, path string, status int, duration time.Duration) {
 
 func statusLabel(status int) string {
 	if status >= 0 && status < len(httpStatusStrings) {
-		if s := httpStatusStrings[status]; s != "" {
+		if s := httpStatusStrings[status]; !commonstrings.IsEmpty(s) {
 			return s
 		}
 	}

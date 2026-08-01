@@ -7,10 +7,12 @@ import (
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
+
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 func mintUserJWT(ctx context.Context, s *Store, clusterID, accountName string, user NATSAccountUser, userSeed, accountSeed string) (string, error) {
-	ukp, err := nkeys.FromSeed([]byte(userSeed))
+	ukp, err := nkeys.FromSeed(commonstrings.StringToBytes(userSeed))
 	if err != nil {
 		return "", fmt.Errorf("user seed: %w", err)
 	}
@@ -18,7 +20,7 @@ func mintUserJWT(ctx context.Context, s *Store, clusterID, accountName string, u
 	if err != nil {
 		return "", err
 	}
-	akp, err := nkeys.FromSeed([]byte(accountSeed))
+	akp, err := nkeys.FromSeed(commonstrings.StringToBytes(accountSeed))
 	if err != nil {
 		return "", fmt.Errorf("account seed: %w", err)
 	}
@@ -26,7 +28,7 @@ func mintUserJWT(ctx context.Context, s *Store, clusterID, accountName string, u
 	claims := jwt.NewUserClaims(upub)
 	claims.Name = user.Name
 	for _, tag := range user.Tags {
-		if tag != "" {
+		if !commonstrings.IsEmpty(tag) {
 			claims.Tags.Add(tag)
 		}
 	}
@@ -66,12 +68,12 @@ func mintUserJWT(ctx context.Context, s *Store, clusterID, accountName string, u
 	claims.BearerToken = user.BearerToken
 	claims.ProxyRequired = user.ProxyRequired
 	for _, ct := range user.AllowedConnectionTypes {
-		if ct != "" {
+		if !commonstrings.IsEmpty(ct) {
 			claims.AllowedConnectionTypes.Add(ct)
 		}
 	}
 	for _, cidr := range user.SrcCIDRs {
-		if cidr != "" {
+		if !commonstrings.IsEmpty(cidr) {
 			claims.Src.Add(cidr)
 		}
 	}
@@ -79,7 +81,7 @@ func mintUserJWT(ctx context.Context, s *Store, clusterID, accountName string, u
 	if len(user.TimeRanges) > 0 {
 		times := make([]jwt.TimeRange, 0, len(user.TimeRanges))
 		for _, tr := range user.TimeRanges {
-			if tr.Start == "" && tr.End == "" {
+			if commonstrings.IsEmpty(tr.Start) && commonstrings.IsEmpty(tr.End) {
 				continue
 			}
 			times = append(times, jwt.TimeRange{Start: tr.Start, End: tr.End})

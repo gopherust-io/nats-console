@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/valyala/fasthttp"
 )
 
@@ -113,7 +114,7 @@ func WrapError(err error) *Error {
 	case strings.Contains(lower, "could not reach gemini"):
 		return newAssistantError(CodeUnavailable, "Could not reach Gemini API. Check your network connection.", true, 0)
 	default:
-		if msg == "" {
+		if commonstrings.IsEmpty(msg) {
 			msg = "Assistant request failed"
 		}
 		return newAssistantError(CodeProvider, msg, true, 0)
@@ -163,7 +164,7 @@ func newAuthError() *Error {
 }
 
 func newProviderError(message string, retryable bool, status int) *Error {
-	if strings.TrimSpace(message) == "" {
+	if commonstrings.IsEmpty(strings.TrimSpace(message)) {
 		message = "Gemini request failed"
 	}
 	return newAssistantError(CodeProvider, message, retryable, status)

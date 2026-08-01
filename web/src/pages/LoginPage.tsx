@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router";
 import LoginSplitLayout from "../components/LoginSplitLayout";
 import Alert from "../components/ui/Alert";
+import { ApiError, userFacingError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
 export default function LoginPage() {
@@ -13,6 +14,7 @@ export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [csrfHint, setCsrfHint] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
@@ -31,11 +33,15 @@ export default function LoginPage() {
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setError("");
+    setCsrfHint(false);
     try {
       await login(username, password);
       navigate("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("auth.loginFailed"));
+      if (err instanceof ApiError && err.code === "csrf_invalid") {
+        setCsrfHint(true);
+      }
+      setError(err instanceof ApiError ? userFacingError(err, t) : err instanceof Error ? err.message : t("auth.loginFailed"));
     }
   }
 
@@ -76,6 +82,11 @@ export default function LoginPage() {
         </form>
 
         <Alert variant="error">{error}</Alert>
+        {csrfHint && (
+          <button type="button" className="login-help-link" onClick={() => window.location.reload()}>
+            {t("auth.csrfReload")}
+          </button>
+        )}
 
         <button type="button" className="login-help-link" onClick={() => setHelpOpen((v) => !v)}>
           {t("auth.helpLink")}

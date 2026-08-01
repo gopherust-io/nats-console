@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Signing key groups for NATS account users (Phase 2).
 
 CREATE TABLE IF NOT EXISTS nats_signing_groups (
@@ -23,3 +25,9 @@ CREATE INDEX IF NOT EXISTS idx_nats_signing_groups_cluster
 
 ALTER TABLE nats_account_users
     ADD COLUMN IF NOT EXISTS assigned_user_id UUID REFERENCES users(id) ON DELETE SET NULL;
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+SELECT 1;
+-- +goose StatementEnd

@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS clusters (
     id UUID PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
@@ -11,3 +13,9 @@ CREATE TABLE IF NOT EXISTS clusters (
 );
 
 CREATE INDEX IF NOT EXISTS idx_clusters_is_default ON clusters (is_default) WHERE is_default = TRUE;
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+SELECT 1;
+-- +goose StatementEnd

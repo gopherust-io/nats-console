@@ -3,7 +3,6 @@
 package security_test
 
 import (
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -17,8 +16,6 @@ import (
 func TestLoginSetsSecureSessionCookies(t *testing.T) {
 	stack := testutil.SetupStack(t)
 	srv := stack.NewServer(t, func(cfg *config.Config) {
-		cfg.AuthEnabled = true
-		cfg.Env = "production"
 		cfg.PublicBaseURL = "https://nats-consol.example.com"
 	})
 
@@ -28,23 +25,26 @@ func TestLoginSetsSecureSessionCookies(t *testing.T) {
 		strings.NewReader(`{"username":"admin","password":"admin"}`),
 	)
 	require.NoError(t, err)
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode, "status body = %s", string(body))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "status body = %s", string(resp.Body))
 
-	var sessionCookie, csrfCookie *http.Cookie
+	var sessionCookie, refreshCookie, csrfCookie *testutil.Cookie
 	for _, c := range resp.Cookies() {
 		switch c.Name {
 		case "nats_consol_session":
 			sessionCookie = c
+		case "nats_consol_refresh":
+			refreshCookie = c
 		case "nats_consol_csrf":
 			csrfCookie = c
 		}
 	}
 	require.NotNil(t, sessionCookie, "expected session cookie, got %#v", resp.Cookies())
+	require.NotNil(t, refreshCookie, "expected refresh cookie, got %#v", resp.Cookies())
 	require.NotNil(t, csrfCookie, "expected csrf cookie, got %#v", resp.Cookies())
 	assert.True(t, sessionCookie.HttpOnly, "session cookie must be HttpOnly")
-	assert.True(t, sessionCookie.Secure, "cookies must be Secure in production")
-	assert.True(t, csrfCookie.Secure, "cookies must be Secure in production")
+	assert.True(t, refreshCookie.HttpOnly, "refresh cookie must be HttpOnly")
+	assert.True(t, sessionCookie.Secure, "cookies must be Secure")
+	assert.True(t, refreshCookie.Secure, "refresh cookie must be Secure")
+	assert.True(t, csrfCookie.Secure, "cookies must be Secure")
 	assert.Equal(t, http.SameSiteLaxMode, sessionCookie.SameSite, "session SameSite")
 }

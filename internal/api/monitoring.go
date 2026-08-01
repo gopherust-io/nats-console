@@ -7,7 +7,8 @@ import (
 	"github.com/valyala/fasthttp"
 
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
-	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
+	"github.com/gopherust-io/nats-consol/internal/httpctx/httpstatus"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 var allowedMonitoringEndpoints = map[string]struct{}{
@@ -34,11 +35,11 @@ func validateMonitoringEndpoint(endpoint string) error {
 func (h *Handler) Monitoring(ctx *fasthttp.RequestCtx) {
 	endpoint := strings.ToLower(httpctx.RouteParam(ctx, "endpoint"))
 	if err := validateMonitoringEndpoint(endpoint); err != nil {
-		serializer.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	path := "/" + endpoint
-	if query := string(ctx.URI().QueryString()); query != "" {
+	if query := commonstrings.BytesToString(ctx.URI().QueryString()); !commonstrings.IsEmpty(query) {
 		path += "?" + query
 	}
 	h.natsRaw(ctx, path)

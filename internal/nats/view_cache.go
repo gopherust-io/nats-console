@@ -11,6 +11,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/gopherust-io/nats-consol/internal/metrics"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 const defaultViewCacheTTL = 3 * time.Second
@@ -80,7 +81,7 @@ type cachedResult struct {
 
 // InvalidateCluster drops all cached entries for a cluster ID prefix.
 func (c *ViewCache) InvalidateCluster(clusterID string) {
-	if c == nil || clusterID == "" {
+	if c == nil || commonstrings.IsEmpty(clusterID) {
 		return
 	}
 	prefix := clusterID + "|"
@@ -95,7 +96,7 @@ func (c *ViewCache) InvalidateCluster(clusterID string) {
 
 // InvalidatePrefix drops entries whose key starts with prefix.
 func (c *ViewCache) InvalidatePrefix(prefix string) {
-	if c == nil || prefix == "" {
+	if c == nil || commonstrings.IsEmpty(prefix) {
 		return
 	}
 	c.mu.Lock()
@@ -148,7 +149,7 @@ func etagOf(v any) string {
 		sum := sha256.Sum256(t)
 		return `"` + hex.EncodeToString(sum[:8]) + `"`
 	case string:
-		sum := sha256.Sum256([]byte(t))
+		sum := sha256.Sum256(commonstrings.StringToBytes(t))
 		return `"` + hex.EncodeToString(sum[:8]) + `"`
 	default:
 		raw, err := sonic.Marshal(v)
@@ -175,5 +176,5 @@ func ViewCacheKey(clusterID, op string, parts ...string) string {
 		b = append(b, '|')
 		b = append(b, p...)
 	}
-	return string(b)
+	return commonstrings.BytesToString(b)
 }

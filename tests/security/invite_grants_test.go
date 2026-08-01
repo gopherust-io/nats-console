@@ -4,17 +4,17 @@ package security_test
 
 import (
 	"context"
-	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/gopherust-io/nats-consol/internal/config"
-	"github.com/gopherust-io/nats-consol/internal/store"
-	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
+	"github.com/gopherust-io/nats-consol/tests/testutil"
 )
 
 func TestInviteAcceptAndSystemGrant(t *testing.T) {
@@ -43,40 +43,53 @@ func TestInviteAcceptAndSystemGrant(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	srv := stack.NewServer(t, func(cfg *config.Config) {
-		cfg.AuthEnabled = true
-	})
+	srv := stack.NewServer(t, nil)
 
-	req, _ := http.NewRequest(http.MethodPost, "http://nats-consol.local/api/v1/auth/login", strings.NewReader(`{"username":"invited-person","password":"secret-pass"}`))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := srv.Client.Do(req)
+	resp, err := srv.Client.Do(&testutil.Request{
+		Method: http.MethodPost,
+		URL:    "http://nats-consol.local/api/v1/auth/login",
+		Body:   strings.NewReader(`{"username":"invited-person","password":"secret-pass"}`),
+		Header: http.Header{
+			"Content-Type": {"application/json"},
+		},
+	})
 	require.NoError(t, err)
-	_ = resp.Body.Close()
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 
-	req, _ = http.NewRequest(http.MethodPost, "http://nats-consol.local/api/v1/auth/invite/accept", strings.NewReader(`{"token":"`+inv.Token+`","password":"secret-pass"}`))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err = srv.Client.Do(req)
+	resp, err = srv.Client.Do(&testutil.Request{
+		Method: http.MethodPost,
+		URL:    "http://nats-consol.local/api/v1/auth/invite/accept",
+		Body:   strings.NewReader(`{"token":"`+inv.Token+`","password":"secret-pass"}`),
+		Header: http.Header{
+			"Content-Type": {"application/json"},
+		},
+	})
 	require.NoError(t, err)
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
+	body := resp.Body
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 
-	req, _ = http.NewRequest(http.MethodGet, "http://nats-consol.local/api/v1/clusters", nil)
-	req.Header.Set("Authorization", basicAuth("invited-person", "secret-pass"))
-	resp, err = srv.Client.Do(req)
+	resp, err = srv.Client.Do(&testutil.Request{
+		Method: http.MethodGet,
+		URL:    "http://nats-consol.local/api/v1/clusters",
+		Header: http.Header{
+			"Authorization": {basicAuth("invited-person", "secret-pass")},
+		},
+	})
 	require.NoError(t, err)
-	body, _ = io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
+	body = resp.Body
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Contains(t, string(body), clusterID)
+	assert.Contains(t, commonstrings.BytesToString(body), clusterID)
 
-	req, _ = http.NewRequest(http.MethodPost, srv.BaseURL(clusterID)+"/streams", strings.NewReader(`{"name":"X","subjects":["x.>"]}`))
-	req.Header.Set("Authorization", basicAuth("invited-person", "secret-pass"))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err = srv.Client.Do(req)
+	resp, err = srv.Client.Do(&testutil.Request{
+		Method: http.MethodPost,
+		URL:    srv.BaseURL(clusterID)+"/streams",
+		Body:   strings.NewReader(`{"name":"X","subjects":["x.>"]}`),
+		Header: http.Header{
+			"Authorization": {basicAuth("invited-person", "secret-pass")},
+			"Content-Type": {"application/json"},
+		},
+	})
 	require.NoError(t, err)
-	_ = resp.Body.Close()
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 }
 
@@ -111,18 +124,21 @@ func TestCredentialDownloaderGate(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	srv := stack.NewServer(t, func(cfg *config.Config) {
-		cfg.AuthEnabled = true
-	})
+	srv := stack.NewServer(t, nil)
 
-	req, _ := http.NewRequest(http.MethodGet, srv.BaseURL(clusterID)+"/nats-users/"+natsUser.ID+"/creds?account=Default", nil)
-	req.Header.Set("Authorization", basicAuth("cred-dl", "cred-pass"))
-	resp, err := srv.Client.Do(req)
+	resp, err := srv.Client.Do(&testutil.Request{
+		Method: http.MethodGet,
+		URL:    srv.BaseURL(clusterID)+"/nats-users/"+natsUser.ID+"/creds?account=Default",
+		Header: http.Header{
+			"Authorization": {basicAuth("cred-dl", "cred-pass")},
+		},
+	})
 	require.NoError(t, err)
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
+	body := resp.Body
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var payload map[string]any
-	require.NoError(t, json.Unmarshal(body, &payload))
-	assert.NotEmpty(t, payload["seed"])
+	require.NoError(t, serializer.Unmarshal(body, &payload))
+	data, _ := payload["data"].(map[string]any)
+	require.NotNil(t, data)
+	assert.NotEmpty(t, data["seed"])
 }

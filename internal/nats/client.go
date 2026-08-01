@@ -15,6 +15,7 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/store"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 // Client wraps gopherust-io/nats with console-specific helpers (monitoring URL, domain mapping).
@@ -31,7 +32,10 @@ type ConnectionHooks struct {
 }
 
 func Connect(ctx context.Context, cfg config.Config, hooks ConnectionHooks) (*Client, error) {
-	return dial(ctx, cfg, cfg.NATSURL, cfg.NATSCredsFile, cfg.NATSToken, cfg.MonitoringURL, hooks)
+	if err := ValidateEnvConfig(cfg); err != nil {
+		return nil, err
+	}
+	return dial(ctx, cfg, cfg.NATS.URL, cfg.NATS.CredsFile, cfg.NATS.Token, cfg.NATS.MonitoringURL, hooks)
 }
 
 func ConnectCluster(ctx context.Context, cfg config.Config, cluster store.Cluster, hooks ConnectionHooks) (*Client, error) {
@@ -81,30 +85,29 @@ func dial(
 
 func loadNATSTLS(cfg config.Config) (libnats.ConnectionTLS, error) {
 	out := libnats.ConnectionTLS{
-		ServerName:         cfg.NATSTlsServerName,
-		InsecureSkipVerify: cfg.NATSTlsInsecureSkipVerify,
+		ServerName:         cfg.NATS.TlsServerName,
+		InsecureSkipVerify: cfg.NATS.TlsInsecureSkipVerify,
 	}
-	hasMaterial := cfg.NATSTlsCAFile != "" || cfg.NATSTlsCertFile != "" || cfg.NATSTlsKeyFile != "" ||
-		cfg.NATSTlsServerName != "" || cfg.NATSTlsInsecureSkipVerify
+	hasMaterial := !commonstrings.IsEmpty(cfg.NATS.TlsCAFile) || !commonstrings.IsEmpty(cfg.NATS.TlsCertFile) || !commonstrings.IsEmpty(cfg.NATS.TlsKeyFile) || !commonstrings.IsEmpty(cfg.NATS.TlsServerName) || cfg.NATS.TlsInsecureSkipVerify
 	if !hasMaterial {
 		return out, nil
 	}
-	if (cfg.NATSTlsCertFile == "") != (cfg.NATSTlsKeyFile == "") {
+	if (commonstrings.IsEmpty(cfg.NATS.TlsCertFile)) != (commonstrings.IsEmpty(cfg.NATS.TlsKeyFile)) {
 		return out, errors.New("NATS_TLS_CERT_FILE and NATS_TLS_KEY_FILE must be set together")
 	}
-	if cfg.NATSTlsCAFile != "" {
-		ca, err := os.ReadFile(cfg.NATSTlsCAFile)
+	if !commonstrings.IsEmpty(cfg.NATS.TlsCAFile) {
+		ca, err := os.ReadFile(cfg.NATS.TlsCAFile)
 		if err != nil {
 			return out, fmt.Errorf("read NATS_TLS_CA_FILE: %w", err)
 		}
 		out.CA = ca
 	}
-	if cfg.NATSTlsCertFile != "" {
-		cert, err := os.ReadFile(cfg.NATSTlsCertFile)
+	if !commonstrings.IsEmpty(cfg.NATS.TlsCertFile) {
+		cert, err := os.ReadFile(cfg.NATS.TlsCertFile)
 		if err != nil {
 			return out, fmt.Errorf("read NATS_TLS_CERT_FILE: %w", err)
 		}
-		key, err := os.ReadFile(cfg.NATSTlsKeyFile)
+		key, err := os.ReadFile(cfg.NATS.TlsKeyFile)
 		if err != nil {
 			return out, fmt.Errorf("read NATS_TLS_KEY_FILE: %w", err)
 		}
@@ -219,51 +222,135 @@ func (c *Client) ReplayConsumer(ctx context.Context, stream, consumer string, re
 	}
 
 	mode := req.NormalizedMode()
+	var libRes libnats.ReplayConsumerResult
 	switch mode {
 	case domain.ReplayModeSidecar:
-		durable, err := c.inner.Replay().CreateReplayConsumer(ctx, stream, consumer, opts...)
-		if err != nil {
-			return domain.ReplayConsumerResult{}, err
-		}
-		return domain.ReplayConsumerResult{Durable: durable, Mode: mode}, nil
+		libRes, err = c.inner.Replay().CreateReplayConsumer(ctx, stream, consumer, opts...)
 	default:
-		if err := c.inner.Replay().ResetConsumer(ctx, stream, consumer, opts...); err != nil {
-			return domain.ReplayConsumerResult{}, err
-		}
-		return domain.ReplayConsumerResult{Durable: consumer, Mode: mode}, nil
+		libRes, err = c.inner.Replay().ResetConsumer(ctx, stream, consumer, opts...)
 	}
+	if err != nil {
+		return domain.ReplayConsumerResult{}, err
+	}
+
+	return mapReplayResult(libRes, mode), nil
+}
+
+func mapReplayResult(libRes libnats.ReplayConsumerResult, mode string) domain.ReplayConsumerResult {
+	out := domain.ReplayConsumerResult{
+		Durable:  libRes.Durable,
+		Mode:     mode,
+		StartSeq: libRes.StartSeq,
+		UntilSeq: libRes.UntilSeq,
+		Limit:    libRes.Limit,
+	}
+	if libRes.StartTime != nil {
+		s := libRes.StartTime.UTC().Format(time.RFC3339Nano)
+		out.StartTime = &s
+	}
+	if libRes.UntilTime != nil {
+		s := libRes.UntilTime.UTC().Format(time.RFC3339Nano)
+		out.UntilTime = &s
+	}
+
+	return out
 }
 
 func replayOptsFromRequest(req domain.ReplayConsumerRequest) ([]libnats.ReplayOpt, error) {
-	opts := make([]libnats.ReplayOpt, 0, 4)
-	switch req.NormalizedFrom() {
-	case domain.ReplayFromSeq:
-		opts = append(opts, libnats.FromSeq(req.Seq))
-	case domain.ReplayFromTime:
-		t, err := req.ParseTime()
-		if err != nil {
-			return nil, fmt.Errorf("time: %w", err)
+	opts := make([]libnats.ReplayOpt, 0, 8)
+
+	oneMsg := req.NormalizedFrom() == domain.ReplayFromSeq &&
+		req.Seq > 0 &&
+		req.UntilSeq == req.Seq &&
+		req.Limit == 1
+
+	if oneMsg {
+		opts = append(opts, libnats.OneMessage(req.Seq))
+	} else {
+		switch req.NormalizedFrom() {
+		case domain.ReplayFromSeq:
+			opts = append(opts, libnats.FromSeq(req.Seq))
+		case domain.ReplayFromTime:
+			t, err := req.ParseTime()
+			if err != nil {
+				return nil, fmt.Errorf("time: %w", err)
+			}
+			opts = append(opts, libnats.FromTime(t))
+		case domain.ReplayFromBeginning:
+			opts = append(opts, libnats.FromBeginning())
+		case domain.ReplayFromNew:
+			opts = append(opts, libnats.FromNew())
 		}
-		opts = append(opts, libnats.FromTime(t))
-	case domain.ReplayFromBeginning:
-		opts = append(opts, libnats.FromBeginning())
-	case domain.ReplayFromNew:
-		opts = append(opts, libnats.FromNew())
+
+		if req.UntilSeq > 0 {
+			opts = append(opts, libnats.UntilSeq(req.UntilSeq))
+		}
+		if !commonstrings.IsEmpty(strings.TrimSpace(req.UntilTime)) {
+			t, err := req.ParseUntilTime()
+			if err != nil {
+				return nil, fmt.Errorf("untilTime: %w", err)
+			}
+			opts = append(opts, libnats.UntilTime(t))
+		}
+		if req.Limit > 0 {
+			opts = append(opts, libnats.Limit(req.Limit))
+		}
 	}
 
 	if strings.EqualFold(strings.TrimSpace(req.ReplayPolicy), domain.ReplayPolicyOriginal) {
 		opts = append(opts, libnats.WithReplayPolicy(libnats.ReplayOriginal))
 	}
 
-	if filter := strings.TrimSpace(req.FilterSubject); filter != "" {
+	if filter := strings.TrimSpace(req.FilterSubject); !commonstrings.IsEmpty(filter) {
 		opts = append(opts, libnats.WithFilterSubject(filter))
 	}
 
-	if durable := strings.TrimSpace(req.Durable); durable != "" && req.NormalizedMode() == domain.ReplayModeSidecar {
+	if durable := strings.TrimSpace(req.Durable); !commonstrings.IsEmpty(durable) && req.NormalizedMode() == domain.ReplayModeSidecar {
 		opts = append(opts, libnats.WithReplayDurable(durable))
 	}
 
 	return opts, nil
+}
+
+func (c *Client) GetMessageRange(ctx context.Context, stream string, startSeq, endSeq uint64, limit int) (*domain.MessageRangeResult, error) {
+	opts := make([]libnats.MsgRangeOpt, 0, 1)
+	if limit > 0 {
+		opts = append(opts, libnats.WithMaxMessages(limit))
+	}
+	msgs, truncated, err := c.inner.Replay().GetMsgRange(ctx, stream, startSeq, endSeq, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	return storedRangeToDomain(msgs, truncated), nil
+}
+
+func (c *Client) GetMessageRangeByTime(ctx context.Context, stream string, start, end time.Time, limit int) (*domain.MessageRangeResult, error) {
+	opts := make([]libnats.MsgRangeOpt, 0, 1)
+	if limit > 0 {
+		opts = append(opts, libnats.WithMaxMessages(limit))
+	}
+	msgs, truncated, err := c.inner.Replay().GetMsgRangeByTime(ctx, stream, start, end, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	return storedRangeToDomain(msgs, truncated), nil
+}
+
+func storedRangeToDomain(msgs []*libnats.StoredMessage, truncated bool) *domain.MessageRangeResult {
+	out := &domain.MessageRangeResult{
+		Messages:  make([]domain.StreamMessage, 0, len(msgs)),
+		Truncated: truncated,
+	}
+	for _, m := range msgs {
+		if m == nil {
+			continue
+		}
+		out.Messages = append(out.Messages, domain.StreamMessageFromStored(m))
+	}
+
+	return out
 }
 
 func (c *Client) GetMessage(ctx context.Context, stream string, seq uint64) (*nats.RawStreamMsg, error) {
@@ -296,7 +383,7 @@ func (c *Client) GetMessageNav(ctx context.Context, stream string, seq uint64, d
 			return nil, err
 		}
 	default:
-		if direction != "" {
+		if !commonstrings.IsEmpty(direction) {
 			return nil, fmt.Errorf("invalid direction %q", direction)
 		}
 		msg, err = c.inner.Streams().GetMsg(ctx, stream, seq)
@@ -407,4 +494,35 @@ func (c *Client) PublishStreamMessage(ctx context.Context, stream string, in dom
 
 func (c *Client) Monitoring(ctx context.Context, path string) ([]byte, error) {
 	return c.inner.Monitoring().Fetch(ctx, c.monitoring, path)
+}
+
+func (c *Client) ProbeRequest(
+	ctx context.Context,
+	subject string,
+	format domain.RequestReplyPayloadFormat,
+	payload []byte,
+	timeout time.Duration,
+) (*nats.Msg, time.Duration, error) {
+	conn := c.Conn()
+	if conn == nil || !conn.IsConnected() {
+		return nil, 0, errors.New("nats connection unavailable")
+	}
+	if timeout <= 0 {
+		timeout = 2 * time.Second
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	msg := &nats.Msg{
+		Subject: subject,
+		Data:    payload,
+		Header:  ProbeRequestHeaders(format, len(payload) > 0),
+	}
+
+	start := time.Now()
+	reply, err := conn.RequestMsgWithContext(reqCtx, msg)
+	if err != nil {
+		return nil, 0, err
+	}
+	return reply, time.Since(start), nil
 }

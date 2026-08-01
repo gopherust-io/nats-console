@@ -13,7 +13,7 @@ func TestCounterRatesUsesElapsedSeconds(t *testing.T) {
 	t0 := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
 	points := []domain.MetricPoint{
 		{T: t0, V: 100},
-		{T: t0.Add(time.Minute), V: 700},   // +600 over 60s → 10/s
+		{T: t0.Add(time.Minute), V: 700},      // +600 over 60s → 10/s
 		{T: t0.Add(2 * time.Minute), V: 1300}, // +600 over 60s → 10/s
 	}
 
@@ -47,4 +47,14 @@ func TestCounterRatesClampsNegativeDelta(t *testing.T) {
 	rates := counterRates(points, time.Minute)
 	require.Len(t, rates, 1)
 	assert.Equal(t, float64(0), rates[0].V)
+}
+
+func TestParseMetricsQueryAcceptsStreamRateMetrics(t *testing.T) {
+	t.Parallel()
+
+	metrics := parseMetricsQuery("stream:ORDERS:last_seq,stream:ORDERS:bytes,not.valid")
+	require.Equal(t, []string{
+		"stream:ORDERS:last_seq",
+		"stream:ORDERS:bytes",
+	}, metrics)
 }

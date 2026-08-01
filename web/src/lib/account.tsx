@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useCluster } from "./cluster";
 
 const ACCOUNT_STORAGE_KEY = "nats-consol-account";
@@ -37,6 +37,16 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     () => [{ ...DEFAULT_ACCOUNT, clusterId: clusterId ?? "" }],
     [clusterId],
   );
+
+  // Restore the previously used account name whenever the active cluster changes.
+  useEffect(() => {
+    if (!clusterId) {
+      setAccountNameState("Default");
+      return;
+    }
+    const stored = localStorage.getItem(storedAccountKey(clusterId));
+    setAccountNameState(stored || "Default");
+  }, [clusterId]);
 
   const setAccountName = useCallback(
     (name: string) => {

@@ -10,6 +10,7 @@ import (
 	libnats "github.com/gopherust-io/nats"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/pkg/common/b64util"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/nats-io/nats.go"
 )
 
@@ -34,20 +35,20 @@ func kvBucketInfoFromStatus(st nats.KeyValueStatus) domain.KVBucketInfo {
 	if info.History <= 0 {
 		info.History = int64(cfg.History)
 	}
-	if cfg.Placement != nil && (cfg.Placement.Cluster != "" || len(cfg.Placement.Tags) > 0) {
+	if cfg.Placement != nil && (!strings.IsEmpty(cfg.Placement.Cluster) || len(cfg.Placement.Tags) > 0) {
 		info.Placement = &domain.KVPlacement{
 			Cluster: cfg.Placement.Cluster,
 			Tags:    append([]string(nil), cfg.Placement.Tags...),
 		}
 	}
-	if cfg.RePublish != nil && cfg.RePublish.Destination != "" {
+	if cfg.RePublish != nil && !strings.IsEmpty(cfg.RePublish.Destination) {
 		info.RePublish = &domain.KVRePublish{
 			Source:      cfg.RePublish.Source,
 			Destination: cfg.RePublish.Destination,
 			HeadersOnly: cfg.RePublish.HeadersOnly,
 		}
 	}
-	if cfg.Mirror != nil && cfg.Mirror.Name != "" {
+	if cfg.Mirror != nil && !strings.IsEmpty(cfg.Mirror.Name) {
 		info.Mirror = &domain.KVStreamSource{
 			Name:          cfg.Mirror.Name,
 			FilterSubject: cfg.Mirror.FilterSubject,
@@ -56,7 +57,7 @@ func kvBucketInfoFromStatus(st nats.KeyValueStatus) domain.KVBucketInfo {
 	if len(cfg.Sources) > 0 {
 		info.Sources = make([]domain.KVStreamSource, 0, len(cfg.Sources))
 		for _, src := range cfg.Sources {
-			if src == nil || src.Name == "" {
+			if src == nil || strings.IsEmpty(src.Name) {
 				continue
 			}
 			info.Sources = append(info.Sources, domain.KVStreamSource{
@@ -119,7 +120,7 @@ func (c *Client) CreateKVBucket(ctx context.Context, cfg *nats.KeyValueConfig, o
 }
 
 func (c *Client) UpdateKVBucket(ctx context.Context, cfg *nats.KeyValueConfig, opts domain.KVBucketWriteOpts) (*domain.KVBucketInfo, error) {
-	if cfg == nil || cfg.Bucket == "" {
+	if cfg == nil || strings.IsEmpty(cfg.Bucket) {
 		return nil, errors.New("bucket is required")
 	}
 	libCfg := libnats.KeyValueConfig{
@@ -169,7 +170,7 @@ func (c *Client) applyKVStreamExtras(ctx context.Context, cfg *nats.KeyValueConf
 	} else {
 		sc.Compression = nats.NoCompression
 	}
-	if cfg.Placement != nil && (cfg.Placement.Cluster != "" || len(cfg.Placement.Tags) > 0) {
+	if cfg.Placement != nil && (!strings.IsEmpty(cfg.Placement.Cluster) || len(cfg.Placement.Tags) > 0) {
 		sc.Placement = &nats.Placement{
 			Cluster: cfg.Placement.Cluster,
 			Tags:    append([]string(nil), cfg.Placement.Tags...),

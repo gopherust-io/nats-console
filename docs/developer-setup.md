@@ -29,11 +29,19 @@ nats-consol/
 │   ├── store/           # Postgres access
 │   └── auth/            # Sessions, RBAC
 ├── web/                 # React + Vite frontend
-├── migrations/          # SQL migrations
+├── migrations/          # goose SQL migrations (applied on startup; goose_db_version)
 ├── tests/               # integration, contract, security, e2e
 ├── docs/                # You are here
 └── deploy/helm/         # Kubernetes chart
 ```
+
+### Database migrations
+
+SQL files under `migrations/` are applied on startup via `goose.UpContext` (see `internal/store/store.go`). Use goose annotations only — do not add Go `migration.Up` / `AddMigration`.
+
+- Always include `-- +goose Up` and `-- +goose Down` (and `StatementBegin` / `StatementEnd` for multi-statement blocks).
+- Prefer goose’s **default transactional Up** so DDL/DML and the version row commit or roll back together.
+- Use `-- +goose NO TRANSACTION` only when Postgres requires it (e.g. `CREATE INDEX CONCURRENTLY`); keep that file small and idempotent.
 
 ---
 
@@ -43,7 +51,7 @@ nats-consol/
 
 ```bash
 cp .env.example .env
-# Edit .env — set POSTGRES_PASSWORD, ADMIN_PASSWORD, ENCRYPTION_KEY, SESSION_SECRET
+# Edit .env — set POSTGRES_PASSWORD, ADMIN_PASSWORD, ENCRYPTION_KEY, SESSION_PRIVATE_KEY, SESSION_PUBLIC_KEY
 docker compose up postgres nats -d
 ```
 
@@ -56,15 +64,23 @@ export NATS_URL=nats://localhost:4222
 export NATS_MONITORING_URL=http://localhost:8222
 export ADMIN_PASSWORD=change-me-local-admin
 export ENCRYPTION_KEY=dev-encryption-key-min-16-chars
-export SESSION_SECRET=dev-session-secret-min-16-chars
-# Optional: AUTH_ENABLED=false for a faster local loop (not for production)
+# openssl genrsa -out session.pem 2048 && openssl rsa -in session.pem -pubout -out session.pub.pem
+export SESSION_PRIVATE_KEY="$(awk 'NF {sub(/\r/,""); printf "%s\\n",$0}' session.pem)"
+export SESSION_PUBLIC_KEY="$(awk 'NF {sub(/\r/,""); printf "%s\\n",$0}' session.pub.pem)"
 
 go run ./cmd/server
 ```
 
 API listens on **http://localhost:8080**.
 
-With `AUTH_ENABLED=false`, the UI treats you as a dev admin automatically.
+To exercise the **Replicas** page against a 5-node JetStream cluster, stop the root compose `nats` service (port clash), then `make nats-cluster-up` (see [`docker/nats/cluster/`](../docker/nats/cluster/) and [local Docker labs](./local-docker.md)) and set:
+
+```bash
+export NATS_URL=nats://127.0.0.1:4222,nats://127.0.0.1:4223,nats://127.0.0.1:4224,nats://127.0.0.1:4225,nats://127.0.0.1:4226
+export NATS_MONITORING_URL=http://127.0.0.1:8222
+```
+
+Sign in with the bootstrap admin (`ADMIN_USERNAME` / `ADMIN_PASSWORD`). Authentication is always required.
 
 ### 3. Frontend (hot reload)
 
@@ -74,12 +90,20 @@ npm install
 npm run dev
 ```
 
-Open **http://localhost:5173**.
+Open **http://localhost:8080**.
+
+When running the Go API locally on the default `:8080`, start it on `:8081` instead so Vite can bind `:8080`:
+
+```bash
+HTTP_ADDR=:8081 make dev
+```
 
 Vite proxies:
 
-- `/api/*` → `:8080`  
-- `/debug/*` → `:8080` (pprof, when enabled)
+- `/api/*` → `:8081`  
+- `/debug/*` → `:8081` (pprof, when enabled)
+
+For Docker Compose + hot reload, use `make dev-web-docker` from the repo root. It moves the console API to host `:8081` and serves Vite on `:8080`.
 
 ---
 
@@ -90,9 +114,9 @@ cp .env.example .env   # required — fill secrets
 docker compose up --build
 ```
 
-Includes Postgres + NATS + console. UI at http://localhost:8080. Login with the `ADMIN_USERNAME` / `ADMIN_PASSWORD` from your `.env`.
+Includes Postgres + NATS + console. UI at **http://localhost:8080**. Login with the `ADMIN_USERNAME` / `ADMIN_PASSWORD` from your `.env`.
 
-> The stock compose stack is a **local plaintext lab**. Production must use `ENV=production`, Postgres `sslmode=require|verify-full`, `tls://` NATS, and HTTPS monitoring (see [devops-setup.md](devops-setup.md)).
+> Stock compose is a **local lab**: Postgres/NATS may be plaintext inside the compose network. Production must use `ENV=production`, Postgres `sslmode=require|verify-full`, `tls://` NATS, HTTPS monitoring, and TLS termination on an external reverse proxy or Ingress (see [devops-setup.md](devops-setup.md)).
 
 ### Test alert emails locally
 
@@ -181,7 +205,7 @@ SKIP_TESTCONTAINERS=1 go test ./...
 | Contract | `tests/contract` | JSON camelCase vs frontend |
 | Security | `tests/security` | CSRF, headers, RBAC, secrets |
 | Web e2e | `web/e2e` | Playwright against preview (mocked `/api`) |
-| Smoke | `tests/e2e/smoke.sh` | Health, login, streams, live WS on compose |
+| Smoke | `tests/e2e/smoke.sh` | Health, login, streams, live WS on compose (`BASE_URL=http://localhost:8080`) |
 | Performance | `tests/performance/load.sh` | vegeta baseline (main CI) |
 | Stress | `tests/performance/stress.sh` | vegeta higher RPS (main CI) |
 
@@ -196,7 +220,7 @@ make lint          # Go + web
 make lint-go-fix   # auto-fix struct alignment, modernize, etc.
 ```
 
-CI runs on every pull request to `main` (`.github/workflows/test.yml`): Go lint/tests/build, web lint/typecheck/build/Playwright e2e, parallel regression suites, race detector (live WebSocket), and compose smoke, plus an **All checks passed** gate. Performance and stress baselines run on pushes to `main` only (advisory).
+CI runs on every pull request to `main` (`.github/workflows/test.yml`): Go lint/tests/build, web lint/typecheck/build/Playwright e2e, parallel regression suites, race detector (live WebSocket), compose smoke (`:8080`), plus an **All checks passed** gate. Performance and stress baselines run on pushes to `main` only (advisory).
 
 ---
 
@@ -225,7 +249,7 @@ On-demand profiles: `GET /api/v1/pprof/profile/{heap|cpu|goroutine|...}` (admin 
 ### Structured logs
 
 ```bash
-LOG_JSON=true LOG_LEVEL=debug go run ./cmd/server
+LOG_LEVEL=debug go run ./cmd/server   # console logs by default; set LOG_JSON=true for JSON
 ```
 
 ### NATS connection issues

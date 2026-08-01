@@ -32,13 +32,11 @@ func TestCanManageUsersAndViewAudit(t *testing.T) {
 	assert.False(t, CanViewAudit(viewer))
 }
 
-func TestCanCreateAndDeleteCluster(t *testing.T) {
+func TestCanDeleteCluster(t *testing.T) {
 	t.Parallel()
-	assert.True(t, CanCreateCluster(store.User{IsRoot: true}))
 	assert.True(t, CanDeleteCluster(store.User{IsRoot: true}))
 
 	legacyAdmin := store.User{Roles: []string{store.RoleAdmin}}
-	assert.True(t, CanCreateCluster(legacyAdmin))
 	assert.True(t, CanDeleteCluster(legacyAdmin))
 
 	scoped := store.User{
@@ -48,7 +46,6 @@ func TestCanCreateAndDeleteCluster(t *testing.T) {
 			DeleteClusters: false,
 		},
 	}
-	assert.False(t, CanCreateCluster(scoped))
 	assert.False(t, CanDeleteCluster(scoped))
 
 	scopedDelete := store.User{
@@ -58,7 +55,6 @@ func TestCanCreateAndDeleteCluster(t *testing.T) {
 			DeleteClusters: true,
 		},
 	}
-	assert.False(t, CanCreateCluster(scopedDelete))
 	assert.True(t, CanDeleteCluster(scopedDelete))
 }
 
@@ -84,7 +80,8 @@ func TestCanAccessClusterRulesAndGrants(t *testing.T) {
 			Role:         store.GrantAdmin,
 		}},
 	}, clusterID))
-	assert.True(t, CanAccessCluster(store.User{
+	// H1: account/NATS-user scoped grants must not unlock cluster-wide access.
+	assert.False(t, CanAccessCluster(store.User{
 		Roles: []string{store.RoleViewer},
 		Grants: []store.AccessGrant{{
 			ResourceType: store.ResourceAccount,
@@ -92,4 +89,124 @@ func TestCanAccessClusterRulesAndGrants(t *testing.T) {
 			Role:         store.GrantAdmin,
 		}},
 	}, clusterID))
+	assert.False(t, CanAccessCluster(store.User{
+		Roles: []string{store.RoleViewer},
+		Grants: []store.AccessGrant{{
+			ResourceType: store.ResourceNATSUser,
+			ResourceKey:  clusterID + ":Default:user-1",
+			Role:         store.GrantAdmin,
+		}},
+	}, clusterID))
+}
+
+func TestCanAccessClusterOrAccount(t *testing.T) {
+	t.Parallel()
+	clusterID := "550e8400-e29b-41d4-a716-446655440000"
+	otherCluster := "660e8400-e29b-41d4-a716-446655440001"
+
+	// System-level access still satisfies the broader check.
+	assert.True(t, CanAccessClusterOrAccount(store.User{IsRoot: true}, clusterID))
+	assert.True(t, CanAccessClusterOrAccount(store.User{
+		Roles:       []string{store.RoleViewer},
+		AccessRules: &store.AccessRules{ClusterIDs: []string{clusterID}},
+	}, clusterID))
+
+	// Account/NATS-user scoped grants unlock the "any access" check but not CanAccessCluster.
+	accountUser := store.User{
+		Roles: []string{store.RoleViewer},
+		Grants: []store.AccessGrant{{
+			ResourceType: store.ResourceAccount,
+			ResourceKey:  clusterID + ":Default",
+			Role:         store.GrantAdmin,
+		}},
+	}
+	assert.False(t, CanAccessCluster(accountUser, clusterID))
+	assert.True(t, CanAccessClusterOrAccount(accountUser, clusterID))
+	assert.False(t, CanAccessClusterOrAccount(accountUser, otherCluster))
+
+	natsUserGrant := store.User{
+		Grants: []store.AccessGrant{{
+			ResourceType: store.ResourceNATSUser,
+			ResourceKey:  clusterID + ":Default:user-1",
+			Role:         store.GrantObserver,
+		}},
+	}
+	assert.True(t, CanAccessClusterOrAccount(natsUserGrant, clusterID))
+
+	assert.False(t, CanAccessClusterOrAccount(store.User{Roles: []string{store.RoleViewer}}, clusterID))
+}
+
+func TestCanAccessAccount(t *testing.T) {
+	t.Parallel()
+	clusterID := "550e8400-e29b-41d4-a716-446655440000"
+	accountA := "Default"
+	accountB := "Other"
+
+	assert.True(t, CanAccessAccount(store.User{IsRoot: true}, clusterID, accountA))
+	assert.True(t, CanAccessAccount(store.User{
+		Roles:       []string{store.RoleViewer},
+		AccessRules: &store.AccessRules{ClusterIDs: []string{clusterID}},
+	}, clusterID, accountB))
+
+	accountGrant := store.User{
+		Roles: []string{store.RoleViewer},
+		Grants: []store.AccessGrant{{
+			ResourceType: store.ResourceAccount,
+			ResourceKey:  clusterID + ":" + accountA,
+			Role:         store.GrantObserver,
+		}},
+	}
+	assert.True(t, CanAccessAccount(accountGrant, clusterID, accountA))
+	assert.False(t, CanAccessAccount(accountGrant, clusterID, accountB))
+
+	natsUserGrant := store.User{
+		Roles: []string{store.RoleViewer},
+		Grants: []store.AccessGrant{{
+			ResourceType: store.ResourceNATSUser,
+			ResourceKey:  clusterID + ":" + accountA + ":user-1",
+			Role:         store.GrantAdmin,
+		}},
+	}
+	assert.True(t, CanAccessAccount(natsUserGrant, clusterID, accountA))
+	assert.False(t, CanAccessAccount(natsUserGrant, clusterID, accountB))
+}
+
+func TestCanDownloadCredsExactKeys(t *testing.T) {
+	t.Parallel()
+	clusterID := "550e8400-e29b-41d4-a716-446655440000"
+	account := "Default"
+	userA := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	userB := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+
+	assert.True(t, CanDownloadCreds(store.User{IsRoot: true}, clusterID, account, userA))
+
+	accountAdmin := store.User{
+		Grants: []store.AccessGrant{{
+			ResourceType: store.ResourceAccount,
+			ResourceKey:  clusterID + ":" + account,
+			Role:         store.GrantAdmin,
+		}},
+	}
+	assert.True(t, CanDownloadCreds(accountAdmin, clusterID, account, userA))
+	assert.True(t, CanDownloadCreds(accountAdmin, clusterID, account, userB))
+
+	natsUserGrant := store.User{
+		Grants: []store.AccessGrant{{
+			ResourceType: store.ResourceNATSUser,
+			ResourceKey:  clusterID + ":" + account + ":" + userA,
+			Role:         store.GrantAdmin,
+		}},
+	}
+	assert.True(t, CanDownloadCreds(natsUserGrant, clusterID, account, userA))
+	assert.False(t, CanDownloadCreds(natsUserGrant, clusterID, account, userB))
+
+	credDownloader := store.User{
+		Grants: []store.AccessGrant{{
+			ResourceType: store.ResourceNATSUser,
+			ResourceKey:  clusterID + ":" + account + ":" + userA,
+			Role:         store.GrantCredentialDownloader,
+		}},
+	}
+	assert.True(t, CanDownloadCreds(credDownloader, clusterID, account, userA))
+	assert.False(t, CanDownloadCreds(credDownloader, clusterID, account, userB))
 }

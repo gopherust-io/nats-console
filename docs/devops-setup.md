@@ -35,18 +35,18 @@ Before pointing real users at the console:
 
 - [ ] `ENV=production`  
 - [ ] Strong random `ENCRYPTION_KEY` (32+ chars) — encrypts stored NATS tokens/creds  
-- [ ] Strong random `SESSION_SECRET` — signs session cookies  
+- [ ] RSA session key pair (`SESSION_PRIVATE_KEY` / `SESSION_PUBLIC_KEY`, ≥2048-bit) — signs/verifies access JWTs  
+- [ ] `TRUSTED_PROXIES` set correctly if behind a reverse proxy (refresh fingerprint uses client IP)  
 - [ ] `ADMIN_PASSWORD` changed from default  
-- [ ] `AUTH_ENABLED=true`  
 - [ ] HTTPS in front (ingress / load balancer)  
 - [ ] `PUBLIC_BASE_URL` matches your public hostname  
 - [ ] PostgreSQL backups enabled  
 - [ ] Network: console → NATS `:4222` and monitoring `:8222` only from private networks  
-- [ ] Configure OTLP collector (`TEL_ENABLE` / `TEL_COLLECTOR_GRPC_ADDR`) when process metrics are needed
+- [ ] Configure OTLP collector (`TEL_COLLECTOR_GRPC_ADDR`) when process metrics are needed
 - [ ] Keep `PPROF_ENABLED=false` unless admins need runtime profiling
 - [ ] Consider `LOG_LEVEL=warn` and `METRICS_SNAPSHOT_INTERVAL=120s` under load
 
-The server **refuses to start** in production if encryption key, session secret, weak admin password, insecure Postgres (`sslmode=disable`), plaintext NATS (`nats://`), or HTTP monitoring is configured.
+The server **refuses to start** if encryption key, session RSA keys, weak admin password (in production), insecure Postgres (`sslmode=disable`), plaintext NATS (`nats://`), or HTTP monitoring is configured.
 
 Production connection checklist:
 
@@ -72,10 +72,10 @@ console:
     ENV: production
     DATABASE_URL: postgres://user:pass@postgres:5432/natsconsol?sslmode=require
     ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-    SESSION_SECRET: ${SESSION_SECRET}
+    SESSION_PRIVATE_KEY: ${SESSION_PRIVATE_KEY}
+    SESSION_PUBLIC_KEY: ${SESSION_PUBLIC_KEY}
     ADMIN_USERNAME: admin
     ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-    AUTH_ENABLED: "true"
     PUBLIC_BASE_URL: https://nats-consol.example.com
     STATIC_DIR: /app/web
     NATS_URL: tls://nats:4222
@@ -85,36 +85,18 @@ console:
     LOG_JSON: "true"
 ```
 
-Put TLS termination on a reverse proxy (nginx, Caddy, Traefik) in front of `:8080`. For **HTTP/3 (QUIC)**, prefer Caddy and open **UDP 443** to clients.
+Put TLS termination on a reverse proxy (nginx, Caddy, Traefik) or Kubernetes Ingress in front of `:8080`. The console itself serves plain HTTP; TLS and HTTP/2 are a DevOps concern outside the app.
 
-### HTTP/3 with Docker Compose
+Local Compose exposes the console at **http://localhost:8080** (`PUBLIC_BASE_URL` defaults to the same). Set `config.publicBaseUrl` (Helm) or `PUBLIC_BASE_URL` to your public HTTPS URL when a proxy terminates TLS.
 
-```bash
-docker compose --profile http3 up --build
-```
-
-Open **https://localhost** (Caddy terminates TLS + HTTP/3; console stays on internal `:8080`).
-
-Set on the console service when using the profile:
-
-- `PUBLIC_BASE_URL=https://localhost`
-
-Caddy config: [`deploy/caddy/Caddyfile.dev`](deploy/caddy/Caddyfile.dev). Live WebSocket tail uses HTTP/1.1 upgrade through the proxy (Caddy handles `Upgrade` automatically).
-
-### HTTP/3 with Helm
-
-Enable the optional Caddy gateway (LoadBalancer with TCP+UDP 443):
+Enable Ingress in the Helm chart when you want cluster-managed TLS:
 
 ```bash
 helm upgrade --install nats-consol ./deploy/helm/nats-consol \
-  --set http3.enabled=true \
-  --set http3.host=nats-consol.example.com \
-  --set http3.tlsSecretName=nats-consol-tls
+  --set ingress.enabled=true \
+  --set ingress.hosts[0].host=nats-consol.example.com \
+  --set config.publicBaseUrl=https://nats-consol.example.com
 ```
-
-Or use a **Caddy Ingress Controller** and set `ingress.annotations` / `http3.enabled` for `h1,h2,h3` protocols.
-
-**Not migrated to HTTP/3:** NATS JetStream (`4222`), NATS monitoring (`8222`), Postgres — these remain on their native protocols.
 
 ---
 
@@ -125,7 +107,8 @@ helm upgrade --install nats-consol ./deploy/helm/nats-consol \
   --namespace nats-consol --create-namespace \
   --set secrets.databaseUrl='postgres://user:pass@postgres:5432/natsconsol?sslmode=verify-full' \
   --set secrets.encryptionKey='your-long-random-encryption-key' \
-  --set secrets.sessionSecret='your-long-random-session-secret' \
+  --set secrets.sessionPrivateKey="$(cat session.pem)" \
+  --set secrets.sessionPublicKey="$(cat session.pub.pem)" \
   --set secrets.adminPassword='your-strong-admin-password' \
   --set ingress.enabled=true \
   --set ingress.hosts[0].host=nats-consol.example.com \
@@ -151,7 +134,8 @@ Store in Kubernetes Secrets or external secret operator:
 |-----|---------|
 | `databaseUrl` | Postgres DSN |
 | `encryptionKey` | AES-GCM for cluster credentials |
-| `sessionSecret` | JWT session signing |
+| `sessionPrivateKey` | RSA private PEM for RS256 session JWTs |
+| `sessionPublicKey` | Matching RSA public PEM |
 | `adminPassword` | Bootstrap root password (first install only) |
 
 ---
@@ -199,12 +183,11 @@ Full playbook: [Company-wide scaling](./company-scale.md).
 ### Username & password
 
 ```bash
-AUTH_ENABLED=true
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=<strong>
 ```
 
-Bootstrap user is **root** on first start.
+Bootstrap user is **root** on first start. Authentication is always enabled.
 
 ### Invite links
 
@@ -312,7 +295,10 @@ make test-security
 | `ENV` | Must be `production` |
 | `DATABASE_URL` | **Required** — `sslmode=require`, `verify-ca`, or `verify-full` |
 | `ENCRYPTION_KEY` | **Required** — rotate with care (re-encrypt clusters) |
-| `SESSION_SECRET` | **Required** — rotating logs everyone out |
+| `SESSION_PRIVATE_KEY` | **Required** — RSA private PEM (≥2048-bit); rotating logs everyone out |
+| `SESSION_PUBLIC_KEY` | **Required** — matching RSA public PEM |
+| `SESSION_TTL` | Access JWT lifetime (default `15m`) |
+| `REFRESH_TOKEN_TTL` | Refresh cookie lifetime (default `168h`); bound to UA+IP fingerprint — set `TRUSTED_PROXIES` behind proxies |
 | `NATS_URL` | Use `tls://` / `wss://` when seeding a default cluster |
 | `NATS_CREDS_FILE` / `NATS_TOKEN` | Required when `NATS_URL` is set |
 | `NATS_MONITORING_URL` | Use `https://` |
@@ -364,11 +350,18 @@ Background collector stores normalized JetStream/varz samples in PostgreSQL for 
 | `METRICS_SNAPSHOT_ENABLED` | `true` | Enable background collector (also drives alert rule evaluation) |
 | `METRICS_SNAPSHOT_INTERVAL` | `60s` | Scrape interval per cluster (use `120s` in production to halve monitoring + DB load) |
 | `METRICS_SNAPSHOT_RETENTION` | `168h` | Sample TTL (7 days) |
+| `METRICS_SNAPSHOT_BOTTLENECK_RETENTION` | `672h` | Hourly bottleneck rollup TTL (28 days) |
 | `METRICS_SNAPSHOT_CLEANUP_INTERVAL` | `1h` | Purge job frequency |
+| `SLOW_CONSUMER_PENDING_THRESHOLD` | `1000` | Pending msgs ≥ this → count as slow |
+| `SLOW_CONSUMER_LAG_THRESHOLD` | `1000` | Stream lag ≥ this → count as slow |
+| `SLOW_CONSUMER_ACK_PENDING_RATIO` | `0.9` | Ack-pending ≥ ratio × MaxAckPending → count as slow |
+| `BEHAVIOR_FINGERPRINT_KV_BUCKET` | `nats_consol_fingerprints` | KV bucket for worker-reported behavior fingerprints |
 | `SMTP_ENABLED` | `false` | Email console users when an alert first opens |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_FROM` | — / `587` / — | Required when SMTP is enabled |
 
-Rough sizing: ~14 metric keys × 1 sample/min/cluster ≈ 20k rows/cluster/day. With 7-day retention, plan ~140k rows per cluster unless you shorten retention.
+Rough sizing: ~18 metric keys × 1 sample/min/cluster ≈ 26k rows/cluster/day. With 7-day retention, plan ~180k rows per cluster unless you shorten retention.
+
+Alert on aggregates such as `jetstream.slow_consumers` or `jetstream.consumer_max_lag` (see [user-guide.md](user-guide.md#slow-consumers)).
 
 Query history via `GET /api/v1/clusters/{id}/metrics/history?from=&to=&step=`.
 

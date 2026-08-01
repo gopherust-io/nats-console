@@ -1,17 +1,14 @@
 import { STORAGE_KEYS } from "./constants";
+import { safeDecodeURIComponent } from "./safeDecode";
 
 const AUTH_STORAGE_KEY = STORAGE_KEYS.auth;
 const CLUSTER_STORAGE_KEY = STORAGE_KEYS.cluster;
 
-export function getAuthHeader(): string | undefined {
-  const value = localStorage.getItem(AUTH_STORAGE_KEY);
-  return value ?? undefined;
-}
-
-export function setAuth(username: string, password: string) {
-  localStorage.setItem(AUTH_STORAGE_KEY, `Basic ${btoa(`${username}:${password}`)}`);
-}
-
+/**
+ * Auth is session-cookie based (set by the server on login); we never keep
+ * credentials in localStorage. clearAuth() only exists to wipe any legacy
+ * `Basic ...` value left over from older builds.
+ */
 export function clearAuth() {
   localStorage.removeItem(AUTH_STORAGE_KEY);
 }
@@ -31,20 +28,139 @@ export class UnauthorizedError extends Error {
   }
 }
 
-export function getCSRFToken(): string | undefined {
-  const match = document.cookie.match(/(?:^|;\s*)nats_consol_csrf=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : undefined;
+export type ApiErrorCode =
+  | "not_found"
+  | "forbidden"
+  | "unauthorized"
+  | "validation"
+  | "conflict"
+  | "timeout"
+  | "unavailable"
+  | "internal"
+  | "rate_limit"
+  | "csrf_invalid"
+  | "gone"
+  | "network"
+  | "unknown";
+
+export class ApiError extends Error {
+  status: number;
+  code: ApiErrorCode;
+  retryable: boolean;
+  retryAfterSeconds?: number;
+
+  constructor(
+    message: string,
+    options: {
+      status?: number;
+      code?: ApiErrorCode;
+      retryable?: boolean;
+      retryAfterSeconds?: number;
+    } = {},
+  ) {
+    super(message);
+    this.name = "ApiError";
+    this.status = options.status ?? 0;
+    this.code = options.code ?? "unknown";
+    this.retryable = options.retryable ?? false;
+    this.retryAfterSeconds = options.retryAfterSeconds;
+  }
 }
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+export type ApiMeta = { total: number; offset?: number; limit?: number };
+export type ApiResult<T> = { data: T; meta?: ApiMeta };
+
+type ErrorBody = {
+  error?: {
+    message?: string;
+    code?: string;
+    retryable?: boolean;
+    retryAfterSeconds?: number;
+  };
+};
+
+export function codeFromStatus(status: number): ApiErrorCode {
+  if (status === 404) return "not_found";
+  if (status === 403) return "forbidden";
+  if (status === 401) return "unauthorized";
+  if (status === 409) return "conflict";
+  if (status === 410) return "gone";
+  if (status === 408 || status === 504) return "timeout";
+  if (status === 429) return "rate_limit";
+  if (status === 502 || status === 503) return "unavailable";
+  if (status === 400 || status === 422 || (status >= 400 && status < 500)) return "validation";
+  if (status >= 500) return "internal";
+  return "unknown";
+}
+
+function normalizeCode(raw: string | undefined, status: number): ApiErrorCode {
+  const known: ApiErrorCode[] = [
+    "not_found",
+    "forbidden",
+    "unauthorized",
+    "validation",
+    "conflict",
+    "timeout",
+    "unavailable",
+    "internal",
+    "rate_limit",
+    "csrf_invalid",
+    "gone",
+    "network",
+  ];
+  if (raw && (known as string[]).includes(raw)) {
+    return raw as ApiErrorCode;
+  }
+  return codeFromStatus(status);
+}
+
+export function getCSRFToken(): string | undefined {
+  const match = document.cookie.match(/(?:^|;\s*)nats_consol_csrf=([^;]*)/);
+  return match ? safeDecodeURIComponent(match[1]) : undefined;
+}
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function tryRefreshSession(): Promise<boolean> {
+  if (refreshInFlight) {
+    return refreshInFlight;
+  }
+  refreshInFlight = (async () => {
+    try {
+      const headers = new Headers();
+      const csrf = getCSRFToken();
+      if (csrf) {
+        headers.set("X-CSRF-Token", csrf);
+      }
+      const response = await fetch("/api/v1/auth/refresh", {
+        method: "POST",
+        headers,
+        credentials: "include",
+      });
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
+function isAuthBootstrapPath(path: string): boolean {
+  return (
+    path.startsWith("/api/v1/auth/login") ||
+    path.startsWith("/api/v1/auth/logout") ||
+    path.startsWith("/api/v1/auth/refresh") ||
+    path.startsWith("/api/v1/auth/config") ||
+    path.startsWith("/api/v1/auth/invite")
+  );
+}
+
+export async function api<T>(path: string, init: RequestInit = {}): Promise<ApiResult<T>> {
   const headers = new Headers(init.headers);
   if (init.body) {
     headers.set("Content-Type", "application/json");
-  }
-
-  const auth = getAuthHeader();
-  if (auth) {
-    headers.set("Authorization", auth);
   }
 
   const method = (init.method ?? "GET").toUpperCase();
@@ -55,7 +171,40 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
   }
 
-  const response = await fetch(path, { ...init, headers, credentials: "include" });
+  let response: Response;
+  try {
+    response = await fetch(path, { ...init, headers, credentials: "include" });
+  } catch {
+    throw new ApiError("Network request failed. Check your connection and try again.", {
+      status: 0,
+      code: "network",
+    });
+  }
+
+  if (response.status === 401 && !isAuthBootstrapPath(path)) {
+    const refreshed = await tryRefreshSession();
+    if (refreshed) {
+      const retryHeaders = new Headers(init.headers);
+      if (init.body) {
+        retryHeaders.set("Content-Type", "application/json");
+      }
+      if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+        const csrf = getCSRFToken();
+        if (csrf) {
+          retryHeaders.set("X-CSRF-Token", csrf);
+        }
+      }
+      try {
+        response = await fetch(path, { ...init, headers: retryHeaders, credentials: "include" });
+      } catch {
+        throw new ApiError("Network request failed. Check your connection and try again.", {
+          status: 0,
+          code: "network",
+        });
+      }
+    }
+  }
+
   if (response.status === 401) {
     clearAuth();
     if (!window.location.pathname.startsWith("/login")) {
@@ -64,13 +213,46 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new UnauthorizedError();
   }
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.error ?? `Request failed (${response.status})`);
+    const body = (await response.json().catch(() => ({}))) as ErrorBody;
+    const nested = body.error;
+    const retryable =
+      nested?.retryable === true || response.status === 429 || response.status === 502 || response.status === 503 || response.status === 504;
+    throw new ApiError(nested?.message ?? `Request failed (${response.status})`, {
+      status: response.status,
+      code: normalizeCode(nested?.code, response.status),
+      retryable,
+      retryAfterSeconds: nested?.retryAfterSeconds,
+    });
   }
   if (response.status === 204) {
-    return undefined as T;
+    return { data: undefined as T };
   }
-  return response.json() as Promise<T>;
+  const body = (await response.json()) as { data?: T; meta?: ApiMeta };
+  // Monitoring proxy endpoints return raw NATS JSON (no envelope).
+  if (body && typeof body === "object" && "data" in body) {
+    return { data: body.data as T, meta: body.meta };
+  }
+  return { data: body as T };
+}
+
+export function errorMessage(err: unknown, fallback = "Request failed"): string {
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
+type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
+
+/** Map ApiError codes to actionable i18n copy; falls back to the error message. */
+export function userFacingError(err: unknown, t: TranslateFn): string {
+  if (err instanceof ApiError) {
+    const key = `errors.${err.code}`;
+    const translated = t(key);
+    if (translated && translated !== key) {
+      return translated;
+    }
+    if (err.message) return err.message;
+  }
+  return errorMessage(err, t("errors.requestFailed"));
 }
 
 export function clusterPath(clusterId: string, suffix: string): string {
@@ -92,11 +274,6 @@ export type Cluster = {
   isDefault: boolean;
   createdAt: string;
   updatedAt: string;
-};
-
-export type ClusterListResponse = {
-  clusters: Cluster[];
-  total: number;
 };
 
 export type AuditEntry = {
@@ -208,6 +385,55 @@ export type StreamInfo = {
     lastSeq: number;
     consumerCount: number;
   };
+  isDlq?: boolean;
+};
+
+/** Pre-delete impact summary from GET .../streams/{name}/impact */
+export type BlastRadius = {
+  stream: string;
+  services: number;
+  streams: number;
+  consumers: number;
+  critical: string[];
+  serviceNames: string[];
+  relatedStreams: string[];
+  consumerNames: string[];
+};
+
+export type DLQMessage = {
+  seq: number;
+  subject: string;
+  time: string;
+  data: string;
+  headers?: Record<string, string>;
+  reason?: string;
+  originalSubject?: string;
+  sourceStream?: string;
+  sourceSeq?: number;
+  consumer?: string;
+  numDelivered?: number;
+  autopsyError?: string;
+  autopsyHash?: string;
+  autopsyStack?: string;
+};
+
+export type DLQListResult = {
+  messages: DLQMessage[];
+  truncated?: boolean;
+  nextSeq?: number;
+};
+
+export type DLQRetryRequest = {
+  seqs?: number[];
+  all?: boolean;
+  limit?: number;
+};
+
+export type DLQRetryResult = {
+  retried: number;
+  failed?: { seq: number; error: string }[];
+  truncated?: boolean;
+  remaining?: number;
 };
 
 export type ConsumerConfig = {
@@ -259,6 +485,8 @@ export type ConsumerInfo = {
     consumerSeq: number;
     streamSeq: number;
   };
+  slowConsumer?: boolean;
+  slowReasons?: Array<"pending" | "lag" | "ack_pending">;
 };
 
 export type ReplayConsumerRequest = {
@@ -266,6 +494,9 @@ export type ReplayConsumerRequest = {
   from: "seq" | "time" | "beginning" | "new";
   seq?: number;
   time?: string;
+  untilSeq?: number;
+  untilTime?: string;
+  limit?: number;
   replayPolicy?: "instant" | "original";
   filterSubject?: string;
   durable?: string;
@@ -274,6 +505,59 @@ export type ReplayConsumerRequest = {
 export type ReplayConsumerResult = {
   durable: string;
   mode: "reset" | "sidecar";
+  startSeq?: number;
+  untilSeq?: number;
+  limit?: number;
+  startTime?: string;
+  untilTime?: string;
+};
+
+/** Pre-replay impact estimate from POST .../consumers/{c}/replay/dry-run */
+export type ReplayDryRun = {
+  messages: number;
+  estimatedDurationMs: number;
+  consumersAffected: number;
+  potentialDuplicates: string[];
+  unbounded?: boolean;
+  approximate?: boolean;
+};
+
+/** Worker-reported behavior fingerprint from GET .../behavior-fingerprint */
+export type BehaviorFingerprintSnapshot = {
+  msgPerMin: number;
+  processingMs: number;
+};
+
+export type BehaviorFingerprintReport = {
+  available: boolean;
+  stream?: string;
+  durable?: string;
+  anomaly?: boolean;
+  normal?: BehaviorFingerprintSnapshot;
+  current?: BehaviorFingerprintSnapshot;
+  sustainedForMs?: number;
+  updatedAt?: string;
+};
+
+/** Auto-generated incident timeline from GET .../incident-reconstruction */
+export type IncidentTimelineEvent = {
+  at: string;
+  category: string;
+  label: string;
+  source: string;
+  evidence?: string;
+};
+
+export type IncidentReconstruction = {
+  clusterId: string;
+  stream: string;
+  consumer: string;
+  from: string;
+  to: string;
+  events: IncidentTimelineEvent[];
+  eventCount: number;
+  usedDeployAnnotations?: boolean;
+  usedAuditFallback?: boolean;
 };
 
 export type RawMessage = {
@@ -348,7 +632,9 @@ export type ObjectInfo = {
 
 export function decodeBase64(data: string): string {
   try {
-    return atob(data);
+    const binary = atob(data);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
   } catch {
     return data;
   }
@@ -362,6 +648,13 @@ export function tryParseJSON(data: string): { parsed: unknown; isJSON: boolean }
   }
 }
 
+/** Pretty-print JSON payloads; leave non-JSON text unchanged. */
+export function formatMessagePayload(decoded: string): string {
+  const { parsed, isJSON } = tryParseJSON(decoded);
+  if (!isJSON) return decoded;
+  return JSON.stringify(parsed, null, 2);
+}
+
 export function getWebSocketURL(clusterId: string, stream: string, subject?: string, fromSeq?: number): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   const params = new URLSearchParams({ stream });
@@ -369,4 +662,19 @@ export function getWebSocketURL(clusterId: string, stream: string, subject?: str
   if (fromSeq) params.set("fromSeq", String(fromSeq));
   // Auth uses the session cookie (credentials included by the browser); never put Basic in the query string.
   return `${proto}//${window.location.host}/api/v1/clusters/${encodeURIComponent(clusterId)}/live/ws?${params}`;
+}
+
+/** Same-origin SSE URL; session cookie is sent automatically by EventSource. */
+export function getSnapshotEventsURL(clusterId: string): string {
+  return `/api/v1/clusters/${encodeURIComponent(clusterId)}/snapshots/events`;
+}
+
+/** Demand-driven connz SSE; session cookie is sent automatically by EventSource. */
+export function getConnzEventsURL(clusterId: string): string {
+  return `/api/v1/clusters/${encodeURIComponent(clusterId)}/monitoring/connz/events`;
+}
+
+/** Demand-driven replicas SSE; session cookie is sent automatically by EventSource. */
+export function getReplicasEventsURL(clusterId: string): string {
+  return `/api/v1/clusters/${encodeURIComponent(clusterId)}/replicas/events`;
 }

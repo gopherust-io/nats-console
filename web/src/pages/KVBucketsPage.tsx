@@ -1,42 +1,43 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import CreateKVBucketPanel, { KVBucketConfigPayload } from "../components/CreateKVBucketPanel";
+import Alert from "../components/ui/Alert";
+import QueryErrorState from "../components/ui/QueryErrorState";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { api, clusterPath, jetStreamUIBase, KVBucketInfo } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
-
-type BucketListResponse = {
-  buckets: KVBucketInfo[];
-  total: number;
-};
+import { HUB_LIST_POLL_MS } from "../lib/constants";
+import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
 
 export default function KVBucketsPage() {
   const { t } = useTranslation();
-  const { accountName } = useParams();
-  const { clusterId } = useCluster();
+  const { askConfirm, confirmDialog } = useConfirmDialog();
+  const { accountName, clusterId: routeCluster } = useParams();
+  const { clusterId: contextClusterId } = useCluster();
+  const clusterId = routeCluster ?? contextClusterId;
   const { canManageJetStream } = useAuth();
+  const queryClient = useQueryClient();
   const jsBase = clusterId ? jetStreamUIBase(clusterId, accountName) : "";
-  const [buckets, setBuckets] = useState<KVBucketInfo[]>([]);
-  const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelError, setPanelError] = useState("");
   const [panelBusy, setPanelBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    if (!clusterId) return;
-    try {
-      const data = await api<BucketListResponse>(clusterPath(clusterId, "/kv/buckets"));
-      setBuckets(data.buckets ?? []);
-      setError("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load KV buckets");
-    }
-  }, [clusterId]);
+  const bucketsQuery = useQuery({
+    queryKey: clusterQueryKey(clusterId, "kv"),
+    queryFn: async () => (await api<KVBucketInfo[]>(clusterPath(clusterId!, "/kv/buckets"))).data ?? [],
+    enabled: Boolean(clusterId),
+    refetchInterval: visibilityAwareInterval(HUB_LIST_POLL_MS),
+  });
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const buckets = bucketsQuery.data ?? [];
+
+  async function invalidateBuckets() {
+    await queryClient.invalidateQueries({ queryKey: clusterQueryKey(clusterId, "kv") });
+  }
 
   async function onCreate(body: KVBucketConfigPayload) {
     if (!clusterId) return;
@@ -48,7 +49,8 @@ export default function KVBucketsPage() {
         body: JSON.stringify(body),
       });
       setPanelOpen(false);
-      await load();
+      setActionError("");
+      await invalidateBuckets();
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Failed to create bucket");
       throw err;
@@ -57,18 +59,26 @@ export default function KVBucketsPage() {
     }
   }
 
-  async function deleteBucket(name: string) {
-    if (!clusterId || !confirm(`Delete KV bucket "${name}"?`)) return;
-    try {
-      await api(clusterPath(clusterId, `/kv/buckets/${encodeURIComponent(name)}`), { method: "DELETE" });
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete bucket");
-    }
+  function deleteBucket(name: string) {
+    if (!clusterId) return;
+    askConfirm({
+      title: t("kv.confirmDeleteTitle"),
+      description: t("kv.confirmDelete", { name }),
+      action: async () => {
+        try {
+          await api(clusterPath(clusterId, `/kv/buckets/${encodeURIComponent(name)}`), { method: "DELETE" });
+          setActionError("");
+          await invalidateBuckets();
+        } catch (err) {
+          setActionError(err instanceof Error ? err.message : "Failed to delete bucket");
+        }
+      },
+    });
   }
 
   return (
     <div>
+      {confirmDialog}
       <div className="page-header">
         <h1>KV Stores</h1>
         {canManageJetStream && (
@@ -85,7 +95,10 @@ export default function KVBucketsPage() {
         )}
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {actionError && <Alert variant="error">{actionError}</Alert>}
+      {bucketsQuery.isError && (
+        <QueryErrorState error={bucketsQuery.error} onRetry={() => void bucketsQuery.refetch()} />
+      )}
 
       <CreateKVBucketPanel
         mode="create"
@@ -119,7 +132,7 @@ export default function KVBucketsPage() {
                 <td>{b.history}</td>
                 <td>
                   {canManageJetStream && (
-                    <button className="btn danger" type="button" onClick={() => deleteBucket(b.bucket)}>
+                    <button className="btn danger btn--small" type="button" onClick={() => deleteBucket(b.bucket)}>
                       Delete
                     </button>
                   )}

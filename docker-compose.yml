@@ -34,7 +34,7 @@ services:
     expose:
       - "8080"
     ports:
-      - "8080:8080"
+      - "${CONSOLE_PORT:-8080}:8080"
     env_file:
       - path: .env
         required: true
@@ -47,9 +47,9 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
-      AUTH_ENABLED: ${AUTH_ENABLED:-true}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env}
-      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      SESSION_PRIVATE_KEY: ${SESSION_PRIVATE_KEY:?set SESSION_PRIVATE_KEY in .env}
+      SESSION_PUBLIC_KEY: ${SESSION_PUBLIC_KEY:?set SESSION_PUBLIC_KEY in .env}
       ENV: ${ENV:-development}
       AI_ENABLED: ${AI_ENABLED:-false}
       AI_API_KEY: ${AI_API_KEY:-}
@@ -83,25 +83,6 @@ services:
       - "1025:1025"
       - "8025:8025"
 
-  caddy:
-    profiles: ["http3"]
-    image: caddy:2.9-alpine
-    ports:
-      - "443:443/tcp"
-      - "443:443/udp"
-    environment:
-      HTTP3_HOST: localhost
-      HTTP3_UPSTREAM: console:8080
-      HTTP3_TLS_MODE: internal
-    volumes:
-      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      - console
-
 volumes:
   nats-data:
   postgres-data:
-  caddy-data:
-  caddy-config:

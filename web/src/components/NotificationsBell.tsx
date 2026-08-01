@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAlertOpenSummary } from "../lib/alerts";
+import { ALERTS_POLL_MS } from "../lib/constants";
 import { visibilityAwareInterval } from "../lib/query";
 
 function formatWhen(iso: string) {
@@ -27,7 +28,7 @@ export default function NotificationsBell() {
   const summaryQuery = useQuery({
     queryKey: ["alerts", "open-summary"],
     queryFn: fetchAlertOpenSummary,
-    refetchInterval: visibilityAwareInterval(20_000),
+    refetchInterval: visibilityAwareInterval(ALERTS_POLL_MS),
   });
 
   const clearCloseTimer = useCallback(() => {

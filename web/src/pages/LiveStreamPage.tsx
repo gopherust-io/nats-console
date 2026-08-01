@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
+import MessageDownloadMenu from "../components/MessageDownloadMenu";
 import MessagePayloadViewer from "../components/MessagePayloadViewer";
 import Alert from "../components/ui/Alert";
 import PageHeader from "../components/ui/PageHeader";
@@ -9,6 +10,7 @@ import { getWebSocketURL, jetStreamUIBase } from "../lib/api";
 import { useCluster } from "../lib/cluster";
 import { formatDateTime } from "../lib/datetime";
 import { LIVE_STREAM_MAX_MESSAGES, LIVE_SUBJECT_FILTER_DEBOUNCE_MS } from "../lib/constants";
+import { rowFromMessage } from "../lib/messageDownload";
 
 type LiveMessage = {
   type: string;
@@ -16,6 +18,7 @@ type LiveMessage = {
   subject?: string;
   time?: string;
   data?: string;
+  headers?: Record<string, string>;
   error?: string;
 };
 
@@ -26,13 +29,7 @@ const WS_BATCH_MS = 100;
 const ESTIMATED_ROW_HEIGHT = 140;
 const FOLLOW_BOTTOM_PX = 80;
 
-const LiveMessageRow = memo(function LiveMessageRow({
-  msg,
-  rawMode,
-}: {
-  msg: LiveMessage;
-  rawMode: boolean;
-}) {
+const LiveMessageRow = memo(function LiveMessageRow({ msg }: { msg: LiveMessage }) {
   const timeLabel = formatDateTime(msg.time, "—");
 
   return (
@@ -51,7 +48,13 @@ const LiveMessageRow = memo(function LiveMessageRow({
         )}
       </div>
       {msg.data && (
-        <MessagePayloadViewer data={msg.data} rawMode={rawMode} compact showHeaders={false} />
+        <MessagePayloadViewer
+          data={msg.data}
+          headers={msg.headers}
+          compact
+          showHeaders={false}
+          cacheHost={msg}
+        />
       )}
     </div>
   );
@@ -73,7 +76,6 @@ export default function LiveStreamPage() {
   const [fromSeqInput, setFromSeqInput] = useState("");
   const [fromSeq, setFromSeq] = useState<number | undefined>(undefined);
   const [paused, setPaused] = useState(false);
-  const [rawMode, setRawMode] = useState(false);
   const [follow, setFollow] = useState(true);
   const [showJump, setShowJump] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -137,10 +139,22 @@ export default function LiveStreamPage() {
       flushTimerRef.current = null;
     }
 
-    ws.onopen = () => setStatus("connected");
-    ws.onclose = () => setStatus("disconnected");
-    ws.onerror = () => setStatus("error");
+    const isActive = () => wsRef.current === ws;
+
+    ws.onopen = () => {
+      if (!isActive()) return;
+      setStatus("connected");
+    };
+    ws.onclose = () => {
+      if (!isActive()) return;
+      setStatus("disconnected");
+    };
+    ws.onerror = () => {
+      if (!isActive()) return;
+      setStatus("error");
+    };
     ws.onmessage = (event) => {
+      if (!isActive()) return;
       let frame: LiveMessage;
       try {
         frame = JSON.parse(event.data) as LiveMessage;
@@ -168,6 +182,9 @@ export default function LiveStreamPage() {
       if (flushTimerRef.current !== null) {
         window.clearTimeout(flushTimerRef.current);
         flushTimerRef.current = null;
+      }
+      if (wsRef.current === ws) {
+        wsRef.current = null;
       }
       ws.close();
     };
@@ -227,6 +244,23 @@ export default function LiveStreamPage() {
       setShowJump(false);
     }
   }
+
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  const getDownloadRows = useCallback(() => {
+    return messagesRef.current
+      .filter((msg) => msg.type === "message" || msg.data)
+      .map((msg) =>
+        rowFromMessage({
+          seq: msg.seq ?? 0,
+          subject: msg.subject ?? "",
+          time: msg.time ?? "",
+          data: msg.data,
+          headers: msg.headers,
+        }),
+      );
+  }, []);
 
   const statusLabel =
     status === "connected"
@@ -289,14 +323,12 @@ export default function LiveStreamPage() {
         <button type="button" className="btn secondary" onClick={() => sendAction("clear")}>
           {t("liveStream.clear")}
         </button>
-        <button
-          type="button"
-          className="btn secondary"
-          aria-pressed={rawMode}
-          onClick={() => setRawMode((v) => !v)}
-        >
-          {rawMode ? t("liveStream.json") : t("liveStream.raw")}
-        </button>
+        <MessageDownloadMenu
+          mode="live"
+          stream={name}
+          getRows={getDownloadRows}
+          disabled={messages.length === 0}
+        />
         <button
           type="button"
           className="btn secondary"
@@ -343,7 +375,7 @@ export default function LiveStreamPage() {
                     transform: `translateY(${item.start}px)`,
                   }}
                 >
-                  <LiveMessageRow msg={msg} rawMode={rawMode} />
+                  <LiveMessageRow msg={msg} />
                 </div>
               );
             })}

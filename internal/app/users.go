@@ -48,13 +48,18 @@ func (s *UserService) Create(ctx context.Context, actor domain.User, in domain.U
 	if in.IsRoot {
 		return domain.User{}, domain.ErrForbidden
 	}
-	if err := validateUserInput(in.Roles, in.AccessRules); err != nil {
+	if err := validateRoles(in.Roles); err != nil {
+		return domain.User{}, err
+	}
+	if in.AccessRules == nil {
+		// Only root may mint legacy full admins (admin + nil accessRules).
+		if !perms.IsRoot || !domain.HasRole(in.Roles, domain.RoleAdmin) {
+			return domain.User{}, errors.New("accessRules required")
+		}
+	} else if err := domain.ValidateAccessRules(in.AccessRules); err != nil {
 		return domain.User{}, err
 	}
 	if !perms.IsRoot {
-		if domain.HasRole(in.Roles, domain.RoleAdmin) && in.AccessRules == nil {
-			return domain.User{}, domain.ErrCannotEscalate
-		}
 		if !perms.AllowsRoles(in.Roles) {
 			return domain.User{}, domain.ErrCannotEscalate
 		}
@@ -75,7 +80,7 @@ func (s *UserService) Update(ctx context.Context, actor domain.User, userID stri
 	}
 	perms := domain.PermissionsFor(actor)
 	if in.SetRoles {
-		if err := validateUserInput(in.Roles, nil); err != nil {
+		if err := validateRoles(in.Roles); err != nil {
 			return domain.User{}, err
 		}
 		if !perms.AllowsRoles(in.Roles) {
@@ -83,11 +88,18 @@ func (s *UserService) Update(ctx context.Context, actor domain.User, userID stri
 		}
 	}
 	if in.SetRules {
-		if err := domain.ValidateAccessRules(in.AccessRules); err != nil {
-			return domain.User{}, err
-		}
-		if !perms.CanAssignAccessRules(in.AccessRules) {
-			return domain.User{}, domain.ErrCannotEscalate
+		if in.AccessRules == nil {
+			// Clearing rules creates a legacy full admin; non-root must never do this.
+			if !perms.IsRoot {
+				return domain.User{}, domain.ErrCannotEscalate
+			}
+		} else {
+			if err := domain.ValidateAccessRules(in.AccessRules); err != nil {
+				return domain.User{}, err
+			}
+			if !perms.CanAssignAccessRules(in.AccessRules) {
+				return domain.User{}, domain.ErrCannotEscalate
+			}
 		}
 	}
 	return s.users.UpdateUser(ctx, userID, in)
@@ -134,7 +146,7 @@ func (s *UserService) authorizeUserMutation(actor, target domain.User) error {
 	return nil
 }
 
-func validateUserInput(roles []string, rules *domain.AccessRules) error {
+func validateRoles(roles []string) error {
 	if len(roles) == 0 {
 		return errors.New("roles required")
 	}
@@ -145,11 +157,5 @@ func validateUserInput(roles []string, rules *domain.AccessRules) error {
 			return errors.New("invalid role: " + role)
 		}
 	}
-	if domain.HasRole(roles, domain.RoleAdmin) && rules == nil {
-		return domain.ValidateAccessRules(rules)
-	}
-	if rules == nil {
-		return errors.New("accessRules required")
-	}
-	return domain.ValidateAccessRules(rules)
+	return nil
 }

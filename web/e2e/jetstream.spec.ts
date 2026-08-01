@@ -159,15 +159,23 @@ test.describe("jetstream", () => {
     });
 
     await page.goto(`${jetstream}/streams/ORDERS`);
-    page.once("dialog", (dialog) => {
-      void dialog.accept();
-    });
     await page.getByRole("button", { name: "Purge Stream" }).click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    await page.getByRole("button", { name: "Purge" }).click();
     await expect.poll(() => purged).toBe(true);
   });
 
   test("consumer detail loads and delete", async ({ page }) => {
-    const stream = sampleStream("ORDERS");
+    const stream = {
+      ...sampleStream("ORDERS"),
+      state: {
+        messages: 100,
+        bytes: 1024,
+        firstSeq: 1,
+        lastSeq: 100,
+        consumerCount: 1,
+      },
+    };
     const consumer = sampleConsumer("worker");
     await mockJson(page, "**/api/v1/clusters/*/streams/ORDERS", stream);
     await mockJson(page, "**/api/v1/clusters/*/streams/ORDERS/consumers/worker", consumer);
@@ -188,11 +196,15 @@ test.describe("jetstream", () => {
 
     await page.goto(`${jetstream}/streams/ORDERS/consumers/worker`);
     await expect(page.getByRole("heading", { name: "worker" })).toBeVisible();
+    await expect(page.getByText("Lag", { exact: true })).toBeVisible();
+    await expect(page.getByText("Pending", { exact: true })).toBeVisible();
+    await expect(page.getByText("Waiting", { exact: true })).toBeVisible();
+    await expect(page.getByText("Redelivered", { exact: true })).toBeVisible();
+    await expect(page.getByText("Ack Wait", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Delete Consumer" })).toBeVisible();
-    page.once("dialog", (dialog) => {
-      void dialog.accept();
-    });
     await page.getByRole("button", { name: "Delete Consumer" }).click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Delete" }).click();
     await expect.poll(() => deleted).toBe(true);
   });
 

@@ -5,6 +5,7 @@ import {
   recommendFiltersLabel,
   recommendedConsumerFromStream,
 } from "../lib/consumerRecommend";
+import { SegBtn } from "./Seg";
 import FieldHint from "./ui/FieldHint";
 import PanelError from "./ui/PanelError";
 
@@ -426,7 +427,7 @@ export default function CreateConsumerPanel({
     try {
       await onSubmit(body);
     } catch {
-      // Parent surfaces API error.
+      // onSubmit surfaces errors to the panel
     }
   }
 
@@ -523,17 +524,26 @@ export default function CreateConsumerPanel({
               <FieldHint>{t("consumerConfig.descriptionHint")}</FieldHint>
             </div>
             <div className="nc-form-row">
-              <label htmlFor="cons-cfg-replicas">{t("consumerConfig.replicas")}</label>
-              <select
-                id="cons-cfg-replicas"
-                value={replicas}
-                onChange={(e) => setReplicas(Number(e.target.value) || 0)}
-              >
-                <option value={0}>{t("consumerConfig.replicasInherit")}</option>
-                <option value={1}>1</option>
-                <option value={3}>3</option>
-                <option value={5}>5</option>
-              </select>
+              <label id="cons-cfg-replicas-label">{t("consumerConfig.replicas")}</label>
+              <div className="seg" role="group" aria-labelledby="cons-cfg-replicas-label">
+                {(
+                  [
+                    [0, t("consumerConfig.replicasInherit"), "Use the stream’s replica count."],
+                    [1, "1", "Single replica — fine for development, not HA."],
+                    [3, "3", "Three replicas — typical production quorum."],
+                    [5, "5", "Five replicas — higher durability at more cost."],
+                  ] as const
+                ).map(([value, label, hint]) => (
+                  <SegBtn
+                    key={value}
+                    aria-pressed={replicas === value}
+                    hint={hint}
+                    onClick={() => setReplicas(value)}
+                  >
+                    {label}
+                  </SegBtn>
+                ))}
+              </div>
               <FieldHint>{t("consumerConfig.replicasHint")}</FieldHint>
             </div>
             <div className="stream-config-limit">
@@ -553,19 +563,28 @@ export default function CreateConsumerPanel({
             <h3>{t("consumerConfig.delivery")}</h3>
             <p>{t("consumerConfig.deliveryLead")}</p>
             <div className="nc-form-row">
-              <label htmlFor="cons-cfg-deliver">{t("consumerConfig.deliverPolicy")}</label>
-              <select
-                id="cons-cfg-deliver"
-                value={deliverPolicy}
-                onChange={(e) => setDeliverPolicy(e.target.value)}
-              >
-                <option value="all">all</option>
-                <option value="last">last</option>
-                <option value="new">new</option>
-                <option value="by_start_sequence">by_start_sequence</option>
-                <option value="by_start_time">by_start_time</option>
-                <option value="last_per_subject">last_per_subject</option>
-              </select>
+              <label id="cons-cfg-deliver-label">{t("consumerConfig.deliverPolicy")}</label>
+              <div className="seg" role="group" aria-labelledby="cons-cfg-deliver-label">
+                {(
+                  [
+                    ["all", "all", "Deliver every retained message from the beginning of the stream."],
+                    ["last", "last", "Start with the last message in the stream, then new ones."],
+                    ["new", "new", "Only messages published after this consumer is created."],
+                    ["by_start_sequence", "by start seq", "Start at a specific stream sequence number."],
+                    ["by_start_time", "by start time", "Start at the first message at or after a timestamp."],
+                    ["last_per_subject", "last per subject", "For each subject, start from its last message."],
+                  ] as const
+                ).map(([value, label, hint]) => (
+                  <SegBtn
+                    key={value}
+                    aria-pressed={deliverPolicy === value}
+                    hint={hint}
+                    onClick={() => setDeliverPolicy(value)}
+                  >
+                    {label}
+                  </SegBtn>
+                ))}
+              </div>
               <FieldHint>{t("consumerConfig.deliverPolicyHint")}</FieldHint>
             </div>
             {deliverPolicy === "by_start_sequence" && (
@@ -594,24 +613,45 @@ export default function CreateConsumerPanel({
               </div>
             )}
             <div className="nc-form-row">
-              <label htmlFor="cons-cfg-ack">{t("consumerConfig.ackPolicy")}</label>
-              <select id="cons-cfg-ack" value={ackPolicy} onChange={(e) => setAckPolicy(e.target.value)}>
-                <option value="explicit">explicit</option>
-                <option value="none">none</option>
-                <option value="all">all</option>
-              </select>
+              <label id="cons-cfg-ack-label">{t("consumerConfig.ackPolicy")}</label>
+              <div className="seg" role="group" aria-labelledby="cons-cfg-ack-label">
+                {(
+                  [
+                    ["explicit", "explicit", "Each message must be acked individually (recommended)."],
+                    ["none", "none", "No acks — fire-and-forget delivery."],
+                    ["all", "all", "Acking one message acks all earlier pending messages."],
+                  ] as const
+                ).map(([value, label, hint]) => (
+                  <SegBtn
+                    key={value}
+                    aria-pressed={ackPolicy === value}
+                    hint={hint}
+                    onClick={() => setAckPolicy(value)}
+                  >
+                    {label}
+                  </SegBtn>
+                ))}
+              </div>
               <FieldHint>{t("consumerConfig.ackPolicyHint")}</FieldHint>
             </div>
             <div className="nc-form-row">
-              <label htmlFor="cons-cfg-replay">{t("consumerConfig.replayPolicy")}</label>
-              <select
-                id="cons-cfg-replay"
-                value={replayPolicy}
-                onChange={(e) => setReplayPolicy(e.target.value)}
-              >
-                <option value="instant">instant</option>
-                <option value="original">original</option>
-              </select>
+              <label id="cons-cfg-replay-label">{t("consumerConfig.replayPolicy")}</label>
+              <div className="seg" role="group" aria-labelledby="cons-cfg-replay-label">
+                <SegBtn
+                  aria-pressed={replayPolicy === "instant"}
+                  hint="Deliver historical messages as fast as the client can consume them."
+                  onClick={() => setReplayPolicy("instant")}
+                >
+                  instant
+                </SegBtn>
+                <SegBtn
+                  aria-pressed={replayPolicy === "original"}
+                  hint="Pace delivery using the original publish timestamps between messages."
+                  onClick={() => setReplayPolicy("original")}
+                >
+                  original
+                </SegBtn>
+              </div>
               <FieldHint>{t("consumerConfig.replayPolicyHint")}</FieldHint>
             </div>
             <div className="stream-config-limit">

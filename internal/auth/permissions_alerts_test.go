@@ -13,7 +13,7 @@ func TestCanManageAlertRules(t *testing.T) {
 	assert.True(t, CanManageAlertRules(store.User{Roles: []string{store.RoleAdmin}}))
 	assert.False(t, CanManageAlertRules(store.User{Roles: []string{store.RoleViewer}}))
 	assert.True(t, CanManageAlertRules(store.User{
-		Roles: []string{store.RoleOperator},
+		Roles:       []string{store.RoleOperator},
 		AccessRules: &store.AccessRules{ManageUsers: true},
 	}))
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/gopherust-io/nats-consol/internal/crypto"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 type EncryptionRotationStats struct {
@@ -28,7 +29,7 @@ func (s *Store) RotateEncryptionKeys(ctx context.Context, currentKey, newKey str
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	clusterRows, err := tx.Query(ctx, `SELECT id, token FROM clusters WHERE token <> ''`)
+	clusterRows, err := tx.Query(ctx, queryListClusterTokens)
 	if err != nil {
 		return stats, err
 	}
@@ -48,7 +49,7 @@ func (s *Store) RotateEncryptionKeys(ctx context.Context, currentKey, newKey str
 		}
 		stats.ClustersUpdated++
 		if !dryRun {
-			if _, err := tx.Exec(ctx, `UPDATE clusters SET token = $2, updated_at = NOW() WHERE id = $1`, id, encrypted); err != nil {
+			if _, err := tx.Exec(ctx, queryUpdateClusterToken, id, encrypted); err != nil {
 				return stats, err
 			}
 		}
@@ -67,7 +68,7 @@ func (s *Store) RotateEncryptionKeys(ctx context.Context, currentKey, newKey str
 }
 
 func decryptWithFallback(value string, oldEnc, active *crypto.Encryptor) (string, error) {
-	if value == "" {
+	if strings.IsEmpty(value) {
 		return "", nil
 	}
 	if !crypto.IsEncrypted(value) {

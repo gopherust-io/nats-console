@@ -12,6 +12,7 @@ import (
 
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
 	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 const (
@@ -116,7 +117,7 @@ func (b *ContextBuilder) evictOldestLocked() {
 			first = false
 		}
 	}
-	if oldestKey != "" {
+	if !strings.IsEmpty(oldestKey) {
 		delete(b.cache, oldestKey)
 	}
 }
@@ -175,7 +176,7 @@ func (b *ContextBuilder) buildFresh(ctx context.Context, clusterID string, page 
 		}
 	}
 
-	if page.Stream != "" {
+	if !strings.IsEmpty(page.Stream) {
 		if info, err := client.StreamInfo(ctx, page.Stream); err == nil {
 			out["current_stream"] = streamSummary(info)
 			consumers, total, err := client.ListConsumers(ctx, page.Stream, 0, 20)
@@ -192,7 +193,7 @@ func (b *ContextBuilder) buildFresh(ctx context.Context, clusterID string, page 
 		}
 	}
 
-	if page.Stream != "" && page.Consumer != "" {
+	if !strings.IsEmpty(page.Stream) && !strings.IsEmpty(page.Consumer) {
 		if cInfo, err := client.ConsumerInfo(ctx, page.Stream, page.Consumer); err == nil {
 			out["current_consumer"] = consumerSummary(cInfo)
 		}
@@ -244,7 +245,7 @@ func compactJSON(raw []byte, maxLen int) any {
 	}
 	var v any
 	if err := sonic.Unmarshal(raw, &v); err != nil {
-		s := redactString(string(raw))
+		s := redactString(strings.BytesToString(raw))
 		if len(s) > maxLen {
 			return s[:maxLen] + "…"
 		}
@@ -255,7 +256,7 @@ func compactJSON(raw []byte, maxLen int) any {
 	if err != nil || len(encoded) <= maxLen {
 		return safe
 	}
-	return map[string]any{"truncated": true, "preview": string(encoded[:maxLen]) + "…"}
+	return map[string]any{"truncated": true, "preview": strings.BytesToString(encoded[:maxLen]) + "…"}
 }
 
 func FormatContextBlock(ctx map[string]any) (string, error) {

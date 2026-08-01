@@ -3,6 +3,8 @@ package natsclient
 import (
 	"testing"
 	"time"
+
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 func TestViewCacheGetOrLoadCoalesces(t *testing.T) {
@@ -10,7 +12,7 @@ func TestViewCacheGetOrLoadCoalesces(t *testing.T) {
 	calls := 0
 	load := func() (any, error) {
 		calls++
-		return []byte("ok"), nil
+		return commonstrings.StringToBytes("ok"), nil
 	}
 	v1, etag1, err := c.GetOrLoad("k", load)
 	if err != nil {
@@ -23,10 +25,10 @@ func TestViewCacheGetOrLoadCoalesces(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("calls = %d, want 1", calls)
 	}
-	if string(v1.([]byte)) != "ok" || string(v2.([]byte)) != "ok" {
+	if commonstrings.BytesToString(v1.([]byte)) != "ok" || commonstrings.BytesToString(v2.([]byte)) != "ok" {
 		t.Fatalf("unexpected values")
 	}
-	if etag1 == "" || etag1 != etag2 {
+	if commonstrings.IsEmpty(etag1) || etag1 != etag2 {
 		t.Fatalf("etag mismatch %q %q", etag1, etag2)
 	}
 	c.InvalidateCluster("cluster")

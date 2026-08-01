@@ -5,6 +5,7 @@
   --bg-sidebar: #ffffff;
   --bg-card: #ffffff;
   --bg-input: #f4f4f5;
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' viewBox='0 0 12 12'%3E%3Cpath stroke='%2371717a' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
   --bg-table-hover: rgba(16, 185, 129, 0.06);
   --bg-nav-active: rgba(16, 185, 129, 0.12);
   --bg-badge: rgba(16, 185, 129, 0.1);
@@ -82,12 +83,14 @@
     opacity var(--nc-duration, 150ms) var(--nc-ease, cubic-bezier(0.4, 0, 0.2, 1));
 }
 
+[data-theme="control-light"] .btn--secondary,
 [data-theme="control-light"] .btn.secondary {
   background: transparent;
   border: 1px solid var(--border);
   box-shadow: none;
 }
 
+[data-theme="control-light"] .btn--secondary:hover:not(:disabled),
 [data-theme="control-light"] .btn.secondary:hover:not(:disabled) {
   background: var(--btn-secondary-bg-hover);
   border-color: var(--btn-secondary-border-hover);

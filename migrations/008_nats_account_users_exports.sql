@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- NATS account users (client credentials metadata) and sharing exports.
 
 CREATE TABLE IF NOT EXISTS nats_account_users (
@@ -32,3 +34,9 @@ CREATE TABLE IF NOT EXISTS nats_account_exports (
 
 CREATE INDEX IF NOT EXISTS idx_nats_account_exports_cluster
     ON nats_account_exports (cluster_id, account_name);
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+SELECT 1;
+-- +goose StatementEnd

@@ -33,6 +33,7 @@ func TestStreamInfoFromNATSUsesCamelCaseFields(t *testing.T) {
 		},
 	})
 	assert.Equal(t, "ORDERS", info.Config.Name)
+	assert.False(t, info.IsDLQ)
 	assert.Equal(t, "orders", info.Config.Description)
 	assert.Equal(t, "limits", info.Config.Retention)
 	assert.Equal(t, "new", info.Config.Discard)
@@ -86,4 +87,21 @@ func TestAccountInfoFromNATSUsesCamelCaseFields(t *testing.T) {
 	assert.Equal(t, uint64(1024), info.Memory)
 	assert.Equal(t, int64(4096), info.Limits.MaxMemory)
 	assert.Equal(t, 10, info.Limits.MaxStreams)
+}
+
+func TestStreamInfoFromNATSMarksDLQ(t *testing.T) {
+	byName := StreamInfoFromNATS(&nats.StreamInfo{
+		Config: nats.StreamConfig{Name: "ORDERS_DLQ", Retention: nats.LimitsPolicy, Storage: nats.FileStorage},
+	})
+	assert.True(t, byName.IsDLQ)
+
+	byMeta := StreamInfoFromNATS(&nats.StreamInfo{
+		Config: nats.StreamConfig{
+			Name:     "POISON",
+			Metadata: map[string]string{MetadataRoleKey: MetadataRoleDLQ},
+			Retention: nats.LimitsPolicy,
+			Storage:   nats.FileStorage,
+		},
+	})
+	assert.True(t, byMeta.IsDLQ)
 }

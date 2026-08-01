@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 
 	natsadapter "github.com/gopherust-io/nats-consol/internal/adapter/nats"
 	"github.com/gopherust-io/nats-consol/internal/adapter/postgres"
@@ -13,6 +14,7 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/crypto"
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
 	"github.com/gopherust-io/nats-consol/internal/port"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 type Application struct {
@@ -26,10 +28,26 @@ type Application struct {
 	Config      config.Config
 }
 
-func New(ctx context.Context, cfg config.Config, encryptor *crypto.Encryptor) (*Application, error) {
+func New(ctx context.Context, cfg config.Config) (*Application, error) {
+	if strings.IsEmpty(cfg.EncryptionKey) {
+		return nil, errors.New("EncryptionKey required")
+	}
+
+	encryptor, err := crypto.New(cfg.EncryptionKey)
+	if err != nil {
+		return nil, err
+	}
+
 	uow, err := postgres.OpenWithConfig(ctx, cfg, encryptor)
 	if err != nil {
 		return nil, err
+	}
+
+	if cfg.TLSEnabled() {
+		if err := natsclient.ValidateEnvConfig(cfg); err != nil {
+			uow.Close()
+			return nil, err
+		}
 	}
 
 	authSvc, err := auth.NewService(cfg, uow.Raw())
@@ -45,7 +63,8 @@ func New(ctx context.Context, cfg config.Config, encryptor *crypto.Encryptor) (*
 	manager := natsclient.NewManager(uow.Raw(), cfg)
 	gateway := natsadapter.NewGateway(manager)
 
-	services := app.NewServices(uow, gateway, authSvc, nil)
+	services := app.NewServices(uow, gateway, authSvc, nil, cfg.HealthCheckTimeout)
+	services.Bottlenecks = app.NewBottleneckService(uow, cfg.MetricsSnapshot.BottleneckRetention)
 
 	if err := services.Cluster.BootstrapDefault(ctx); err != nil {
 		uow.Close()

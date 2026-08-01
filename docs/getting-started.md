@@ -66,6 +66,8 @@ Use the **Active cluster** dropdown in the left sidebar. The demo stack ships wi
 
 Everything in JetStream (streams, KV, objects, live tail) is scoped to the cluster you select.
 
+Open the system → **Replicas** to see NATS server peers (view-only). Against a multi-node cluster lab, you should see all route peers listed.
+
 ---
 
 ## Step 4 — Try a few things

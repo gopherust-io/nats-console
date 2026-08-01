@@ -26,5 +26,14 @@ func TestReplayConsumerRequestValidate(t *testing.T) {
 	err = (domain.ReplayConsumerRequest{From: "bogus"}).Validate()
 	require.Error(t, err)
 
+	err = (domain.ReplayConsumerRequest{From: "seq", Seq: 10, UntilSeq: 5}).Validate()
+	require.Error(t, err)
+
+	err = (domain.ReplayConsumerRequest{From: "new", Limit: 1}).Validate()
+	require.Error(t, err)
+
+	err = (domain.ReplayConsumerRequest{From: "seq", Seq: 10, UntilSeq: 10, Limit: 1}).Validate()
+	require.NoError(t, err)
+
 	assert.Equal(t, domain.ReplayModeReset, (domain.ReplayConsumerRequest{From: "new"}).NormalizedMode())
 }

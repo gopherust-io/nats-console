@@ -9,6 +9,8 @@ import (
 	"net/smtp"
 	"strings"
 	"time"
+
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 // Sender delivers outbound email.
@@ -38,10 +40,10 @@ type SMTPSender struct {
 }
 
 func NewSMTPSender(cfg SMTPConfig) (*SMTPSender, error) {
-	if strings.TrimSpace(cfg.Host) == "" {
+	if commonstrings.IsEmpty(strings.TrimSpace(cfg.Host)) {
 		return nil, errors.New("smtp host is required")
 	}
-	if strings.TrimSpace(cfg.From) == "" {
+	if commonstrings.IsEmpty(strings.TrimSpace(cfg.From)) {
 		return nil, errors.New("smtp from is required")
 	}
 	if cfg.Port <= 0 {
@@ -88,7 +90,7 @@ func (s *SMTPSender) Send(ctx context.Context, to []string, subject, textBody, h
 		}
 	}
 
-	if s.cfg.Username != "" {
+	if !commonstrings.IsEmpty(s.cfg.Username) {
 		auth := smtp.PlainAuth("", s.cfg.Username, s.cfg.Password, s.cfg.Host)
 		if err := client.Auth(auth); err != nil {
 			return err
@@ -130,14 +132,14 @@ func buildMIME(from string, to []string, subject, textBody, htmlBody string) []b
 	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
 	b.WriteString(textBody)
 	b.WriteString("\r\n")
-	if htmlBody != "" {
+	if !commonstrings.IsEmpty(htmlBody) {
 		b.WriteString("--" + boundary + "\r\n")
 		b.WriteString("Content-Type: text/html; charset=UTF-8\r\n\r\n")
 		b.WriteString(htmlBody)
 		b.WriteString("\r\n")
 	}
 	b.WriteString("--" + boundary + "--\r\n")
-	return []byte(b.String())
+	return commonstrings.StringToBytes(b.String())
 }
 
 func sanitizeHeader(v string) string {

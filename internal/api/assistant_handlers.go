@@ -7,6 +7,7 @@ import (
 
 	"github.com/gopherust-io/nats-consol/internal/assistant"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
+	"github.com/gopherust-io/nats-consol/internal/httpctx/httpstatus"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 )
 
@@ -20,12 +21,12 @@ func NewAssistantHandler(svc *assistant.Service) *AssistantHandler {
 
 func (h *AssistantHandler) Config(ctx *fasthttp.RequestCtx) {
 	if h.svc == nil || !h.svc.Enabled() {
-		serializer.WriteJSON(ctx, fasthttp.StatusOK, AssistantConfigResponse{
+		httpstatus.WriteJSON(ctx, fasthttp.StatusOK, AssistantConfigResponse{
 			AIEnabled: false,
 		})
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, AssistantConfigResponse{
+	httpstatus.WriteJSON(ctx, fasthttp.StatusOK, AssistantConfigResponse{
 		AIEnabled:  true,
 		AIProvider: h.svc.Provider(),
 		AIModel:    h.svc.Model(),
@@ -39,7 +40,7 @@ func (h *AssistantHandler) Chat(ctx *fasthttp.RequestCtx) {
 	}
 
 	var req assistant.ChatRequest
-	if err := parseJSONBody(ctx, &req); err != nil {
+	if err := serializer.Unmarshal(ctx.PostBody(), &req); err != nil {
 		writeAssistantError(ctx, assistant.WrapError(err))
 		return
 	}
@@ -49,21 +50,21 @@ func (h *AssistantHandler) Chat(ctx *fasthttp.RequestCtx) {
 		writeAssistantError(ctx, assistant.WrapError(err))
 		return
 	}
-	serializer.WriteJSON(ctx, fasthttp.StatusOK, resp)
+	httpstatus.WriteJSON(ctx, fasthttp.StatusOK, resp)
 }
 
 func writeAssistantError(ctx *fasthttp.RequestCtx, err *assistant.Error) {
 	if err == nil {
-		serializer.WriteError(ctx, fasthttp.StatusInternalServerError, errors.New("assistant request failed"))
+		httpstatus.WriteError(ctx, fasthttp.StatusInternalServerError, errors.New("assistant request failed"))
 		return
 	}
-	payload := AssistantErrorResponse{
-		Error:     err.Message,
+	body := httpstatus.ErrorBody{
+		Message:   err.Message,
 		Code:      err.Code,
 		Retryable: err.Retryable,
 	}
 	if err.RetryAfter > 0 {
-		payload.RetryAfterSeconds = err.RetryAfter
+		body.RetryAfterSeconds = err.RetryAfter
 	}
-	serializer.WriteJSON(ctx, err.HTTPStatus(), payload)
+	httpstatus.WriteErrorBody(ctx, err.HTTPStatus(), body)
 }

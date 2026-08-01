@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/gopherust-io/nats-consol/pkg/common/b64util"
+	libnats "github.com/gopherust-io/nats"
 	"github.com/nats-io/nats.go"
 )
 
@@ -38,6 +39,31 @@ type PublishMessageResult struct {
 }
 
 func StreamMessageFromRaw(msg *nats.RawStreamMsg) StreamMessage {
+	if msg == nil {
+		return StreamMessage{}
+	}
+	out := StreamMessage{
+		Seq:     msg.Sequence,
+		Subject: msg.Subject,
+		Time:    msg.Time.UTC().Format(time.RFC3339Nano),
+		Data:    b64util.EncodeToString(msg.Data),
+	}
+	if msg.Header != nil {
+		headers := make(map[string]string, len(msg.Header))
+		for k, vals := range msg.Header {
+			if len(vals) > 0 {
+				headers[k] = vals[0]
+			}
+		}
+		if len(headers) > 0 {
+			out.Headers = headers
+		}
+	}
+	return out
+}
+
+// StreamMessageFromStored maps a library StoredMessage into the console API shape.
+func StreamMessageFromStored(msg *libnats.StoredMessage) StreamMessage {
 	if msg == nil {
 		return StreamMessage{}
 	}

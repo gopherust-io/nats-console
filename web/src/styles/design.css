@@ -5,6 +5,16 @@
 :root {
   --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --fs-2xs: 0.625rem;
+  --fs-xs: 0.6875rem;
+  --fs-sm: 0.75rem;
+  --fs-md: 0.8125rem;
+  --fs-base: 0.875rem;
+  --fs-lg: 0.9375rem;
+  --fs-xl: 1.05rem;
+  --fs-2xl: 1.25rem;
+  --fs-3xl: 1.5rem;
+  --fs-4xl: 1.75rem;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 8px;
@@ -125,7 +135,7 @@ body {
   border: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--bg-card) 92%, transparent);
   color: var(--text-secondary);
-  font-size: 0.82rem;
+  font-size: var(--fs-md);
   font-weight: 600;
   box-shadow: var(--shadow-sm);
   flex-shrink: 0;
@@ -247,14 +257,14 @@ body {
 }
 
 .brand__name {
-  font-size: 1.05rem;
+  font-size: var(--fs-xl);
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1.2;
 }
 
 .brand__tagline {
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   font-weight: 500;
   color: var(--text-muted);
   letter-spacing: 0.02em;
@@ -284,7 +294,7 @@ body {
   border: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--bg-card) 92%, transparent);
   color: var(--text-secondary);
-  font-size: 0.82rem;
+  font-size: var(--fs-md);
   font-weight: 600;
   box-shadow: var(--shadow-sm);
   text-decoration: none;
@@ -318,6 +328,74 @@ body {
   margin: 0;
   padding: 0;
   line-height: 0;
+}
+
+.theme-toggle--launching {
+  opacity: 0 !important;
+  pointer-events: none;
+}
+
+/* Flying clone: glides to viewport center before the theme wipe */
+.theme-flyer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2147483646;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin: 0;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: var(--bg-card);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--text-primary) 10%, transparent);
+  pointer-events: none;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+.theme-flyer svg {
+  display: block;
+}
+
+/* Circular page reveal from center (clip animated via WAAPI) */
+html[data-theme-transition="circle"]::view-transition-group(root) {
+  animation-duration: 560ms;
+  animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1);
+}
+
+html[data-theme-transition="circle"]::view-transition-old(root),
+html[data-theme-transition="circle"]::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+  /* Keep snapshot box = viewport so clip-path 50% 50% is true center */
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+html[data-theme-transition="circle"]::view-transition-image-pair(root) {
+  isolation: auto;
+}
+
+html[data-theme-transition="circle"]::view-transition-old(root) {
+  z-index: 1;
+}
+
+html[data-theme-transition="circle"]::view-transition-new(root) {
+  z-index: 9999;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-toggle--launching {
+    opacity: 1 !important;
+    pointer-events: auto;
+  }
 }
 
 .theme-toggle:not(.nc-icon-btn) {
@@ -371,7 +449,7 @@ body {
 
 .settings-section__title {
   margin: 0 0 6px;
-  font-size: 1.05rem;
+  font-size: var(--fs-xl);
   font-weight: 700;
   letter-spacing: -0.02em;
 }
@@ -380,7 +458,7 @@ body {
 .settings-section__note {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 0.875rem;
+  font-size: var(--fs-base);
   max-width: 62ch;
 }
 
@@ -404,7 +482,7 @@ body {
 
 .settings-summary dt {
   margin: 0 0 4px;
-  font-size: 0.68rem;
+  font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -413,7 +491,7 @@ body {
 
 .settings-summary dd {
   margin: 0;
-  font-size: 0.925rem;
+  font-size: var(--fs-lg);
   font-weight: 600;
 }
 
@@ -476,24 +554,24 @@ body {
 }
 
 .pref-card__title {
-  font-size: 0.925rem;
+  font-size: var(--fs-lg);
   font-weight: 700;
 }
 
 .pref-card__meta {
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
 }
 
 .pref-card__desc {
-  font-size: 0.82rem;
+  font-size: var(--fs-md);
   color: var(--text-secondary);
   line-height: 1.45;
 }
 
 .pref-card__sample {
   margin-top: 6px;
-  font-size: 0.82rem;
+  font-size: var(--fs-md);
   color: var(--text-muted);
 }
 
@@ -534,7 +612,7 @@ body {
 .pref-empty {
   margin: 0;
   color: var(--text-muted);
-  font-size: 0.875rem;
+  font-size: var(--fs-base);
 }
 
 .pref-toggle-row {
@@ -553,12 +631,12 @@ body {
 }
 
 .pref-toggle-row__title {
-  font-size: 0.95rem;
+  font-size: var(--fs-lg);
   font-weight: 700;
 }
 
 .pref-toggle-row__desc {
-  font-size: 0.84rem;
+  font-size: var(--fs-md);
   color: var(--text-secondary);
   line-height: 1.45;
   max-width: 52ch;
@@ -614,7 +692,7 @@ body {
 }
 
 .pref-switch__label {
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -641,7 +719,7 @@ body {
 
 .nav-section__label {
   padding: 0 12px 8px;
-  font-size: 0.68rem;
+  font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -738,7 +816,7 @@ body {
 
 .cluster-picker__meta {
   margin: 8px 0 0;
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   font-family: var(--font-mono);
   white-space: nowrap;
@@ -771,7 +849,7 @@ body {
   border-radius: var(--radius-md);
   background: var(--brand-bg, var(--accent));
   color: #fff;
-  font-size: 0.85rem;
+  font-size: var(--fs-md);
   font-weight: 700;
 }
 
@@ -783,7 +861,7 @@ body {
 }
 
 .user-pill__name {
-  font-size: 0.875rem;
+  font-size: var(--fs-base);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -791,23 +869,28 @@ body {
 }
 
 .user-pill__role {
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
 }
 
 /* ── Page header ── */
 
 .page-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   align-items: flex-start;
+  gap: 12px 16px;
   margin-bottom: 32px;
 }
 
 .page-header__main {
   min-width: 0;
+  flex: 1 1 12rem;
 }
 
 .page-header__eyebrow {
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -820,18 +903,30 @@ body {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .page-header__actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+
+.page-header__actions .actions {
+  max-width: 100%;
 }
 
 .page-header h1 {
-  font-size: 2rem;
+  font-size: var(--fs-3xl);
   letter-spacing: -0.04em;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Sections & stats ── */
@@ -848,7 +943,7 @@ body {
 
 .section__title {
   margin: 0 0 14px;
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -923,7 +1018,7 @@ body {
 }
 
 .stat-card__label {
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -931,12 +1026,12 @@ body {
 }
 
 .stat-card__icon {
-  font-size: 1rem;
+  font-size: var(--fs-xl);
   opacity: 0.55;
 }
 
 .stat-card__value {
-  font-size: 1.85rem;
+  font-size: var(--fs-3xl);
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1.1;
@@ -944,7 +1039,7 @@ body {
 
 .stat-card__hint {
   margin-top: 8px;
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
 }
 
@@ -968,13 +1063,13 @@ body {
 
 .panel__title {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--fs-xl);
   font-weight: 700;
 }
 
 .panel__lead {
   margin: 0 0 6px;
-  font-size: 1.15rem;
+  font-size: var(--fs-2xl);
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -986,7 +1081,7 @@ body {
   align-items: center;
   padding: 4px 10px;
   border-radius: 999px;
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1016,7 +1111,7 @@ body {
 .alert {
   padding: 12px 14px;
   border-radius: var(--radius-sm);
-  font-size: 0.875rem;
+  font-size: var(--fs-base);
   font-weight: 500;
   margin-bottom: 16px;
   border: 1px solid transparent;
@@ -1069,7 +1164,7 @@ body {
   margin: 0;
   flex: 1;
   min-width: 0;
-  font-size: 0.875rem;
+  font-size: var(--fs-base);
   font-weight: 550;
   line-height: 1.4;
   word-break: break-word;
@@ -1085,7 +1180,7 @@ body {
   background: transparent;
   color: inherit;
   opacity: 0.7;
-  font-size: 1.1rem;
+  font-size: var(--fs-xl);
   line-height: 1;
   cursor: pointer;
 }
@@ -1178,6 +1273,51 @@ body {
   overflow: hidden;
 }
 
+/* Clusters: split multi-URL lists so the table stays within the viewport. */
+.clusters-page .table-wrap {
+  overflow-x: auto;
+}
+
+.clusters-page th,
+.clusters-page td {
+  vertical-align: top;
+}
+
+.clusters-page .clusters-endpoints {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.clusters-page .clusters-endpoints__item {
+  overflow-wrap: anywhere;
+}
+
+.clusters-page .clusters-availability {
+  white-space: nowrap;
+}
+
+.table-wrap--fit {
+  overflow: hidden;
+}
+
+.table-wrap--fit .virtual-table__body {
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 35%, transparent) transparent;
+}
+
+.table-wrap--fit .virtual-table__body::-webkit-scrollbar {
+  width: 6px;
+  height: 0;
+}
+
+.table-wrap--fit .virtual-table__body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 35%, transparent);
+}
+
 .table-wrap thead th {
   position: sticky;
   top: 0;
@@ -1188,6 +1328,7 @@ body {
 
 .virtual-table {
   width: 100%;
+  min-width: 0;
 }
 
 .virtual-table__header,
@@ -1196,6 +1337,8 @@ body {
   grid-template-columns: var(--vt-columns);
   align-items: center;
   column-gap: 0;
+  width: 100%;
+  min-width: 0;
 }
 
 .virtual-table__header {
@@ -1209,20 +1352,28 @@ body {
 
 .virtual-table__th,
 .virtual-table__td {
-  padding: 12px 16px;
+  padding: 10px 12px;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .virtual-table__th {
   color: var(--text-muted);
-  font-size: 0.8125rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
+}
+
+.virtual-table__td {
+  font-size: var(--fs-base);
+  color: var(--text-primary);
 }
 
 .virtual-table__row {
-  position: absolute;
+  position: relative;
   left: 0;
   width: 100%;
   border-bottom: 1px solid var(--border-subtle);
@@ -1230,8 +1381,36 @@ body {
   transition: background 0.15s ease;
 }
 
-.virtual-table__row:hover {
+.virtual-table__block {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.virtual-table__block .virtual-table__row {
+  border-bottom: none;
+  background: transparent;
+}
+
+.virtual-table__detail {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-input) 55%, var(--bg-card));
+}
+
+.virtual-table__row:hover,
+.virtual-table__block:hover {
   background: var(--bg-table-hover);
+}
+
+.virtual-table__block:hover .virtual-table__row {
+  background: transparent;
 }
 
 .virtual-table__row:last-child {
@@ -1258,15 +1437,20 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+  min-width: 0;
 }
 
 .virtual-table__body {
   position: relative;
+  overflow-x: hidden;
 }
 
 .virtual-table__viewport {
   position: relative;
   width: 100%;
+  min-width: 0;
 }
 
 /* ── Audit log table ── */
@@ -1289,14 +1473,15 @@ body {
 }
 
 .audit-toolbar__label {
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 
-.audit-toolbar__field input {
+.audit-toolbar__field input,
+.audit-toolbar__field select {
   width: 100%;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
@@ -1304,6 +1489,37 @@ body {
   background: var(--bg-input);
   color: var(--text-primary);
   font: inherit;
+}
+
+.audit-incident {
+  padding: 18px;
+  margin-bottom: 20px;
+}
+
+.audit-incident__selectors {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.audit-incident__selectors .audit-toolbar__field {
+  min-width: 0;
+}
+
+.audit-incident__hint {
+  margin: 14px 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-lg);
+}
+
+.audit-incident .nc-incident-reconstruction {
+  margin-top: 18px;
+}
+
+@media (max-width: 760px) {
+  .audit-incident__selectors {
+    grid-template-columns: 1fr;
+  }
 }
 
 .audit-table {
@@ -1340,7 +1556,7 @@ body {
 
 .audit-table__header .audit-table__cell {
   color: var(--text-muted);
-  font-size: 0.8125rem;
+  font-size: var(--fs-md);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1376,7 +1592,7 @@ body {
   display: inline-flex;
   padding: 4px 8px;
   border-radius: 999px;
-  font-size: 0.75rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: lowercase;
@@ -1400,7 +1616,7 @@ body {
 }
 
 .audit-entry__details-label {
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1408,7 +1624,7 @@ body {
 }
 
 .audit-entry__request-id {
-  font-size: 0.75rem;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
 }
 
@@ -1419,7 +1635,7 @@ body {
   border: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--bg-input) 88%, transparent);
   color: var(--text-primary);
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   line-height: 1.5;
   overflow-x: auto;
   max-width: 100%;
@@ -1445,7 +1661,7 @@ body {
   .audit-table__cell--time {
     grid-column: 1 / -1;
     color: var(--text-secondary);
-    font-size: 0.84rem;
+    font-size: var(--fs-md);
   }
 
   .audit-table__cell--details {
@@ -1501,7 +1717,7 @@ body {
 }
 
 .login-topbar__brand .brand__name {
-  font-size: 0.95rem;
+  font-size: var(--fs-lg);
   font-weight: 600;
   letter-spacing: -0.01em;
 }
@@ -1529,7 +1745,7 @@ body {
 
 .login-pane__title {
   margin: 0 0 8px;
-  font-size: 1.85rem;
+  font-size: var(--fs-3xl);
   font-weight: 700;
   letter-spacing: -0.03em;
 }
@@ -1537,7 +1753,7 @@ body {
 .login-pane__sub {
   margin: 0 0 28px;
   color: #a3a3a3;
-  font-size: 0.9rem;
+  font-size: var(--fs-lg);
   line-height: 1.45;
   max-width: 36ch;
 }
@@ -1595,7 +1811,7 @@ body {
 
 .login-promo__body {
   margin: 0 0 28px;
-  font-size: 0.95rem;
+  font-size: var(--fs-lg);
   line-height: 1.55;
   color: rgba(216, 245, 232, 0.86);
   max-width: 42ch;
@@ -1834,7 +2050,7 @@ body {
 
 .login-center__title {
   margin: 0 0 28px;
-  font-size: 1.75rem;
+  font-size: var(--fs-4xl);
   font-weight: 700;
   letter-spacing: -0.03em;
   text-align: center;
@@ -1859,7 +2075,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 0.875rem;
+  font-size: var(--fs-base);
   font-weight: 500;
   color: #e8e8e8;
 }
@@ -1891,7 +2107,7 @@ body {
   background: var(--login-teal);
   color: #fff;
   font: inherit;
-  font-size: 0.95rem;
+  font-size: var(--fs-lg);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease;
@@ -1908,7 +2124,7 @@ body {
   background: none;
   color: var(--login-teal);
   font: inherit;
-  font-size: 0.875rem;
+  font-size: var(--fs-base);
   cursor: pointer;
   text-align: center;
   align-self: center;
@@ -1926,7 +2142,7 @@ body {
   border: 1px solid var(--login-border);
   background: var(--login-surface);
   color: #a3a3a3;
-  font-size: 0.825rem;
+  font-size: var(--fs-md);
   line-height: 1.5;
   text-align: center;
 }
@@ -1963,13 +2179,13 @@ body {
 
 .empty-state__title {
   margin: 0 0 8px;
-  font-size: 1.05rem;
+  font-size: var(--fs-xl);
 }
 
 .empty-state__desc {
   margin: 0 0 16px;
   color: var(--text-muted);
-  font-size: 0.875rem;
+  font-size: var(--fs-base);
   max-width: 36ch;
 }
 
@@ -2170,11 +2386,11 @@ body {
   }
 
   .login-promo__title {
-    font-size: 1.35rem;
+    font-size: var(--fs-2xl);
   }
 
   .login-promo__body {
-    font-size: 0.875rem;
+    font-size: var(--fs-base);
     margin-bottom: 12px;
   }
 
@@ -2189,11 +2405,16 @@ body {
     align-items: stretch;
   }
 
+  .page-header__main {
+    flex-basis: auto;
+  }
+
   .page-header__actions {
     width: 100%;
   }
 
-  .page-header__actions .btn {
+  .page-header__actions .btn,
+  .page-header__actions .actions .btn {
     flex: 1;
   }
 }
@@ -2218,10 +2439,167 @@ body {
   font: inherit;
 }
 
+.topology-zombies--panel {
+  margin-top: 8px;
+  padding: 18px;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: color-mix(in srgb, var(--bg-card) 94%, transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.topology-tabs {
+  margin-bottom: 20px;
+}
+
+.topology-tabs .nc-tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  gap: 8px;
+}
+
+.topology-tabs__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.topology-zombies__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.topology-zombies__title {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 700;
+}
+
+.topology-zombies__subtitle {
+  margin: 6px 0 0;
+  font-size: var(--fs-md);
+  color: var(--text-muted);
+  max-width: 56ch;
+}
+
+.topology-zombies__empty {
+  margin: 12px 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-base);
+}
+
+.topology-zombies__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.topology-zombies__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--bg-body) 45%, transparent);
+}
+
+.topology-zombies__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.topology-zombies__kind {
+  display: block;
+  font-size: var(--fs-sm);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.topology-zombies__label {
+  color: var(--text-primary);
+  font-size: var(--fs-lg);
+  word-break: break-word;
+}
+
+.topology-zombies__suggested {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--fs-md);
+  color: var(--text-muted);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  word-break: break-word;
+}
+
+.topology-zombies__suggested strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.topology-zombies__cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.topology-zombies__chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  background: color-mix(in srgb, var(--bg-body) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
 .topology-tree {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.topology-tree--constellation .topology-tree__canvas {
+  position: relative;
+  overflow-x: clip;
+  overflow-y: auto;
+  padding: 10px 10px 12px 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 4%, transparent) 0%,
+      transparent 48px
+    ),
+    color-mix(in srgb, var(--bg-input) 28%, var(--bg-card));
+  box-shadow: none;
 }
 
 .topology-tree__canvas {
@@ -2245,6 +2623,8 @@ body {
 }
 
 .topology-branch {
+  --rail-x: 6px;
+  --rail-color: color-mix(in srgb, var(--border) 85%, var(--text-muted));
   position: relative;
   min-width: 0;
   max-width: 100%;
@@ -2255,47 +2635,79 @@ body {
   display: flex;
   align-items: stretch;
   gap: 0;
-  padding: 4px 0;
+  padding: 3px 0;
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
 }
 
+.topology-branch--root > .topology-branch__row {
+  padding-bottom: 6px;
+}
+
+.topology-branch--leaf > .topology-branch__row {
+  padding: 2px 0;
+}
+
+/*
+  Vertical spine lives on the branch <li> so it spans the full height
+  when children are expanded (row-only rails broke through open trees).
+*/
+.topology-branch:not([data-depth="0"]):not(.topology-branch--last)::before,
+.topology-branch--open:not([data-depth="0"])::before {
+  content: "";
+  position: absolute;
+  left: var(--rail-x);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--rail-color);
+  pointer-events: none;
+}
+
+/* True └ : last sibling with no open children — stop at mid-row */
+.topology-branch--last:not([data-depth="0"]):not(.topology-branch--open) > .topology-branch__row .topology-branch__rail::before {
+  content: "";
+  position: absolute;
+  left: var(--rail-x);
+  top: 0;
+  height: 50%;
+  width: 1px;
+  background: var(--rail-color);
+}
+
 .topology-branch__rail {
   position: relative;
-  width: 16px;
-  flex: 0 0 16px;
+  width: 14px;
+  flex: 0 0 14px;
   align-self: stretch;
-  min-height: 36px;
+  min-height: 28px;
 }
 
-.topology-branch__rail-svg {
+/* Horizontal tick into the node */
+.topology-branch:not([data-depth="0"]) > .topology-branch__row .topology-branch__rail::after {
+  content: "";
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-.topology-branch__rail-path {
-  stroke: color-mix(in srgb, var(--accent) 70%, var(--border));
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.topology-branch__rail-dot {
-  fill: color-mix(in srgb, var(--accent) 85%, #fff);
+  left: var(--rail-x);
+  top: 50%;
+  width: 8px;
+  height: 1px;
+  background: var(--rail-color);
 }
 
 .topology-branch__children {
-  /* Indent with padding only — width:100% + margin-left overflows and clips borders. */
-  padding-left: 16px;
-  border-left: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  margin-left: 6px;
+  padding-left: 8px;
+  border-left: none;
 }
 
-.topology-branch--last > .topology-branch__children {
-  border-left-color: transparent;
+.topology-branch--root > .topology-branch__children {
+  margin-left: 6px;
+  padding-left: 8px;
+}
+
+.topology-branch--stream > .topology-branch__children {
+  margin-top: 2px;
 }
 
 .topology-node {
@@ -2305,22 +2717,90 @@ body {
   min-width: 0;
   flex: 1 1 0;
   box-sizing: border-box;
-  padding: 8px 10px;
+  padding: 6px 9px;
   border-radius: 10px;
-  border: 1px solid transparent;
-  background: color-mix(in srgb, var(--bg-input) 55%, var(--bg-card));
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--bg-input) 45%, var(--bg-card));
   box-shadow: none;
-  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .topology-node--chip {
   backdrop-filter: none;
 }
 
+.topology-node--kind-cluster {
+  align-items: center;
+  gap: 10px;
+  padding: 6px 9px;
+  border-radius: 10px;
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 10%, transparent),
+      color-mix(in srgb, var(--bg-card) 92%, transparent)
+    );
+}
+
+.topology-node--kind-cluster .topology-node__name {
+  font-size: var(--fs-lg);
+  font-weight: 650;
+}
+
+.topology-node--kind-stream {
+  align-items: center;
+  padding: 6px 9px;
+  border-color: color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 88%, var(--bg-input));
+}
+
+.topology-node--compact {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  min-height: 0;
+  border-radius: 8px;
+  border-color: transparent;
+  background: color-mix(in srgb, var(--bg-input) 35%, transparent);
+}
+
+.topology-node--compact .topology-node__head {
+  margin-bottom: 0;
+  gap: 6px;
+}
+
+.topology-node--compact .topology-node__kind {
+  font-size: var(--fs-2xs);
+}
+
+.topology-node--compact .topology-node__name {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.topology-node--compact .topology-node__meta {
+  margin-top: 3px;
+  gap: 3px;
+}
+
+.topology-node--compact .topology-node__chip {
+  padding: 1px 5px;
+  font-size: var(--fs-2xs);
+}
+
 .topology-node:hover {
-  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-card));
   box-shadow: none;
+}
+
+.topology-node--compact:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
 }
 
 .topology-node--selectable {
@@ -2333,9 +2813,11 @@ body {
 }
 
 .topology-node--selected {
-  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 62%, transparent);
   background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
-  box-shadow: none;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .topology-node--healthy {
@@ -2346,6 +2828,10 @@ body {
   border-left: 3px solid var(--warning-text, #fcd34d);
 }
 
+.topology-node--unhealthy {
+  border-left: 3px solid var(--danger, #ef4444);
+}
+
 .topology-node--idle {
   border-left: 3px solid var(--text-muted);
 }
@@ -2354,13 +2840,40 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-md);
-  font-size: 0.85rem;
   flex-shrink: 0;
   background: var(--bg-badge);
   color: var(--text-primary);
+}
+
+.topology-node--kind-cluster .topology-node__icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+}
+
+.topology-node--compact .topology-node__icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+}
+
+.topology-node__glyph {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+
+.topology-node--kind-cluster .topology-node__glyph {
+  width: 14px;
+  height: 14px;
+}
+
+.topology-node--compact .topology-node__glyph {
+  width: 12px;
+  height: 12px;
 }
 
 .topology-node__icon--cluster {
@@ -2369,15 +2882,18 @@ body {
 }
 
 .topology-node__icon--stream {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
 }
 
 .topology-node__icon--subject {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
   color: var(--success-text, var(--success));
 }
 
 .topology-node__icon--consumer {
-  color: color-mix(in srgb, var(--accent) 55%, #c084fc);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-badge));
+  color: color-mix(in srgb, var(--accent) 45%, #67e8f9);
 }
 
 .topology-node__body {
@@ -2393,7 +2909,7 @@ body {
 }
 
 .topology-node__kind {
-  font-size: 0.68rem;
+  font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2404,6 +2920,8 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .topology-node__status--healthy {
@@ -2416,12 +2934,47 @@ body {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning-text, #fcd34d) 25%, transparent);
 }
 
+.topology-node__status--unhealthy {
+  background: var(--danger, #ef4444);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger, #ef4444) 28%, transparent);
+}
+
 .topology-node__status--idle {
   background: var(--text-muted);
 }
 
+.topology-node__role {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+
+.topology-node__role--leader {
+  color: var(--success-text, var(--success));
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+}
+
+.topology-node__role--replica {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-body) 70%, transparent);
+}
+
+.topology-node__role--replicas {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .topology-node__name {
-  font-size: 0.92rem;
+  font-size: var(--fs-md);
   font-weight: 650;
   letter-spacing: -0.02em;
   color: var(--text-primary);
@@ -2441,15 +2994,15 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 6px;
+  margin-top: 3px;
 }
 
 .topology-node__chip {
   display: inline-flex;
   align-items: center;
-  padding: 2px 6px;
+  padding: 1px 5px;
   border-radius: 999px;
-  font-size: 0.68rem;
+  font-size: var(--fs-2xs);
   font-family: var(--font-mono);
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--bg-body) 55%, transparent);
@@ -2458,13 +3011,14 @@ body {
 
 .topology-node__toggle {
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  border: none;
-  background: color-mix(in srgb, var(--bg-body) 60%, transparent);
+  width: 22px;
+  height: 22px;
+  margin-top: 0;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--bg-body) 55%, transparent);
   color: var(--text-secondary);
-  font-size: 0.85rem;
+  font-size: var(--fs-md);
   line-height: 1;
   cursor: pointer;
   display: grid;
@@ -2473,7 +3027,19 @@ body {
 
 .topology-node__toggle:hover {
   color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.topology-node__toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 1px;
+}
+
+.topology-node--compact .topology-node__toggle {
+  width: 22px;
+  height: 22px;
+  margin-top: 0;
 }
 
 /* ── Topology explorer & detail ── */
@@ -2496,13 +3062,17 @@ body {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+  grid-template-columns: 1fr;
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
+  min-height: calc(100dvh - 220px);
 }
 
 .topology-explorer__hierarchy {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .topology-explorer__hierarchy .topology-tree,
@@ -2511,41 +3081,47 @@ body {
   backdrop-filter: none;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  padding: 18px 18px 16px;
+  padding: 16px 16px 14px;
   box-shadow: none;
+}
+
+.topology-explorer__hierarchy .topology-tree {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topology-explorer__hierarchy .topology-tree--constellation .topology-tree__canvas {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
 }
 
 .topology-inspector {
   position: sticky;
   top: 16px;
-  min-height: 320px;
+  min-height: 0;
   margin: 0;
+  align-self: stretch;
+  max-height: calc(100dvh - 120px);
+}
+
+.topo-signal-overlay__panel .topology-inspector {
+  position: static;
+  top: auto;
+  max-height: none;
+  height: 100%;
+  align-self: stretch;
 }
 
 .topology-inspector--stage {
-  padding: 16px;
-}
-
-.topology-inspector__empty {
-  display: grid;
-  place-content: center;
-  gap: 8px;
-  min-height: 280px;
-  padding: 12px;
-  text-align: center;
-}
-
-.topology-inspector__empty-title {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 700;
-}
-
-.topology-inspector__empty-desc {
-  margin: 0 auto 8px;
-  max-width: 36ch;
-  font-size: 0.875rem;
-  color: var(--text-muted);
+  padding: 14px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .topology-inspector__body {
@@ -2560,8 +3136,8 @@ body {
 }
 
 .topology-inspector__context {
-  margin: 10px 0 0;
-  font-size: 0.82rem;
+  margin: 8px 0 0;
+  font-size: var(--fs-md);
   color: var(--text-secondary);
 }
 
@@ -2574,9 +3150,14 @@ body {
   margin-bottom: 16px;
 }
 
+.topology-detail__head > :first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .topology-detail__eyebrow {
   margin: 0 0 4px;
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2593,8 +3174,13 @@ body {
 
 .topology-detail__actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .topology-detail__columns {
@@ -2616,12 +3202,12 @@ body {
   align-items: center;
   gap: 8px;
   margin: 0 0 6px;
-  font-size: 0.95rem;
+  font-size: var(--fs-lg);
 }
 
 .topology-detail__column-desc {
   margin: 0 0 12px;
-  font-size: 0.82rem;
+  font-size: var(--fs-md);
   color: var(--text-muted);
 }
 
@@ -2633,7 +3219,7 @@ body {
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 
@@ -2665,7 +3251,7 @@ body {
 
 .topology-detail__pattern {
   font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: var(--fs-md);
   word-break: break-all;
 }
 
@@ -2679,7 +3265,7 @@ body {
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg-body) 55%, transparent);
   border: none;
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
 }
 
@@ -2689,34 +3275,120 @@ body {
   color: var(--warning, #f59e0b);
 }
 
+.topology-detail__chip--danger {
+  border: none;
+  background: color-mix(in srgb, var(--danger, #ef4444) 16%, transparent);
+  color: var(--danger, #ef4444);
+}
+
+.topology-detail__chip--ok {
+  border: none;
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success-text, var(--success));
+}
+
+.topology-detail__chip--leader {
+  border: none;
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success-text, var(--success));
+}
+
+.topology-detail__chip--replica {
+  border: none;
+  background: color-mix(in srgb, var(--bg-body) 65%, transparent);
+  color: var(--text-secondary);
+}
+
+.topology-detail__chip--mono {
+  font-family: var(--font-mono);
+}
+
+.topology-raft {
+  margin: 16px 0 8px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-body) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.topology-raft__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 12px;
+}
+
+.topology-raft__peers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.topology-raft__peer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm, 8px);
+  background: color-mix(in srgb, var(--bg-card) 80%, transparent);
+}
+
+.topology-raft__peer--bad {
+  border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 35%, transparent);
+}
+
+.topology-raft__peer-name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.topology-raft__peer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
 .topology-detail__empty {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: var(--fs-md);
   color: var(--text-muted);
 }
 
 .topo-flow-section__note {
   margin: 8px 0 0;
-  font-size: 0.82rem;
+  font-size: var(--fs-md);
   color: var(--text-muted);
 }
 
 .topology-tree__title {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--fs-lg);
   font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .topology-tree__subtitle {
-  margin: 4px 0 0;
-  font-size: 0.82rem;
+  margin: 3px 0 0;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
+  line-height: 1.35;
 }
 
 .topology-group {
   list-style: none;
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   padding: 0;
+}
+
+.topology-group:last-child {
+  margin-bottom: 2px;
 }
 
 .topology-group__header {
@@ -2724,12 +3396,36 @@ body {
   align-items: center;
   gap: 8px;
   max-width: 100%;
-  margin: 0 0 4px;
-  padding: 4px 6px 4px 16px;
+  margin: 4px 0 6px;
+  padding: 5px 8px 5px 4px;
   box-sizing: border-box;
   color: var(--text-muted);
-  font-size: 0.74rem;
-  font-weight: 600;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-body) 40%, transparent);
+}
+
+.topology-group__rail {
+  width: 3px;
+  height: 14px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.topology-group__header--subjects .topology-group__rail {
+  background: color-mix(in srgb, var(--success) 55%, transparent);
+}
+
+.topology-group__header--consumers .topology-group__rail {
+  background: color-mix(in srgb, var(--accent) 40%, #67e8f9);
+}
+
+.topology-group__label {
+  color: var(--text-secondary);
 }
 
 .topology-group__count {
@@ -2738,14 +3434,21 @@ body {
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--accent);
-  font-size: 0.72rem;
+  font-size: var(--fs-xs);
   font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.topology-group__header--subjects .topology-group__count {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: var(--success-text, var(--success));
 }
 
 .topology-group__items {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 0 0 4px;
 }
 
 .skeleton--panel {
@@ -2760,10 +3463,25 @@ body {
 @media (max-width: 900px) {
   .topology-explorer {
     grid-template-columns: 1fr;
+    min-height: 0;
   }
 
   .topology-inspector {
     position: static;
+    max-height: none;
+  }
+
+  .topo-signal-overlay {
+    padding: 0;
+  }
+
+  .topo-signal-overlay__panel {
+    border-radius: 0;
+    border: none;
+  }
+
+  .topo-signal-panel__stage .topo-signal-stage__svg {
+    min-height: 360px;
   }
 }
 
@@ -2782,7 +3500,13 @@ body {
   }
 
   .topology-branch__children {
-    padding-left: 12px;
+    margin-left: 10px;
+    padding-left: 8px;
+  }
+
+  .topology-branch--root > .topology-branch__children {
+    margin-left: 12px;
+    padding-left: 8px;
   }
 
   .topology-branch__rail {
@@ -2791,12 +3515,457 @@ body {
   }
 
   .topology-group__header {
-    padding-left: 12px;
+    padding-left: 4px;
   }
 
   .topology-node {
     min-width: 0;
-    padding: 7px 8px;
+    padding: 6px 8px;
+  }
+
+  .topology-node--kind-cluster {
+    padding: 6px 8px;
+  }
+
+  .topology-node--kind-stream {
+    padding: 6px 8px;
+  }
+
+  .topology-tree--constellation .topology-tree__canvas {
+    padding: 8px 6px 10px;
+  }
+}
+
+/* ── Topology signal stage panel ── */
+
+.topo-signal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 0;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.topo-signal-overlay__panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 0;
+  background: #000;
+  border: none;
+  box-shadow: none;
+}
+
+.topo-signal-overlay__panel .topology-inspector--stage,
+.topo-signal-overlay__panel .topo-signal-panel {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topo-signal-overlay__panel .topo-signal-panel__chrome {
+  padding: 14px 16px 0;
+  flex-shrink: 0;
+}
+
+.topo-signal-overlay__panel .topo-signal-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.topo-signal-overlay__panel .topo-signal-panel__stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-self: stretch;
+  isolation: isolate;
+  overflow: hidden;
+  /* Rich teal atmosphere — full-bleed, soft depth, no side frames. */
+  background:
+    radial-gradient(
+      ellipse 55% 48% at 50% 42%,
+      color-mix(in srgb, var(--accent) 22%, transparent),
+      color-mix(in srgb, var(--accent) 8%, transparent) 42%,
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 70% 55% at 12% 78%,
+      color-mix(in srgb, var(--success) 10%, transparent),
+      transparent 68%
+    ),
+    radial-gradient(
+      ellipse 60% 50% at 88% 18%,
+      color-mix(in srgb, var(--accent) 9%, transparent),
+      transparent 65%
+    ),
+    linear-gradient(
+      155deg,
+      color-mix(in srgb, var(--accent) 14%, #0c1f1a) 0%,
+      color-mix(in srgb, var(--accent) 9%, #081612) 48%,
+      color-mix(in srgb, var(--success) 6%, #0a1814) 100%
+    );
+}
+
+.topo-signal-overlay__panel .topo-signal-panel__stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.26;
+  background-image:
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--accent) 30%, transparent) 1px, transparent 0);
+  background-size: 26px 26px;
+  mask-image: radial-gradient(ellipse 120% 100% at 50% 45%, #000 35%, transparent 92%);
+  -webkit-mask-image: radial-gradient(ellipse 120% 100% at 50% 45%, #000 35%, transparent 92%);
+}
+
+.topo-signal-overlay__panel .topo-signal-panel__stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #000 32%, transparent) 0%,
+    transparent 16%,
+    transparent 82%,
+    color-mix(in srgb, #000 38%, transparent) 100%
+  );
+}
+
+.topo-signal-overlay__panel .topo-signal-panel__stage .topo-flow-section,
+.topo-signal-overlay__panel .topo-signal-panel__stage .topo-signal-stage {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  margin: 0;
+  border-radius: 0;
+  background: transparent !important;
+}
+
+.topo-signal-overlay__panel .topo-signal-panel__stage .topo-signal-stage__svg {
+  display: block;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0 !important;
+  max-height: none;
+  aspect-ratio: auto;
+}
+
+.topo-signal-overlay__panel .topo-signal-panel__dock {
+  border-radius: 0;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+  padding: 12px 16px max(20px, env(safe-area-inset-bottom, 0px));
+  background: #050806;
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.topo-signal-panel {
+  min-width: 0;
+}
+
+.topo-signal-panel__chrome {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.topo-signal-panel__identity {
+  min-width: 0;
+  flex: 1;
+}
+
+.topo-signal-panel__title {
+  margin: 0 0 6px;
+  font-size: clamp(1.1rem, 1.6vw, 1.4rem);
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  color: var(--text-primary);
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.topo-signal-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.topo-signal-panel__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.topo-signal-panel__stage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topo-signal-panel__stage .topo-flow-section {
+  margin: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.topo-signal-panel__stage .topo-signal-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: var(--radius-lg, var(--radius-md));
+}
+
+.topo-signal-panel__stage .topo-signal-stage__svg {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 520px;
+  max-height: none;
+}
+
+.topo-signal-panel__dock {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-card) 35%, transparent),
+    color-mix(in srgb, var(--bg-card) 55%, transparent)
+  );
+  border-radius: var(--radius-md);
+}
+
+.topo-signal-panel--empty {
+  justify-content: center;
+  align-items: center;
+  min-height: 420px;
+}
+
+.topo-signal-panel__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 36ch;
+  padding: 24px;
+}
+
+.topo-signal-panel__empty-title {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.topo-signal-panel__empty-desc {
+  margin: 0 0 6px;
+  font-size: var(--fs-base);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.topo-signal-dock__band {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.topo-signal-dock__label {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.topo-signal-dock__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.topo-signal-dock__muted {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--text-muted);
+}
+
+.topo-signal-dock__lanes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 20px;
+  align-items: start;
+}
+
+.topo-signal-dock__lane {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.topo-signal-dock__lane-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topo-signal-dock__pills {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 88px;
+  overflow-y: auto;
+}
+
+.topo-signal-dock__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm, 8px);
+  background: color-mix(in srgb, var(--bg-input) 55%, var(--bg-card));
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.topo-signal-dock__pill:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.topo-signal-dock__pill:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.topo-signal-dock__pill.is-active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
+}
+
+.topo-signal-dock__pill--subject {
+  border-color: color-mix(in srgb, var(--success) 35%, var(--border));
+}
+
+.topo-signal-dock__pill--subject.is-active {
+  border-color: color-mix(in srgb, var(--success) 55%, var(--border));
+  background: color-mix(in srgb, var(--success) 12%, var(--bg-card));
+}
+
+.topo-signal-dock__pill--consumer {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.topo-signal-dock__glyph {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: 1;
+}
+
+.topo-signal-dock__code,
+.topo-signal-dock__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.topo-signal-dock__name {
+  font-weight: 650;
+}
+
+.topo-signal-dock__filter {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+@media (max-width: 720px) {
+  .topo-signal-dock__lanes {
+    grid-template-columns: 1fr;
+  }
+
+  .topo-signal-panel__stage .topo-signal-stage__svg {
+    min-height: 300px;
   }
 }
 
@@ -2806,13 +3975,33 @@ body {
   margin-bottom: 16px;
 }
 
+.topo-flow-section--fullscreen {
+  margin-bottom: 0;
+}
+
+.topo-signal-stage--fullscreen .topo-signal-label {
+  font-size: 13px;
+}
+
+.topo-signal-stage--fullscreen .topo-signal-label--hub {
+  font-size: 15px;
+}
+
+.topo-signal-stage--fullscreen .topo-signal-hub__label {
+  font-size: 20px;
+}
+
+.topo-signal-stage--fullscreen .topo-signal-node__glyph {
+  font-size: 15px;
+}
+
 .topo-flow-section--signal .topo-flow-section__head {
   margin-bottom: 10px;
 }
 
 .topo-flow-section__title {
   margin: 0 0 6px;
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -2822,7 +4011,7 @@ body {
 .topo-flow-section__desc {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 0.875rem;
+  font-size: var(--fs-base);
   max-width: 62ch;
 }
 
@@ -2830,10 +4019,49 @@ body {
   position: relative;
   border-radius: var(--radius-md);
   border: none;
-  background:
-    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 55%),
-    color-mix(in srgb, var(--bg-input) 35%, var(--bg-card));
+  isolation: isolate;
   overflow: hidden;
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 45%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 65%),
+    radial-gradient(ellipse 50% 45% at 15% 80%, color-mix(in srgb, var(--success) 8%, transparent), transparent 70%),
+    radial-gradient(ellipse 120% 80% at 50% 110%, color-mix(in srgb, #000 45%, transparent), transparent 55%),
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--accent) 6%, var(--bg-card)) 0%,
+      color-mix(in srgb, var(--bg-input) 50%, #071210) 50%,
+      color-mix(in srgb, var(--bg-card) 75%, #040a08) 100%
+    );
+}
+
+.topo-signal-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  background-image:
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--accent) 24%, transparent) 1px, transparent 0);
+  background-size: 24px 24px;
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 50%, #000 15%, transparent 72%);
+}
+
+.topo-signal-stage > * {
+  position: relative;
+  z-index: 1;
+}
+
+.topo-signal-stage.topo-signal-stage--fullscreen {
+  background: transparent;
+  border-radius: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.topo-signal-stage.topo-signal-stage--fullscreen::before {
+  display: none;
 }
 
 .topo-signal-stage__svg {
@@ -2841,6 +4069,10 @@ body {
   width: 100%;
   height: auto;
   min-height: 220px;
+}
+
+.topo-signal-hit {
+  cursor: pointer;
 }
 
 .topo-signal-path {
@@ -2864,6 +4096,15 @@ body {
   filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 70%, transparent));
 }
 
+.topo-signal-dot--nack {
+  fill: var(--warning-text, #fcd34d);
+  filter: drop-shadow(0 0 7px color-mix(in srgb, var(--warning-text, #fcd34d) 65%, transparent));
+}
+
+.topo-signal-path--nack {
+  stroke: color-mix(in srgb, var(--warning-text, #fcd34d) 55%, var(--border));
+}
+
 .topo-signal-node {
   fill: color-mix(in srgb, var(--bg-card) 88%, transparent);
   stroke: color-mix(in srgb, var(--border) 80%, var(--accent));
@@ -2878,16 +4119,48 @@ body {
   stroke: color-mix(in srgb, var(--accent) 40%, #a78bfa);
 }
 
+.topo-signal-node--warning {
+  stroke: var(--warning-text, #fcd34d);
+  fill: color-mix(in srgb, var(--warning-text, #fcd34d) 20%, var(--bg-card));
+}
+
+.topo-signal-node--unhealthy {
+  stroke: var(--danger, #ef4444);
+  fill: color-mix(in srgb, var(--danger, #ef4444) 18%, var(--bg-card));
+}
+
 .topo-signal-node.is-hot {
-  stroke: var(--accent);
   stroke-width: 2.5;
+}
+
+.topo-signal-node.is-hot:not(.topo-signal-node--warning):not(.topo-signal-node--unhealthy) {
+  stroke: var(--accent);
   fill: color-mix(in srgb, var(--accent) 18%, var(--bg-card));
+}
+
+.topo-signal-node--warning.is-hot {
+  stroke: var(--warning-text, #fcd34d);
+  fill: color-mix(in srgb, var(--warning-text, #fcd34d) 28%, var(--bg-card));
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--warning-text, #fcd34d) 45%, transparent));
+}
+
+.topo-signal-node--unhealthy.is-hot {
+  stroke: var(--danger, #ef4444);
+  fill: color-mix(in srgb, var(--danger, #ef4444) 26%, var(--bg-card));
 }
 
 .topo-signal-node__glyph {
   fill: var(--text-primary);
   font-size: 11px;
   pointer-events: none;
+}
+
+.topo-signal-node--warning ~ .topo-signal-node__glyph {
+  fill: var(--warning-text, #fcd34d);
+}
+
+.topo-signal-node--unhealthy ~ .topo-signal-node__glyph {
+  fill: var(--danger, #ef4444);
 }
 
 .topo-signal-label {
@@ -2909,6 +4182,14 @@ body {
   stroke-width: 1;
 }
 
+.topo-signal-hub--warning {
+  fill: color-mix(in srgb, var(--warning, #f59e0b) 75%, var(--brand-bg, var(--accent)));
+}
+
+.topo-signal-hub--unhealthy {
+  fill: color-mix(in srgb, var(--danger, #ef4444) 80%, var(--brand-bg, var(--accent)));
+}
+
 .topo-signal-hub.is-hot {
   filter: drop-shadow(0 0 14px color-mix(in srgb, var(--accent) 55%, transparent));
 }
@@ -2919,11 +4200,26 @@ body {
   stroke-width: 1.5;
 }
 
+.topo-signal-hub-ring--warning {
+  stroke: color-mix(in srgb, var(--warning-text, #fcd34d) 55%, transparent);
+}
+
+.topo-signal-hub-ring--unhealthy {
+  stroke: color-mix(in srgb, var(--danger, #ef4444) 55%, transparent);
+}
+
 .topo-signal-hub__label {
   fill: #fff;
   font-size: 12px;
   font-weight: 800;
   letter-spacing: -0.04em;
+  pointer-events: none;
+}
+
+.topo-signal-label--raft {
+  fill: var(--text-muted);
+  font-size: 10px;
+  font-family: var(--font-mono);
   pointer-events: none;
 }
 
@@ -2934,67 +4230,15 @@ body {
 .topo-signal-stage__more {
   margin: 0;
   padding: 8px 14px 12px;
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   text-align: center;
 }
 
-.topo-idle-constellation {
-  display: grid;
-  justify-items: center;
-  gap: 6px;
-}
-
-.topo-idle-constellation__svg {
-  width: min(100%, 280px);
-  height: auto;
-}
-
-.topo-idle-constellation__orbit {
-  fill: none;
-  stroke: color-mix(in srgb, var(--accent) 28%, var(--border));
-  stroke-width: 1;
-  stroke-dasharray: 3 7;
-}
-
-.topo-idle-constellation__core {
-  fill: color-mix(in srgb, var(--accent) 55%, var(--bg-card));
-  stroke: color-mix(in srgb, var(--accent) 40%, transparent);
-}
-
-.topo-idle-constellation__star {
-  fill: color-mix(in srgb, var(--bg-card) 90%, transparent);
-  stroke: color-mix(in srgb, var(--accent) 55%, var(--border));
-  stroke-width: 1.5;
-  cursor: pointer;
-}
-
-.topo-idle-constellation__star:hover,
-.topo-idle-constellation__star:focus {
-  stroke: var(--accent);
-  fill: color-mix(in srgb, var(--accent) 18%, var(--bg-card));
-  outline: none;
-}
-
-.topo-idle-constellation__glyph {
-  fill: var(--accent);
-  font-size: 9px;
-  pointer-events: none;
-}
-
-.topo-idle-constellation__note {
-  margin: 0;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .topo-signal-dot {
+  .topo-signal-dot,
+  .topo-signal-dot--nack {
     display: none;
-  }
-
-  .topo-idle-constellation__orbit {
-    stroke-dasharray: none;
   }
 }
 

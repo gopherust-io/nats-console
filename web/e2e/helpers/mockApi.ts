@@ -5,6 +5,7 @@ import {
   emptyAccount,
   emptyBuckets,
   emptyConnz,
+  emptyRequestReply,
   emptyConsumers,
   emptyExports,
   emptyGrants,
@@ -66,6 +67,7 @@ export async function mockClusterApis(page: Page) {
   await mockJson(page, "**/api/v1/clusters/*/objects/buckets**", emptyBuckets);
   await mockJson(page, "**/api/v1/clusters/*/monitoring/varz**", emptyVarz);
   await mockJson(page, "**/api/v1/clusters/*/monitoring/connz**", emptyConnz);
+  await mockJson(page, "**/api/v1/clusters/*/request-reply**", emptyRequestReply);
   await mockJson(page, "**/api/v1/clusters/*/monitoring/jsz**", emptyJsz);
   await mockJson(page, "**/api/v1/clusters/*/metrics/history**", emptyMetricsHistory);
   await mockJson(page, "**/api/v1/clusters/*/access**", emptyGrants);

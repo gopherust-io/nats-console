@@ -7,7 +7,7 @@ import (
 	"github.com/valyala/fasthttp"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
-	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
+	"github.com/gopherust-io/nats-consol/internal/httpctx/httpstatus"
 )
 
 func BenchmarkStreamInfoFromNATSAllocs(b *testing.B) {
@@ -31,7 +31,7 @@ func BenchmarkStreamInfoFromNATSAllocs(b *testing.B) {
 	}
 }
 
-func BenchmarkWriteJSONAllocs(b *testing.B) {
+func BenchmarkWriteDataAllocs(b *testing.B) {
 	payload := domain.StreamInfo{
 		Config: domain.StreamConfigDTO{Name: "ORDERS", Retention: "limits", Storage: "file"},
 		State:  domain.StreamStateDTO{Messages: 10, FirstSeq: 1, LastSeq: 10, ConsumerCount: 2},
@@ -39,6 +39,6 @@ func BenchmarkWriteJSONAllocs(b *testing.B) {
 	ctx := &fasthttp.RequestCtx{}
 	b.ReportAllocs()
 	for b.Loop() {
-		serializer.WriteJSON(ctx, fasthttp.StatusOK, payload)
+		httpstatus.WriteData(ctx, fasthttp.StatusOK, payload)
 	}
 }

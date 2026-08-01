@@ -19,6 +19,8 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/metrics"
 	"github.com/gopherust-io/nats-consol/internal/port"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
+	"github.com/gopherust-io/nats-consol/pkg/common/safe"
 )
 
 const (
@@ -40,28 +42,28 @@ func NewHub(gateway port.ClusterGateway, cfg config.Config) *Hub {
 }
 
 func (h *Hub) liveWSMaxMessages() int {
-	if h.cfg.LiveWSMaxMessages > 0 {
-		return h.cfg.LiveWSMaxMessages
+	if h.cfg.LiveWS.MaxMessages > 0 {
+		return h.cfg.LiveWS.MaxMessages
 	}
 	return defaultLiveWSMaxMessages
 }
 
 func (h *Hub) liveWSIdleTimeout() time.Duration {
-	if h.cfg.LiveWSIdleTimeout > 0 {
-		return h.cfg.LiveWSIdleTimeout
+	if h.cfg.LiveWS.IdleTimeout > 0 {
+		return h.cfg.LiveWS.IdleTimeout
 	}
 	return defaultLiveWSIdleTimeout
 }
 
 func (h *Hub) liveWSRateLimit() time.Duration {
-	if h.cfg.LiveWSRateLimit > 0 {
-		return h.cfg.LiveWSRateLimit
+	if h.cfg.LiveWS.RateLimit > 0 {
+		return h.cfg.LiveWS.RateLimit
 	}
 	return defaultLiveWSRateLimit
 }
 
 func (h *Hub) gatewayTouchInterval() time.Duration {
-	ttl := h.cfg.NATSClientCacheTTL
+	ttl := h.cfg.NATS.ClientCacheTTL
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}
@@ -74,8 +76,8 @@ func (h *Hub) checkOrigin(ctx *fasthttp.RequestCtx) bool {
 	if len(origins) == 0 {
 		return true
 	}
-	origin := string(ctx.Request.Header.Peek("Origin"))
-	if origin == "" {
+	origin := strings.BytesToString(ctx.Request.Header.Peek("Origin"))
+	if strings.IsEmpty(origin) {
 		return true
 	}
 	for _, allowed := range origins {
@@ -86,22 +88,44 @@ func (h *Hub) checkOrigin(ctx *fasthttp.RequestCtx) bool {
 	return false
 }
 
+type FrameAction string
 type controlFrame struct {
-	Action string `json:"action"`
+	Action FrameAction `json:"action"`
+}
+
+const (
+	Pause  FrameAction = "pause"
+	Resume FrameAction = "resume"
+	Clear  FrameAction = "clear"
+)
+
+type FrameType string
+
+const (
+	Paused    FrameType = "paused"
+	Resumed   FrameType = "resumed"
+	Cleared   FrameType = "cleared"
+	Error     FrameType = "error"
+	Connected FrameType = "connected"
+)
+
+func (ft FrameType) String() string {
+	return string(ft)
 }
 
 type liveFrame struct {
-	Type    string `json:"type"`
-	Subject string `json:"subject,omitempty"`
-	Time    string `json:"time,omitempty"`
-	Data    string `json:"data,omitempty"`
-	Error   string `json:"error,omitempty"`
-	Seq     uint64 `json:"seq,omitempty"`
+	Type    FrameType         `json:"type"`
+	Subject string            `json:"subject,omitempty"`
+	Time    string            `json:"time,omitempty"`
+	Data    string            `json:"data,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Error   string            `json:"error,omitempty"`
+	Seq     uint64            `json:"seq,omitempty"`
 }
 
 func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 	clusterID, ok := ctx.UserValue("clusterId").(string)
-	if !ok || clusterID == "" {
+	if !ok || strings.IsEmpty(clusterID) {
 		ctx.Error("missing clusterId", fasthttp.StatusBadRequest)
 		return
 	}
@@ -111,14 +135,14 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	stream := string(ctx.QueryArgs().Peek("stream"))
-	if stream == "" {
+	stream := strings.BytesToString(ctx.QueryArgs().Peek("stream"))
+	if strings.IsEmpty(stream) {
 		ctx.Error("missing stream", fasthttp.StatusBadRequest)
 		return
 	}
-	subjectFilter := string(ctx.QueryArgs().Peek("subject"))
+	subjectFilter := strings.BytesToString(ctx.QueryArgs().Peek("subject"))
 	fromSeq := uint64(0)
-	if v := string(ctx.QueryArgs().Peek("fromSeq")); v != "" {
+	if v := strings.BytesToString(ctx.QueryArgs().Peek("fromSeq")); !strings.IsEmpty(v) {
 		parsed, err := strconv.ParseUint(v, 10, 64)
 		if err != nil {
 			ctx.Error("invalid fromSeq", fasthttp.StatusBadRequest)
@@ -221,8 +245,8 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 			return
 		}
 		cancel()
-		if message != "" {
-			_ = writeFrameOnce(liveFrame{Type: "error", Error: message})
+		if !strings.IsEmpty(message) {
+			_ = writeFrameOnce(liveFrame{Type: Error, Error: message})
 		}
 		_ = conn.Close()
 	}
@@ -240,7 +264,7 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 		return true
 	}
 
-	sendMessage := func(seq uint64, subject string, payload []byte, now time.Time) bool {
+	sendMessageFrame := func(frame []byte) bool {
 		mu.Lock()
 		if closed.Load() {
 			mu.Unlock()
@@ -248,7 +272,7 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 		}
 		if msgCount >= h.liveWSMaxMessages() {
 			mu.Unlock()
-			send(liveFrame{Type: "error", Error: "max messages reached"})
+			send(liveFrame{Type: Error, Error: "max messages reached"})
 			closeSession("")
 			return false
 		}
@@ -261,12 +285,7 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 		lastSent = time.Now()
 		mu.Unlock()
 
-		data, err := encodeMessageFrame(seq, subject, payload, now)
-		if err != nil {
-			closeSession("")
-			return false
-		}
-		if err := writeBytesOnce(data); err != nil {
+		if err := writeBytesOnce(frame); err != nil {
 			closeSession("")
 			return false
 		}
@@ -275,17 +294,12 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 		return true
 	}
 
-	if !send(liveFrame{Type: "connected", Subject: stream}) {
+	if !send(liveFrame{Type: Connected, Subject: stream}) {
 		return
 	}
 
-	viewer := &muxViewer{
-		send:     sendMessage,
-		paused:   &paused,
-		closed:   &closed,
-		truncate: h.cfg.LivePayloadTruncate(),
-	}
-	unsub, err := h.mux.attach(client, muxKey{cluster: clusterID, stream: stream, filter: subjectFilter}, fromSeq, viewer)
+	viewer := newMuxViewer(sendMessageFrame, &paused, &closed, h.cfg.LiveWS.PayloadTruncateBytes)
+	unsub, err := h.mux.attach(client, muxKey{cluster: clusterID, stream: stream, filter: subjectFilter, fromSeq: fromSeq}, fromSeq, viewer)
 	if err != nil {
 		closeSession(err.Error())
 		return
@@ -296,8 +310,11 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 	defer connPoll.Stop()
 
 	readDone := make(chan struct{})
+	const component = "live_ws"
+
 	go func() {
 		defer close(readDone)
+		defer safe.Recover(component)
 		for {
 			select {
 			case <-sessionCtx.Done():
@@ -319,21 +336,22 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 				continue
 			}
 			switch ctrl.Action {
-			case "pause":
+			case Pause:
 				paused.Store(true)
-				send(liveFrame{Type: "paused"})
-			case "resume":
+				send(liveFrame{Type: Paused})
+			case Resume:
 				paused.Store(false)
-				send(liveFrame{Type: "resumed"})
-			case "clear":
+				send(liveFrame{Type: Resumed})
+			case Clear:
 				mu.Lock()
 				msgCount = 0
 				mu.Unlock()
-				send(liveFrame{Type: "cleared"})
+				send(liveFrame{Type: Cleared})
 			}
 		}
 	}()
 
+	defer safe.Recover("live_ws")
 	for {
 		select {
 		case <-sessionCtx.Done():

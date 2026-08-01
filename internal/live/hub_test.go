@@ -22,9 +22,11 @@ func TestHubConfigDefaults(t *testing.T) {
 	assert.Equal(t, defaultLiveWSRateLimit, h.liveWSRateLimit())
 
 	custom := NewHub(nil, config.Config{
-		LiveWSMaxMessages: 42,
-		LiveWSIdleTimeout: 2 * time.Minute,
-		LiveWSRateLimit:   50 * time.Millisecond,
+		LiveWS: config.LiveWSConfig{
+			MaxMessages: 42,
+			IdleTimeout: 2 * time.Minute,
+			RateLimit:   50 * time.Millisecond,
+		},
 	})
 	assert.Equal(t, 42, custom.liveWSMaxMessages())
 	assert.Equal(t, 2*time.Minute, custom.liveWSIdleTimeout())

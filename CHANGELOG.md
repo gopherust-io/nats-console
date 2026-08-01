@@ -2,6 +2,37 @@
 
 All notable changes to NATS Consol are documented in this file.
 
+## [Unreleased]
+
+## [0.12.0] - 2026-08-01
+
+### Added
+
+- **Hidden Bottlenecks** — Docs hub mines recurring weekday×hour patterns from hourly rollups (lag × avg payload, optional fingerprint processing latency); not lag/CPU threshold alerts. `GET/POST …/hidden-bottlenecks` (+ `/ask`); sample Friday 18:00 showcase; Consumer Detail chip when matched (`METRICS_SNAPSHOT_BOTTLENECK_RETENTION`, default `672h`)
+- **Chaos Story Generator** — Docs hub invents realistic multi-act disasters from live inventory names (`GET …/chaos-story`, `POST …/chaos-story/generate`, `GET /api/v1/chaos-story/demo`); Black Friday sample; **Simulate** is a client-side narrative playbook only (no fault injection)
+- **Refresh tokens + device fingerprint** — short-lived RS256 access JWT (`SESSION_TTL`, default `15m`) plus opaque `nats_consol_refresh` cookie (`REFRESH_TOKEN_TTL`, default `168h`); access JWT claim `fph` and refresh rows bind to `SHA-256(User-Agent|ClientIP)`; `POST /api/v1/auth/refresh` rotates with CSRF; reuse of a replaced refresh revokes the user’s refresh family; SPA silently refreshes on 401
+- **Event Catalog** — Swagger-style subject docs (`GET/PUT/DELETE …/event-catalog`): auto-discover concrete subjects from JetStream, enrich with owner / description / JSON Schema / example / deprecation in Postgres, and list matching consumers (`/docs/event-catalog`)
+- **Event Wikipedia** — auto-assembled per-subject docs (`GET …/event-wikipedia`) under Docs: Purpose, History, Owner, Consumers, Examples, Schema, Related Events (Event Genome), Known Incidents (Audit deep links), Deprecation Status (`/docs/event-wikipedia`)
+- **Consumer behavior fingerprinting** — Consumer Detail shows Normal vs Current msg/min and processing latency from worker-published JetStream KV (`nats_consol_fingerprints`, configurable via `BEHAVIOR_FINGERPRINT_KV_BUCKET`); anomaly chip when workers report a regression
+- **Subject naming** — Topology **Subject naming** tab (`GET …/subject-naming`) flags wrong case, missing dots, non-dot separators, shallow hierarchy, and inconsistent subject variants with suggested `dot.lower` normalizations
+- **Event genome** — Topology **Event genome** tab (`GET …/event-genome`) clusters semantically duplicate subjects (action synonyms like `created`/`new`, singular/plural) with a suggested canonical form
+- **Slow consumer detection** — thresholds on pending / lag / ack-pending ratio; consumer API flags + UI badges; topology warnings use the same thresholds; alert metrics `jetstream.slow_consumers`, `jetstream.consumer_max_lag`, `jetstream.consumer_max_pending`, `jetstream.consumer_max_ack_pending`
+- **Connection Inspector** — expanded Connections view with RTT, IP, TLS version, user/account, connected-since, published/received counters, and slow-consumer indicator from `connz`
+
+### Removed
+
+- HTTP/3 / QUIC support: in-process listener, outbound h3 transport, Compose Caddy edge, Helm `http3` gateway, `h3_check`, and `open-https-h3.sh`
+- Related `HTTP3_*` config/env vars
+
+### Changed
+
+- Depend on [tel](https://github.com/gopherust-io/tel) **v0.3.0**, [env](https://github.com/gopherust-io/env) **v0.5.0**, [nats](https://github.com/gopherust-io/nats) **v0.4.0**; goalign **v1.3.0**
+- **Architecture Review** — Docs-only under `/docs/architecture-review` (removed Topology tab); `/admin/topology?view=review` redirects to Docs
+- **HTTP session JWTs** — login/invite sessions are **RS256** (RSA ≥2048) JWTs via `SESSION_PRIVATE_KEY` / `SESSION_PUBLIC_KEY` (replaces `SESSION_SECRET` HS256). Cookie delivery unchanged; `Authorization: Bearer` accepted for the same token. Existing HS256 cookies are invalid after upgrade (re-login).
+- Bumped Go module dependencies (`go get -u` / tidy) and web packages to latest (Vite 8, Recharts 3, ESLint 10); TypeScript held at 6.0.x for `typescript-eslint` peer compatibility
+- Database migrations now use **pressly/goose**; startup still applies pending SQL from `migrations/`, with a one-time bridge from legacy `schema_migrations` to `goose_db_version`
+- Local Compose defaults to plain **http://localhost:8080** (`PUBLIC_BASE_URL`); TLS termination is left to an external reverse proxy or Ingress
+
 ## [0.11.0] - 2026-07-26
 
 ### Added
@@ -17,6 +48,10 @@ All notable changes to NATS Consol are documented in this file.
 ### Changed
 
 - Default `docker compose up` no longer starts Keycloak; use `--profile sso` for optional OIDC demo
+- Default Compose stack starts **Caddy** (HTTPS + HTTP/3 on `:443`); `PUBLIC_BASE_URL` defaults to `https://localhost`
+- Helm sets `PUBLIC_BASE_URL=https://{{ http3.host }}` when `http3.enabled=true` unless `config.publicBaseUrl` is set
+- `scripts/open-https-h3.sh` opens Chrome with QUIC flags so DevTools Protocol shows `h3` for local Caddy
+- `h3_check` now performs a real HTTP/3 (QUIC) dial in addition to Alt-Svc checks
 - Admin **Console Users** label; Access tabs on system and account levels
 - Profiling is backend-only and on-demand (`/api/v1/pprof/*`, non-prod `/debug/pprof`); removed continuous sampler and Profiling UI
 

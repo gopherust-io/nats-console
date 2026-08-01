@@ -6,23 +6,75 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/bytedance/sonic"
+	"github.com/nats-io/nats.go"
 
 	"github.com/gopherust-io/nats-consol/pkg/common/bufpool"
 )
 
 func encodeLiveFrame(frame liveFrame) ([]byte, error) {
-	return sonic.Marshal(frame)
+	scratch := bufpool.Get()
+	defer bufpool.Put(scratch)
+	buf := *scratch
+
+	buf = append(buf, `{"type":`...)
+	buf = appendJSONString(buf, frame.Type.String())
+	if frame.Subject != "" {
+		buf = append(buf, `,"subject":`...)
+		buf = appendJSONString(buf, frame.Subject)
+	}
+	if frame.Time != "" {
+		buf = append(buf, `,"time":`...)
+		buf = appendJSONString(buf, frame.Time)
+	}
+	if frame.Data != "" {
+		buf = append(buf, `,"data":`...)
+		buf = appendJSONString(buf, frame.Data)
+	}
+	if len(frame.Headers) > 0 {
+		buf = append(buf, `,"headers":`...)
+		buf = appendJSONHeaders(buf, frame.Headers)
+	}
+	if frame.Error != "" {
+		buf = append(buf, `,"error":`...)
+		buf = appendJSONString(buf, frame.Error)
+	}
+	if frame.Seq != 0 {
+		buf = append(buf, `,"seq":`...)
+		buf = strconv.AppendUint(buf, frame.Seq, 10)
+	}
+	buf = append(buf, '}')
+	*scratch = buf
+
+	out := make([]byte, len(buf))
+	copy(out, buf)
+	return out, nil
 }
 
 // EncodeMessageFrame encodes a live message frame for benchmarks and tests.
-func EncodeMessageFrame(seq uint64, subject string, payload []byte, now time.Time) ([]byte, error) {
-	return encodeMessageFrame(seq, subject, payload, now)
+func EncodeMessageFrame(seq uint64, subject string, payload []byte, now time.Time, headers map[string]string) ([]byte, error) {
+	return encodeMessageFrame(seq, subject, payload, headers, now)
 }
 
-func encodeMessageFrame(seq uint64, subject string, payload []byte, now time.Time) ([]byte, error) {
-	buf := bufpool.GetBytes()
-	defer bufpool.PutBytes(buf)
+func headerMapFromNATS(h nats.Header) map[string]string {
+	if len(h) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(h))
+	for k, vals := range h {
+		if len(vals) > 0 {
+			out[k] = vals[0]
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func encodeMessageFrame(seq uint64, subject string, payload []byte, headers map[string]string, now time.Time) ([]byte, error) {
+	scratch := bufpool.Get()
+	defer bufpool.Put(scratch)
+	buf := *scratch
 
 	buf = append(buf, `{"type":"message","seq":`...)
 	buf = strconv.AppendUint(buf, seq, 10)
@@ -36,11 +88,34 @@ func encodeMessageFrame(seq uint64, subject string, payload []byte, now time.Tim
 	buf = growSlice(buf, n)
 	base64.StdEncoding.Encode(buf[start:start+n], payload)
 	buf = buf[:start+n]
-	buf = append(buf, `"}`...)
+	buf = append(buf, '"')
+
+	if len(headers) > 0 {
+		buf = append(buf, `,"headers":`...)
+		buf = appendJSONHeaders(buf, headers)
+	}
+
+	buf = append(buf, '}')
+	*scratch = buf
 
 	out := make([]byte, len(buf))
 	copy(out, buf)
 	return out, nil
+}
+
+func appendJSONHeaders(dst []byte, headers map[string]string) []byte {
+	dst = append(dst, '{')
+	first := true
+	for k, v := range headers {
+		if !first {
+			dst = append(dst, ',')
+		}
+		first = false
+		dst = appendJSONString(dst, k)
+		dst = append(dst, ':')
+		dst = appendJSONString(dst, v)
+	}
+	return append(dst, '}')
 }
 
 func growSlice(buf []byte, n int) []byte {

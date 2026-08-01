@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -10,6 +9,9 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+
+	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 type streamPlacementRequest struct {
@@ -137,7 +139,7 @@ func (r streamConfigRequest) toNATS() (nats.StreamConfig, error) {
 	if r.AllowMsgTTL != nil {
 		cfg.AllowMsgTTL = *r.AllowMsgTTL
 	}
-	if r.Mirror != nil && r.Mirror.Name != "" {
+	if r.Mirror != nil && !commonstrings.IsEmpty(r.Mirror.Name) {
 		src, err := r.Mirror.toNATS()
 		if err != nil {
 			return cfg, fmt.Errorf("mirror: %w", err)
@@ -148,7 +150,7 @@ func (r streamConfigRequest) toNATS() (nats.StreamConfig, error) {
 	if len(r.Sources) > 0 {
 		cfg.Sources = make([]*nats.StreamSource, 0, len(r.Sources))
 		for i, srcReq := range r.Sources {
-			if strings.TrimSpace(srcReq.Name) == "" {
+			if commonstrings.IsEmpty(strings.TrimSpace(srcReq.Name)) {
 				continue
 			}
 			src, err := srcReq.toNATS()
@@ -158,41 +160,41 @@ func (r streamConfigRequest) toNATS() (nats.StreamConfig, error) {
 			cfg.Sources = append(cfg.Sources, src)
 		}
 	}
-	if r.Retention != "" {
+	if !commonstrings.IsEmpty(r.Retention) {
 		if err := unmarshalEnum(r.Retention, &cfg.Retention); err != nil {
 			return cfg, fmt.Errorf("retention: %w", err)
 		}
 	}
-	if r.Storage != "" {
+	if !commonstrings.IsEmpty(r.Storage) {
 		if err := unmarshalEnum(r.Storage, &cfg.Storage); err != nil {
 			return cfg, fmt.Errorf("storage: %w", err)
 		}
 	} else {
 		cfg.Storage = nats.FileStorage
 	}
-	if r.Discard != "" {
+	if !commonstrings.IsEmpty(r.Discard) {
 		if err := unmarshalEnum(r.Discard, &cfg.Discard); err != nil {
 			return cfg, fmt.Errorf("discard: %w", err)
 		}
 	}
-	if r.Compression != "" {
+	if !commonstrings.IsEmpty(r.Compression) {
 		if err := unmarshalEnum(r.Compression, &cfg.Compression); err != nil {
 			return cfg, fmt.Errorf("compression: %w", err)
 		}
 	}
-	if r.Placement != nil && (r.Placement.Cluster != "" || len(r.Placement.Tags) > 0) {
+	if r.Placement != nil && (!commonstrings.IsEmpty(r.Placement.Cluster) || len(r.Placement.Tags) > 0) {
 		cfg.Placement = &nats.Placement{
 			Cluster: r.Placement.Cluster,
 			Tags:    append([]string(nil), r.Placement.Tags...),
 		}
 	}
-	if r.SubjectTransform != nil && r.SubjectTransform.Destination != "" {
+	if r.SubjectTransform != nil && !commonstrings.IsEmpty(r.SubjectTransform.Destination) {
 		cfg.SubjectTransform = &nats.SubjectTransformConfig{
 			Source:      r.SubjectTransform.Source,
 			Destination: r.SubjectTransform.Destination,
 		}
 	}
-	if r.RePublish != nil && r.RePublish.Destination != "" {
+	if r.RePublish != nil && !commonstrings.IsEmpty(r.RePublish.Destination) {
 		cfg.RePublish = &nats.RePublish{
 			Source:      r.RePublish.Source,
 			Destination: r.RePublish.Destination,
@@ -214,7 +216,7 @@ func (r streamSourceRequest) toNATS() (*nats.StreamSource, error) {
 		FilterSubject: r.FilterSubject,
 		OptStartSeq:   r.OptStartSeq,
 	}
-	if strings.TrimSpace(r.OptStartTime) != "" {
+	if !commonstrings.IsEmpty(strings.TrimSpace(r.OptStartTime)) {
 		t, err := time.Parse(time.RFC3339Nano, r.OptStartTime)
 		if err != nil {
 			t, err = time.Parse(time.RFC3339, r.OptStartTime)
@@ -224,7 +226,7 @@ func (r streamSourceRequest) toNATS() (*nats.StreamSource, error) {
 		}
 		src.OptStartTime = &t
 	}
-	if r.External != nil && (r.External.APIPrefix != "" || r.External.DeliverPrefix != "") {
+	if r.External != nil && (!commonstrings.IsEmpty(r.External.APIPrefix) || !commonstrings.IsEmpty(r.External.DeliverPrefix)) {
 		src.External = &nats.ExternalStream{
 			APIPrefix:     r.External.APIPrefix,
 			DeliverPrefix: r.External.DeliverPrefix,
@@ -302,22 +304,22 @@ func (r consumerConfigRequest) toNATS() (nats.ConsumerConfig, error) {
 		MemoryStorage:      r.MemoryStorage,
 		Metadata:           cloneStringMap(r.Metadata),
 	}
-	if r.DeliverPolicy != "" {
+	if !commonstrings.IsEmpty(r.DeliverPolicy) {
 		if err := unmarshalEnum(r.DeliverPolicy, &cfg.DeliverPolicy); err != nil {
 			return cfg, fmt.Errorf("deliverPolicy: %w", err)
 		}
 	}
-	if r.AckPolicy != "" {
+	if !commonstrings.IsEmpty(r.AckPolicy) {
 		if err := unmarshalEnum(r.AckPolicy, &cfg.AckPolicy); err != nil {
 			return cfg, fmt.Errorf("ackPolicy: %w", err)
 		}
 	}
-	if r.ReplayPolicy != "" {
+	if !commonstrings.IsEmpty(r.ReplayPolicy) {
 		if err := unmarshalEnum(r.ReplayPolicy, &cfg.ReplayPolicy); err != nil {
 			return cfg, fmt.Errorf("replayPolicy: %w", err)
 		}
 	}
-	if strings.TrimSpace(r.OptStartTime) != "" {
+	if !commonstrings.IsEmpty(strings.TrimSpace(r.OptStartTime)) {
 		t, err := time.Parse(time.RFC3339Nano, r.OptStartTime)
 		if err != nil {
 			t, err = time.Parse(time.RFC3339, r.OptStartTime)
@@ -393,27 +395,27 @@ func (r kvBucketConfigRequest) toKVConfig() (nats.KeyValueConfig, error) {
 		Replicas:     replicas,
 		Compression:  r.Compression,
 	}
-	if r.Storage != "" {
+	if !commonstrings.IsEmpty(r.Storage) {
 		if err := unmarshalEnum(r.Storage, &cfg.Storage); err != nil {
 			return cfg, fmt.Errorf("storage: %w", err)
 		}
 	} else {
 		cfg.Storage = nats.FileStorage
 	}
-	if r.Placement != nil && (r.Placement.Cluster != "" || len(r.Placement.Tags) > 0) {
+	if r.Placement != nil && (!commonstrings.IsEmpty(r.Placement.Cluster) || len(r.Placement.Tags) > 0) {
 		cfg.Placement = &nats.Placement{
 			Cluster: r.Placement.Cluster,
 			Tags:    append([]string(nil), r.Placement.Tags...),
 		}
 	}
-	if r.RePublish != nil && r.RePublish.Destination != "" {
+	if r.RePublish != nil && !commonstrings.IsEmpty(r.RePublish.Destination) {
 		cfg.RePublish = &nats.RePublish{
 			Source:      r.RePublish.Source,
 			Destination: r.RePublish.Destination,
 			HeadersOnly: r.RePublish.HeadersOnly,
 		}
 	}
-	if r.Mirror != nil && strings.TrimSpace(r.Mirror.Name) != "" {
+	if r.Mirror != nil && !commonstrings.IsEmpty(strings.TrimSpace(r.Mirror.Name)) {
 		src, err := r.Mirror.toNATS()
 		if err != nil {
 			return cfg, fmt.Errorf("mirror: %w", err)
@@ -423,7 +425,7 @@ func (r kvBucketConfigRequest) toKVConfig() (nats.KeyValueConfig, error) {
 	if len(r.Sources) > 0 {
 		cfg.Sources = make([]*nats.StreamSource, 0, len(r.Sources))
 		for i, srcReq := range r.Sources {
-			if strings.TrimSpace(srcReq.Name) == "" {
+			if commonstrings.IsEmpty(strings.TrimSpace(srcReq.Name)) {
 				continue
 			}
 			src, err := srcReq.toNATS()
@@ -466,14 +468,14 @@ func (r objectBucketConfigRequest) toObjectConfig() (nats.ObjectStoreConfig, err
 		Compression: r.Compression,
 		Metadata:    r.Metadata,
 	}
-	if r.Storage != "" {
+	if !commonstrings.IsEmpty(r.Storage) {
 		if err := unmarshalEnum(r.Storage, &cfg.Storage); err != nil {
 			return cfg, fmt.Errorf("storage: %w", err)
 		}
 	} else {
 		cfg.Storage = nats.FileStorage
 	}
-	if r.Placement != nil && (r.Placement.Cluster != "" || len(r.Placement.Tags) > 0) {
+	if r.Placement != nil && (!commonstrings.IsEmpty(r.Placement.Cluster) || len(r.Placement.Tags) > 0) {
 		cfg.Placement = &nats.Placement{
 			Cluster: r.Placement.Cluster,
 			Tags:    append([]string(nil), r.Placement.Tags...),
@@ -483,5 +485,5 @@ func (r objectBucketConfigRequest) toObjectConfig() (nats.ObjectStoreConfig, err
 }
 
 func unmarshalEnum[T any](value string, target *T) error {
-	return json.Unmarshal([]byte(`"`+value+`"`), target)
+	return serializer.Unmarshal(commonstrings.StringToBytes(`"`+value+`"`), target)
 }

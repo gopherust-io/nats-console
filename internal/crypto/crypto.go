@@ -10,15 +10,16 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 const encryptedPrefix = "enc:"
 
 var (
-	ErrMissingKey   = errors.New("encryption key is required")
-	ErrInvalidKey   = errors.New("encryption key must be at least 16 characters")
-	ErrDecrypt      = errors.New("decrypt credential")
-	ErrNotEncrypted = errors.New("value is not encrypted")
+	ErrMissingKey = errors.New("encryption key is required")
+	ErrInvalidKey = errors.New("encryption key must be at least 16 characters")
+	ErrDecrypt    = errors.New("decrypt credential")
 )
 
 type Encryptor struct {
@@ -26,14 +27,14 @@ type Encryptor struct {
 }
 
 func New(key string) (*Encryptor, error) {
-	if key == "" {
+	if commonstrings.IsEmpty(key) {
 		return nil, ErrMissingKey
 	}
 	if len(key) < 16 {
 		return nil, ErrInvalidKey
 	}
 
-	sum := sha256.Sum256([]byte(key))
+	sum := sha256.Sum256(commonstrings.StringToBytes(key))
 	block, err := aes.NewCipher(sum[:])
 	if err != nil {
 		return nil, fmt.Errorf("aes cipher: %w", err)
@@ -50,7 +51,7 @@ func IsEncrypted(value string) bool {
 }
 
 func (e *Encryptor) Encrypt(plaintext string) (string, error) {
-	if plaintext == "" {
+	if commonstrings.IsEmpty(plaintext) {
 		return "", nil
 	}
 	if IsEncrypted(plaintext) {
@@ -62,12 +63,12 @@ func (e *Encryptor) Encrypt(plaintext string) (string, error) {
 		return "", fmt.Errorf("nonce: %w", err)
 	}
 
-	ciphertext := e.gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	ciphertext := e.gcm.Seal(nonce, nonce, commonstrings.StringToBytes(plaintext), nil)
 	return encryptedPrefix + base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
 func (e *Encryptor) Decrypt(value string) (string, error) {
-	if value == "" {
+	if commonstrings.IsEmpty(value) {
 		return "", nil
 	}
 	if !IsEncrypted(value) {
@@ -89,11 +90,11 @@ func (e *Encryptor) Decrypt(value string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrDecrypt, err)
 	}
-	return string(plaintext), nil
+	return commonstrings.BytesToString(plaintext), nil
 }
 
 func (e *Encryptor) EncryptIfNeeded(value string) (string, error) {
-	if value == "" || IsEncrypted(value) {
+	if commonstrings.IsEmpty(value) || IsEncrypted(value) {
 		return value, nil
 	}
 	return e.Encrypt(value)

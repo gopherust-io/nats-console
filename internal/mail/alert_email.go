@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 // AlertEmailContent holds subject and bodies for an opened alert.
@@ -55,13 +56,13 @@ func themeForSeverity(severity string) severityTheme {
 
 func BuildAlertEmail(alert domain.Alert, clusterName, publicBaseURL string) AlertEmailContent {
 	ruleLabel := alert.RuleName
-	if ruleLabel == "" {
+	if commonstrings.IsEmpty(ruleLabel) {
 		ruleLabel = alert.Message
 	}
 	subject := fmt.Sprintf("[nats-consol] %s: %s", alert.Severity, ruleLabel)
 
 	clusterLabel := clusterName
-	if clusterLabel == "" {
+	if commonstrings.IsEmpty(clusterLabel) {
 		clusterLabel = alert.ClusterID
 	}
 	link := strings.TrimRight(publicBaseURL, "/") + "/admin/alerts"
@@ -219,7 +220,7 @@ func detailRow(label, valueHTML string) string {
 // IsPlaceholderEmail reports bootstrap/local placeholder addresses that should not receive mail.
 func IsPlaceholderEmail(email string) bool {
 	email = strings.TrimSpace(strings.ToLower(email))
-	if email == "" {
+	if commonstrings.IsEmpty(email) {
 		return true
 	}
 	return strings.HasSuffix(email, "@local")

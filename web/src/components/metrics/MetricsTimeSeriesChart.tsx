@@ -78,9 +78,11 @@ function MetricsTimeSeriesChart({
                 <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} width={56} />
                 <Tooltip
                   labelFormatter={(value) => new Date(Number(value)).toLocaleString()}
-                  formatter={(value: number, name: string) => {
-                    const item = series.find((s) => s.key === name);
-                    return [item?.formatValue ? item.formatValue(value) : value, item?.label ?? name];
+                  formatter={(value, name) => {
+                    const key = String(name);
+                    const item = series.find((s) => s.key === key);
+                    const num = typeof value === "number" ? value : Number(value);
+                    return [item?.formatValue ? item.formatValue(num) : num, item?.label ?? key];
                   }}
                   contentStyle={{
                     background: "var(--bg-card)",
@@ -117,9 +119,11 @@ function MetricsTimeSeriesChart({
                 <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} width={56} />
                 <Tooltip
                   labelFormatter={(value) => new Date(Number(value)).toLocaleString()}
-                  formatter={(value: number, name: string) => {
-                    const item = series.find((s) => s.key === name);
-                    return [item?.formatValue ? item.formatValue(value) : value, item?.label ?? name];
+                  formatter={(value, name) => {
+                    const key = String(name);
+                    const item = series.find((s) => s.key === key);
+                    const num = typeof value === "number" ? value : Number(value);
+                    return [item?.formatValue ? item.formatValue(num) : num, item?.label ?? key];
                   }}
                   contentStyle={{
                     background: "var(--bg-card)",

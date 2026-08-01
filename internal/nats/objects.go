@@ -8,6 +8,7 @@ import (
 	libnats "github.com/gopherust-io/nats"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/pkg/common/b64util"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/nats-io/nats.go"
 )
 
@@ -36,7 +37,7 @@ func (c *Client) CreateObjectBucket(ctx context.Context, cfg *nats.ObjectStoreCo
 }
 
 func (c *Client) UpdateObjectBucket(ctx context.Context, cfg *nats.ObjectStoreConfig) (*domain.ObjectBucketInfo, error) {
-	if cfg == nil || cfg.Bucket == "" {
+	if cfg == nil || strings.IsEmpty(cfg.Bucket) {
 		return nil, errors.New("bucket is required")
 	}
 	if err := c.applyObjectStreamConfig(ctx, cfg); err != nil {
@@ -72,7 +73,7 @@ func (c *Client) applyObjectStreamConfig(ctx context.Context, cfg *nats.ObjectSt
 	} else {
 		sc.Compression = nats.NoCompression
 	}
-	if cfg.Placement != nil && (cfg.Placement.Cluster != "" || len(cfg.Placement.Tags) > 0) {
+	if cfg.Placement != nil && (!strings.IsEmpty(cfg.Placement.Cluster) || len(cfg.Placement.Tags) > 0) {
 		sc.Placement = &nats.Placement{
 			Cluster: cfg.Placement.Cluster,
 			Tags:    append([]string(nil), cfg.Placement.Tags...),
@@ -118,7 +119,7 @@ func (c *Client) GetObjectBucket(ctx context.Context, bucket string) (*domain.Ob
 	info.Compressed = sc.Compression == nats.S2Compression
 	info.Sealed = sc.Sealed
 	info.Metadata = cloneStringMap(sc.Metadata)
-	if sc.Placement != nil && (sc.Placement.Cluster != "" || len(sc.Placement.Tags) > 0) {
+	if sc.Placement != nil && (!strings.IsEmpty(sc.Placement.Cluster) || len(sc.Placement.Tags) > 0) {
 		info.Placement = &domain.ObjectPlacement{
 			Cluster: sc.Placement.Cluster,
 			Tags:    append([]string(nil), sc.Placement.Tags...),

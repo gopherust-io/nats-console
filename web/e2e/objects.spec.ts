@@ -94,10 +94,9 @@ test.describe("objects", () => {
 
     await page.goto(objectsBase);
     await expect(page.getByRole("link", { name: "BLOBS" })).toBeVisible();
-    page.once("dialog", (dialog) => {
-      void dialog.accept();
-    });
     await page.getByRole("button", { name: "Delete" }).click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Delete" }).click();
     await expect.poll(() => deleted).toBe(true);
     await expect(page.getByRole("heading", { name: "No object buckets yet" })).toBeVisible();
   });

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +17,7 @@ func TestWrapErrorRateLimit(t *testing.T) {
 }
 
 func TestMapGeminiHTTPErrorQuota(t *testing.T) {
-	raw := []byte(`{"error":{"code":429,"message":"Quota exceeded for metric: generate_content_free_tier_requests, limit: 0, model: gemini-2.0-flash","status":"RESOURCE_EXHAUSTED"}}`)
+	raw := strings.StringToBytes(`{"error":{"code":429,"message":"Quota exceeded for metric: generate_content_free_tier_requests, limit: 0, model: gemini-2.0-flash","status":"RESOURCE_EXHAUSTED"}}`)
 	err := mapGeminiHTTPError("gemini-2.0-flash", 429, raw)
 	require.Equal(t, CodeQuota, err.Code, "expected quota")
 	assert.False(t, err.Retryable, "quota should not be retryable")

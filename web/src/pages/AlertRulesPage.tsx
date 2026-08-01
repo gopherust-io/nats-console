@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Alert from "../components/ui/Alert";
 import EmptyState from "../components/ui/EmptyState";
 import PageHeader from "../components/ui/PageHeader";
+import QueryErrorState from "../components/ui/QueryErrorState";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import {
   createAlertRule,
   deleteAlertRule,
@@ -55,6 +57,7 @@ function formFromRule(rule: AlertRule): FormState {
 
 export default function AlertRulesPage() {
   const { t } = useTranslation();
+  const { askConfirm, confirmDialog } = useConfirmDialog();
   const { canManageAlertRules } = useAuth();
   const { clusterId, clusters } = useCluster();
   const queryClient = useQueryClient();
@@ -169,6 +172,7 @@ export default function AlertRulesPage() {
 
   return (
     <div className="page">
+      {confirmDialog}
       <PageHeader
         eyebrow={t("alerts.eyebrow")}
         title={t("alerts.rulesTitle")}
@@ -180,7 +184,10 @@ export default function AlertRulesPage() {
         }
       />
 
-      <Alert variant="error">{error || (rulesQuery.error instanceof Error ? rulesQuery.error.message : "")}</Alert>
+      {rulesQuery.isError && (
+        <QueryErrorState error={rulesQuery.error} onRetry={() => void rulesQuery.refetch()} />
+      )}
+      {error && <Alert variant="error">{error}</Alert>}
 
       <section className="panel" style={{ marginBottom: 20 }}>
         <h2 className="panel__title">{editing ? t("alerts.editRule") : t("alerts.createRule")}</h2>
@@ -302,7 +309,7 @@ export default function AlertRulesPage() {
                 <tr key={rule.id}>
                   <td>
                     <div>{rule.name}</div>
-                    <div className="text-muted" style={{ fontSize: "0.8rem" }}>
+                    <div className="text-muted text-md">
                       {rule.message}
                     </div>
                   </td>
@@ -337,11 +344,13 @@ export default function AlertRulesPage() {
                         type="button"
                         className="btn btn--secondary btn--small"
                         disabled={deleteMutation.isPending}
-                        onClick={() => {
-                          if (window.confirm(t("alerts.confirmDelete", { name: rule.name }))) {
-                            deleteMutation.mutate(rule.id);
-                          }
-                        }}
+                        onClick={() =>
+                          askConfirm({
+                            title: t("alerts.confirmDeleteTitle"),
+                            description: t("alerts.confirmDelete", { name: rule.name }),
+                            action: () => deleteMutation.mutate(rule.id),
+                          })
+                        }
                       >
                         {t("common.delete")}
                       </button>

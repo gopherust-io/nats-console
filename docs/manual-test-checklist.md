@@ -10,7 +10,7 @@ Use after a deploy or upgrade. For automated API coverage against a running stac
 ## UI smoke (5–10 minutes)
 
 1. **Login** — Sign in; land on Systems; brand and shell chrome visible.
-2. **Systems** — Open the default system; open account **Default**.
+2. **Systems** — Open the default system; open account **Default**. Confirm **Replicas** tab lists the monitored server (single-node) or all peers (cluster lab).
 3. **JetStream** — Open JetStream hub; create a short-lived stream (or open an existing one).
 4. **Publish** — On stream detail, publish a small JSON message; confirm it appears in the message browser (or state updates).
 5. **Live tail** — Open Live Tail; confirm the page connects (badge / waiting state is acceptable if idle).

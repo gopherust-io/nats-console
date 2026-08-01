@@ -7,15 +7,13 @@ import VirtualTable from "../components/VirtualTable";
 import Alert from "../components/ui/Alert";
 import EmptyState from "../components/ui/EmptyState";
 import PageHeader from "../components/ui/PageHeader";
+import QueryErrorState from "../components/ui/QueryErrorState";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { api, clusterPath, jetStreamUIBase, ObjectBucketInfo } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
-import { clusterQueryKey } from "../lib/query";
-
-type BucketListResponse = {
-  buckets: ObjectBucketInfo[];
-  total: number;
-};
+import { HUB_LIST_POLL_MS } from "../lib/constants";
+import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
 
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
@@ -26,8 +24,10 @@ function formatBytes(value: number) {
 
 export default function ObjectBucketsPage() {
   const { t } = useTranslation();
-  const { accountName } = useParams();
-  const { clusterId } = useCluster();
+  const { askConfirm, confirmDialog } = useConfirmDialog();
+  const { accountName, clusterId: routeCluster } = useParams();
+  const { clusterId: contextClusterId } = useCluster();
+  const clusterId = routeCluster ?? contextClusterId;
   const { canManageJetStream } = useAuth();
   const jsBase = clusterId ? jetStreamUIBase(clusterId, accountName) : "";
   const queryClient = useQueryClient();
@@ -38,13 +38,12 @@ export default function ObjectBucketsPage() {
 
   const bucketsQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "object-buckets"),
-    queryFn: () => api<BucketListResponse>(clusterPath(clusterId!, "/objects/buckets")),
+    queryFn: async () => (await api<ObjectBucketInfo[]>(clusterPath(clusterId!, "/objects/buckets"))).data ?? [],
     enabled: Boolean(clusterId),
+    refetchInterval: visibilityAwareInterval(HUB_LIST_POLL_MS),
   });
 
-  const buckets = bucketsQuery.data?.buckets ?? [];
-  const error =
-    actionError || (bucketsQuery.error instanceof Error ? bucketsQuery.error.message : "");
+  const buckets = bucketsQuery.data ?? [];
 
   async function invalidateBuckets() {
     await queryClient.invalidateQueries({ queryKey: clusterQueryKey(clusterId, "object-buckets") });
@@ -71,19 +70,26 @@ export default function ObjectBucketsPage() {
     }
   }
 
-  async function deleteBucket(name: string) {
-    if (!clusterId || !confirm(`Delete object bucket "${name}"?`)) return;
-    try {
-      await api(clusterPath(clusterId, `/objects/buckets/${encodeURIComponent(name)}`), { method: "DELETE" });
-      setActionError("");
-      await invalidateBuckets();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to delete bucket");
-    }
+  function deleteBucket(name: string) {
+    if (!clusterId) return;
+    askConfirm({
+      title: t("objects.confirmDeleteTitle"),
+      description: t("objects.confirmDelete", { name }),
+      action: async () => {
+        try {
+          await api(clusterPath(clusterId, `/objects/buckets/${encodeURIComponent(name)}`), { method: "DELETE" });
+          setActionError("");
+          await invalidateBuckets();
+        } catch (err) {
+          setActionError(err instanceof Error ? err.message : "Failed to delete bucket");
+        }
+      },
+    });
   }
 
   return (
     <div className="page">
+      {confirmDialog}
       <PageHeader
         eyebrow="JetStream"
         title="Object Stores"
@@ -104,7 +110,10 @@ export default function ObjectBucketsPage() {
         }
       />
 
-      <Alert variant="error">{error}</Alert>
+      <Alert variant="error">{actionError}</Alert>
+      {bucketsQuery.isError && (
+        <QueryErrorState error={bucketsQuery.error} onRetry={() => void bucketsQuery.refetch()} />
+      )}
 
       <CreateObjectBucketPanel
         mode="create"

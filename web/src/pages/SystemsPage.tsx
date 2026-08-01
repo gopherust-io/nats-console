@@ -3,18 +3,15 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import Alert from "../components/ui/Alert";
+import QueryErrorState from "../components/ui/QueryErrorState";
 import { api, clusterPath } from "../lib/api";
 import { useCluster } from "../lib/cluster";
+import { SYSTEMS_CONNECTIONS_POLL_MS, MONITORING_POLL_MS } from "../lib/constants";
 import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
 
 type ConnStatus = {
   clusterId: string;
   connected: boolean;
-};
-
-type ConnectionsList = {
-  connections: ConnStatus[];
-  total: number;
 };
 
 export default function SystemsPage() {
@@ -23,13 +20,13 @@ export default function SystemsPage() {
 
   const connectionsQuery = useQuery({
     queryKey: ["clusters", "connections"],
-    queryFn: () => api<ConnectionsList>("/api/v1/clusters/connections"),
-    refetchInterval: visibilityAwareInterval(15_000),
+    queryFn: async () => (await api<ConnStatus[]>("/api/v1/clusters/connections")).data ?? [],
+    refetchInterval: visibilityAwareInterval(SYSTEMS_CONNECTIONS_POLL_MS),
   });
 
   const statusById = useMemo(() => {
     const map = new Map<string, ConnStatus>();
-    for (const c of connectionsQuery.data?.connections ?? []) {
+    for (const c of connectionsQuery.data ?? []) {
       map.set(c.clusterId, c);
     }
     return map;
@@ -42,15 +39,29 @@ export default function SystemsPage() {
           <h1 className="nc-page-title">{t("systems.title")}</h1>
           <p className="nc-page-sub">{t("systems.subtitle")}</p>
         </div>
-        <Link className="btn" to="/systems/clusters">
-          {t("nav.clusters")}
-        </Link>
       </div>
 
       {error && <Alert variant="error">{error}</Alert>}
+      {connectionsQuery.isError && (
+        <QueryErrorState
+          error={connectionsQuery.error}
+          title={t("errors.connectionsStatus")}
+          onRetry={() => void connectionsQuery.refetch()}
+        />
+      )}
       {loading && <p className="text-muted">{t("systems.loading")}</p>}
 
       <div className="nc-card-grid">
+        <Link className="nc-system-card" to="/systems/clusters">
+          <div className="nc-system-card__body">
+            <div>
+              <div className="nc-system-card__name">{t("nav.clusters")}</div>
+              <div className="nc-system-card__meta">
+                <span>{t("systems.clustersCardDesc")}</span>
+              </div>
+            </div>
+          </div>
+        </Link>
         {clusters.map((cluster) => {
           const connected = statusById.get(cluster.id)?.connected === true;
           return (
@@ -79,8 +90,9 @@ export function SystemUsagePage() {
   const { clusterId } = useCluster();
   const accountQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "account"),
-    queryFn: () => api(clusterPath(clusterId!, "/account")),
+    queryFn: async () => (await api(clusterPath(clusterId!, "/account"))).data,
     enabled: Boolean(clusterId),
+    refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
   });
 
   const account = accountQuery.data as {
@@ -100,6 +112,9 @@ export function SystemUsagePage() {
     <div>
       <h1 className="nc-page-title">{t("systems.usageTitle")}</h1>
       <p className="nc-page-sub">{t("systems.usageSubtitle")}</p>
+      {accountQuery.isError && (
+        <QueryErrorState error={accountQuery.error} onRetry={() => void accountQuery.refetch()} />
+      )}
       <div className="nc-usage-grid">
         <div className="nc-usage-card">
           <div className="nc-usage-card__label">{t("systems.streams")}</div>
