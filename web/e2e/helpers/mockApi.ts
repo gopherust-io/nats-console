@@ -60,7 +60,10 @@ export async function mockShell(page: Page, user: AuthUserFixture = ADMIN) {
 
 /** Common cluster-scoped GETs so account/jetstream pages render cleanly. */
 export async function mockClusterApis(page: Page) {
-  await mockJson(page, "**/api/v1/clusters/connections", { data: connectedStatus });
+  await mockJson(page, "**/api/v1/clusters/connections", {
+    data: connectedStatus,
+    meta: { total: connectedStatus.length },
+  });
   await mockJson(page, "**/api/v1/clusters/*/account", { data: emptyAccount });
   await mockJson(page, "**/api/v1/clusters/*/streams**", emptyStreams);
   await mockJson(page, "**/api/v1/clusters/*/kv/buckets**", emptyBuckets);

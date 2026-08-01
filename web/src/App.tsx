@@ -135,7 +135,10 @@ export default function App() {
           <Route path="systems/:clusterId/accounts/:accountName/users" element={<SuspensePage><NatsUsersPage /></SuspensePage>} />
           <Route path="systems/:clusterId/accounts/:accountName/access" element={<SuspensePage><AccessPage scope="account" /></SuspensePage>} />
           <Route path="systems/:clusterId/accounts/:accountName/sharing" element={<SuspensePage><SharingPage /></SuspensePage>} />
-          <Route path="systems/:clusterId/accounts/:accountName/settings" element={<Navigate to=".." replace />} />
+          <Route
+            path="systems/:clusterId/accounts/:accountName/settings"
+            element={<Navigate to=".." relative="path" replace />}
+          />
 
           <Route path="docs" element={<SuspensePage><DocsPage /></SuspensePage>} />
           <Route path="docs/event-catalog" element={<SuspensePage><EventCatalogPage /></SuspensePage>} />

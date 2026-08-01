@@ -49,7 +49,8 @@ if [[ -z "$csrf" ]]; then
   exit 1
 fi
 
-curl_sf -b "$cookie_jar" "${BASE_URL}/api/v1/clusters" | grep -q '"clusters"'
+# API responses use { data, meta } envelopes (not legacy { clusters } / { streams }).
+curl_sf -b "$cookie_jar" "${BASE_URL}/api/v1/clusters" | grep -q '"data"'
 
 cluster_id="$(curl_sf -b "$cookie_jar" "${BASE_URL}/api/v1/clusters" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)"
 if [[ -z "$cluster_id" ]]; then
@@ -58,7 +59,7 @@ if [[ -z "$cluster_id" ]]; then
 fi
 
 echo "==> smoke: streams list (cluster ${cluster_id})"
-curl_sf -b "$cookie_jar" "${BASE_URL}/api/v1/clusters/${cluster_id}/streams" | grep -q '"streams"'
+curl_sf -b "$cookie_jar" "${BASE_URL}/api/v1/clusters/${cluster_id}/streams" | grep -q '"data"'
 
 echo "==> smoke: create live stream"
 if ! curl_sf -b "$cookie_jar" -X POST "${BASE_URL}/api/v1/clusters/${cluster_id}/streams" \

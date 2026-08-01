@@ -52,8 +52,10 @@ for (const vp of VIEWPORTS) {
 
       const before = await page.evaluate(() => document.documentElement.getAttribute("data-theme"));
       await toggle.click();
+      await expect
+        .poll(async () => page.evaluate(() => document.documentElement.getAttribute("data-theme")))
+        .not.toBe(before);
       const after = await page.evaluate(() => document.documentElement.getAttribute("data-theme"));
-      expect(after).not.toBe(before);
       expect(["control", "control-light"]).toContain(after);
 
       await mockShell(page);

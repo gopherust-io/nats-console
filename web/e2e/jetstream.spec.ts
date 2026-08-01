@@ -160,8 +160,9 @@ test.describe("jetstream", () => {
 
     await page.goto(`${jetstream}/streams/ORDERS`);
     await page.getByRole("button", { name: "Purge Stream" }).click();
-    await expect(page.getByRole("alertdialog")).toBeVisible();
-    await page.getByRole("button", { name: "Purge" }).click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Purge" }).click();
     await expect.poll(() => purged).toBe(true);
   });
 
@@ -195,7 +196,7 @@ test.describe("jetstream", () => {
     });
 
     await page.goto(`${jetstream}/streams/ORDERS/consumers/worker`);
-    await expect(page.getByRole("heading", { name: "worker" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "worker", level: 1 })).toBeVisible();
     await expect(page.getByText("Lag", { exact: true })).toBeVisible();
     await expect(page.getByText("Pending", { exact: true })).toBeVisible();
     await expect(page.getByText("Waiting", { exact: true })).toBeVisible();

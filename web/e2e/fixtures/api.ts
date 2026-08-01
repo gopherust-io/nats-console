@@ -18,14 +18,14 @@ export const emptyBuckets = { data: [], meta: { total: 0 } };
 export const emptyConsumers = { data: [], meta: { total: 0, offset: 0, limit: 50 } };
 export const emptyKeys = { data: [], meta: { total: 0, offset: 0, limit: 50 } };
 export const emptyObjects = { data: [], meta: { total: 0, offset: 0, limit: 50 } };
-export const emptyGrants = { data: { grants: [] } };
+export const emptyGrants = { data: [], meta: { total: 0 } };
 export const emptyPeople = { data: [], meta: { total: 0 } };
 export const emptyAlerts = { data: [], meta: { total: 0 } };
 export const emptyAudit = { data: [], meta: { total: 0 } };
 export const emptyRules = { data: [], meta: { total: 0 } };
-export const emptyExports = { data: { exports: [] } };
+export const emptyExports = { data: [], meta: { total: 0 } };
 export const emptyNatsUsers = { data: [], meta: { total: 0 } };
-export const emptySigningGroups = { data: { groups: [] } };
+export const emptySigningGroups = { data: [], meta: { total: 0 } };
 export const emptyTopology = {
   data: {
     id: "cluster:root",
@@ -74,10 +74,7 @@ export const emptyMetricsHistory = {
   series: [],
 };
 
-export const connectedStatus = {
-  connections: [{ clusterId: CLUSTER.id, connected: true }],
-  total: 1,
-};
+export const connectedStatus = [{ clusterId: CLUSTER.id, connected: true }];
 
 export function sampleStream(name = "ORDERS") {
   return {

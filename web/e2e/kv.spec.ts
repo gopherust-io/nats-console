@@ -67,10 +67,11 @@ test.describe("kv", () => {
 
   test("key page shows value and history", async ({ page }) => {
     const entry = sampleKVEntry("CONFIG", "feature.flag");
-    await mockJson(page, "**/api/v1/clusters/*/kv/buckets/CONFIG/keys/feature.flag", entry);
+    const history = [entry, { ...entry, revision: 2, value: btoa(JSON.stringify({ enabled: false })) }];
+    await mockJson(page, "**/api/v1/clusters/*/kv/buckets/CONFIG/keys/feature.flag", { data: entry });
     await mockJson(page, "**/api/v1/clusters/*/kv/buckets/CONFIG/keys/feature.flag/history", {
-      entries: [entry, { ...entry, revision: 2, value: btoa(JSON.stringify({ enabled: false })) }],
-      total: 2,
+      data: history,
+      meta: { total: history.length },
     });
 
     await page.goto(`${kvBase}/CONFIG/feature.flag`);

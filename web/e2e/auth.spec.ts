@@ -83,6 +83,6 @@ test.describe("auth", () => {
 
     await page.goto("/systems");
     await page.getByRole("button", { name: "Open user menu" }).click();
-    await expect(page.getByRole("button", { name: "Sign Out" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Sign Out" })).toBeVisible();
   });
 });
