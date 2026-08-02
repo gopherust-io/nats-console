@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -26,7 +27,7 @@ func (s *Store) UpsertArchitectureScoreDaily(ctx context.Context, row domain.Arc
 		row.ClusterID,
 		day,
 		row.Score,
-		string(raw),
+		commonstrings.BytesToString(raw),
 		row.AvgLag,
 		captured,
 	)

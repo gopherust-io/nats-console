@@ -138,7 +138,7 @@ func (b *ContextBuilder) buildFresh(ctx context.Context, clusterID string, page 
 			"id":             cluster.ID,
 			"name":           cluster.Name,
 			"nats_url":       redactURL(cluster.NATSURL),
-			"monitoring_url": cluster.MonitoringURL,
+			"monitoring_url": redactURL(cluster.MonitoringURL),
 			"is_default":     cluster.IsDefault,
 			"has_creds":      cluster.HasCreds,
 			"has_token":      cluster.HasToken,

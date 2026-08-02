@@ -6,6 +6,8 @@ import Alert from "../components/ui/Alert";
 import { ApiError, userFacingError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
+const LOGIN_ERROR_CODES = new Set(["access_denied", "session_expired", "invalid_request", "server_error"]);
+
 export default function LoginPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -19,10 +21,13 @@ export default function LoginPage() {
 
   useEffect(() => {
     const authError = searchParams.get("error");
-    if (authError) {
-      setError(authError);
+    if (!authError) return;
+    if (LOGIN_ERROR_CODES.has(authError)) {
+      setError(t(`auth.errors.${authError}`));
+      return;
     }
-  }, [searchParams]);
+    setError("");
+  }, [searchParams, t]);
 
   useEffect(() => {
     if (user) {

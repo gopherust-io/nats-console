@@ -9,6 +9,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,12 +24,12 @@ func TestZombiesEmptyStreamFindings(t *testing.T) {
 	resp, err := srv.Client.Post(base+"/streams", "application/json", strings.NewReader(createBody))
 	require.NoError(t, err)
 	respBody := resp.Body
-	require.Equal(t, http.StatusCreated, resp.StatusCode, "create stream: %s", string(respBody))
+	require.Equal(t, http.StatusCreated, resp.StatusCode, "create stream: %s", commonstrings.BytesToString(respBody))
 
 	resp, err = srv.Client.Get(base + "/zombies?fresh=1")
 	require.NoError(t, err)
 	respBody = resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "zombies: %s", string(respBody))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "zombies: %s", commonstrings.BytesToString(respBody))
 
 	var snap struct {
 		Data domain.ZombieSnapshot `json:"data"`
@@ -49,7 +50,7 @@ func TestZombiesEmptyStreamFindings(t *testing.T) {
 			assert.Equal(t, "zombie.empty.>", f.Subject)
 		}
 	}
-	assert.True(t, emptyStream, "expected empty_stream finding: %s", string(respBody))
-	assert.True(t, unpublished, "expected unpublished_subject finding: %s", string(respBody))
+	assert.True(t, emptyStream, "expected empty_stream finding: %s", commonstrings.BytesToString(respBody))
+	assert.True(t, unpublished, "expected unpublished_subject finding: %s", commonstrings.BytesToString(respBody))
 	assert.GreaterOrEqual(t, snap.Data.Totals.EmptyStreams, 1)
 }

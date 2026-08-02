@@ -30,7 +30,7 @@ func clusterIDFromPath(path string) string {
 	if !uuidPattern.MatchString(clusterID) {
 		return ""
 	}
-	return clusterID
+	return strings.ToLower(clusterID)
 }
 
 // isJetStreamResourcePath reports whether a cluster API path mutates streams,

@@ -122,6 +122,7 @@ export default function StreamDetailPage() {
           ? t("topology.backToTopology")
           : null;
   const { canManageJetStream } = useAuth();
+  const canManageJS = canManageJetStream(id);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -174,11 +175,14 @@ export default function StreamDetailPage() {
     [setSearchParams],
   );
 
+  const messageLoadGenRef = useRef(0);
+
   const loadMessage = useCallback(
     async (targetSeq?: string, direction?: "next" | "prev") => {
       if (!id) return;
       const currentSeq = targetSeq ?? seq;
       if (!currentSeq) return;
+      const gen = ++messageLoadGenRef.current;
       setMessageLoading(true);
       try {
         let url = clusterPath(
@@ -187,13 +191,17 @@ export default function StreamDetailPage() {
         );
         if (direction) url += `&direction=${direction}`;
         const data = (await api<RawMessage>(url)).data;
+        if (gen !== messageLoadGenRef.current) return;
         setMessage(data);
         setSeq(String(data.message.seq));
         setError("");
       } catch (err) {
+        if (gen !== messageLoadGenRef.current) return;
         setError(err instanceof Error ? err.message : t("streams.loadMessageFailed"));
       } finally {
-        setMessageLoading(false);
+        if (gen === messageLoadGenRef.current) {
+          setMessageLoading(false);
+        }
       }
     },
     [id, name, seq, t],
@@ -225,10 +233,18 @@ export default function StreamDetailPage() {
   }, [tab, stream, showDlqTab, setTab]);
 
   useEffect(() => {
+    messageLoadGenRef.current += 1;
     autoLoadedRef.current = false;
     seededRef.current = false;
     setMessage(null);
     setError("");
+    setMessageLoading(false);
+    setPublishPayload('{\n  "hello": "world"\n}');
+    setPublishBinaryPayload("");
+    setPublishPayloadTouched(false);
+    setPublishFormat("json");
+    setPublishSubject("");
+    setSeq("");
   }, [id, name]);
 
   useEffect(() => {
@@ -691,7 +707,7 @@ export default function StreamDetailPage() {
             <Link className="btn secondary" to={`${streamHref}/live`}>
               {t("streams.liveTail")}
             </Link>
-            {canManageJetStream && (
+            {canManageJS && (
               <>
                 <button
                   className="btn secondary"
@@ -884,7 +900,7 @@ export default function StreamDetailPage() {
         <>
           <div className="section-header" style={{ marginTop: 0 }}>
             <h2>{t("streams.tabConsumers")}</h2>
-            {canManageJetStream && (
+            {canManageJS && (
               <button
                 className="btn"
                 type="button"
@@ -974,8 +990,8 @@ export default function StreamDetailPage() {
       )}
 
       {tab === "messages" && (
-        <div className={canManageJetStream ? "messages-layout" : "messages-layout messages-layout--browse-only"}>
-          {canManageJetStream && (
+        <div className={canManageJS ? "messages-layout" : "messages-layout messages-layout--browse-only"}>
+          {canManageJS && (
             <form className="form-grid card messages-layout__publish" onSubmit={publishMessage}>
               <h3 className="section-title form-grid__full">{t("streams.publishMessage")}</h3>
               <label>
@@ -1141,7 +1157,7 @@ export default function StreamDetailPage() {
           )}
 
           <div className="messages-layout__browse">
-            {canManageJetStream && (
+            {canManageJS && (
               <div className="actions mb-12">
                 <MessageImportButton onImport={importMessages} />
               </div>
@@ -1285,7 +1301,7 @@ export default function StreamDetailPage() {
       )}
 
       {tab === "dlq" && showDlqTab && id && (
-        <DlqPanel clusterId={id} streamName={name} canManage={canManageJetStream} />
+        <DlqPanel clusterId={id} streamName={name} canManage={canManageJS} />
       )}
     </div>
   );

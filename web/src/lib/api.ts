@@ -157,7 +157,73 @@ function isAuthBootstrapPath(path: string): boolean {
   );
 }
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<ApiResult<T>> {
+/** Compress request bodies only when strictly larger than 32 KiB. */
+const REQUEST_COMPRESS_MIN_BYTES = 32 * 1024;
+
+type RequestCompressFormat = { stream: CompressionFormat; encoding: "br" | "gzip" };
+
+function preferredRequestCompressFormats(): RequestCompressFormat[] {
+  // Prefer brotli for large JSON; fall back to gzip where CompressionStream("brotli") is unsupported.
+  const formats: RequestCompressFormat[] = [
+    { stream: "brotli" as CompressionFormat, encoding: "br" },
+    { stream: "gzip", encoding: "gzip" },
+  ];
+  return formats.filter((f) => {
+    try {
+      // Probe constructor support without retaining the stream.
+      new CompressionStream(f.stream);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+async function compressJSONBody(body: string, format: CompressionFormat): Promise<ArrayBuffer> {
+  const encoded = new TextEncoder().encode(body);
+  // Cast: DOM lib types CompressionStream.writable as BufferSource, which conflicts with Uint8Array streams.
+  const transform = new CompressionStream(format) as unknown as TransformStream<Uint8Array, Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoded);
+      controller.close();
+    },
+  }).pipeThrough(transform);
+  return new Response(stream).arrayBuffer();
+}
+
+async function maybeCompressJSONBody(
+  body: BodyInit | null | undefined,
+  headers: Headers,
+): Promise<BodyInit | null | undefined> {
+  if (typeof body !== "string") {
+    return body;
+  }
+  const plainBytes = new TextEncoder().encode(body);
+  // Small payloads: skip compression — overhead often outweighs savings.
+  if (plainBytes.byteLength <= REQUEST_COMPRESS_MIN_BYTES) {
+    return body;
+  }
+  if (typeof CompressionStream === "undefined") {
+    return body;
+  }
+  for (const format of preferredRequestCompressFormats()) {
+    try {
+      const compressed = await compressJSONBody(body, format.stream);
+      // Only send compressed if it actually shrinks the wire payload.
+      if (compressed.byteLength >= plainBytes.byteLength) {
+        continue;
+      }
+      headers.set("Content-Encoding", format.encoding);
+      return compressed;
+    } catch {
+      // try next format
+    }
+  }
+  return body;
+}
+
+async function buildAPIRequest(init: RequestInit = {}): Promise<{ headers: Headers; body: BodyInit | null | undefined }> {
   const headers = new Headers(init.headers);
   if (init.body) {
     headers.set("Content-Type", "application/json");
@@ -171,9 +237,16 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<ApiR
     }
   }
 
+  const body = await maybeCompressJSONBody(init.body, headers);
+  return { headers, body };
+}
+
+export async function api<T>(path: string, init: RequestInit = {}): Promise<ApiResult<T>> {
+  const req = await buildAPIRequest(init);
+
   let response: Response;
   try {
-    response = await fetch(path, { ...init, headers, credentials: "include" });
+    response = await fetch(path, { ...init, headers: req.headers, body: req.body, credentials: "include" });
   } catch {
     throw new ApiError("Network request failed. Check your connection and try again.", {
       status: 0,
@@ -184,18 +257,9 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<ApiR
   if (response.status === 401 && !isAuthBootstrapPath(path)) {
     const refreshed = await tryRefreshSession();
     if (refreshed) {
-      const retryHeaders = new Headers(init.headers);
-      if (init.body) {
-        retryHeaders.set("Content-Type", "application/json");
-      }
-      if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
-        const csrf = getCSRFToken();
-        if (csrf) {
-          retryHeaders.set("X-CSRF-Token", csrf);
-        }
-      }
+      const retry = await buildAPIRequest(init);
       try {
-        response = await fetch(path, { ...init, headers: retryHeaders, credentials: "include" });
+        response = await fetch(path, { ...init, headers: retry.headers, body: retry.body, credentials: "include" });
       } catch {
         throw new ApiError("Network request failed. Check your connection and try again.", {
           status: 0,

@@ -171,10 +171,11 @@ func clusterIDFromPath(path string) string {
 	if !uuidPattern.MatchString(clusterID) {
 		return ""
 	}
-	return clusterID
+	return strings.ToLower(clusterID)
 }
 
-var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+// uuidPattern accepts any hex case; callers must canonicalize with strings.ToLower.
+var uuidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 var staticClusterPathSegments = map[string]struct{}{
 	"connections": {},
@@ -220,6 +221,23 @@ func canReadClusterPath(user store.User, clusterID, path string) bool {
 		return auth.CanAccessClusterOrAccount(user, clusterID)
 	}
 	return auth.CanAccessCluster(user, clusterID)
+}
+
+// canMutateClusterPath authorizes a mutating request under
+// /api/v1/clusters/{clusterId}/... . Account-scoped sub-resources accept any
+// grant touching the cluster; handlers enforce finer authz. Cluster-wide
+// sub-resources require system-level access plus JetStream manage or write.
+func canMutateClusterPath(user store.User, clusterID, path string) bool {
+	if isAccountScopedClusterPath(path) {
+		return auth.CanAccessClusterOrAccount(user, clusterID)
+	}
+	if !auth.CanAccessCluster(user, clusterID) {
+		return false
+	}
+	if isJetStreamResourcePath(path) {
+		return auth.CanManageJetStream(user, clusterID)
+	}
+	return auth.CanWriteCluster(user, clusterID)
 }
 
 // accountScopedClusterSegments enumerates cluster sub-resources that are

@@ -89,6 +89,12 @@ func (g *gemini) Chat(ctx context.Context, system string, messages []Message) (s
 			"maxOutputTokens": maxTokens,
 			"temperature":     0.2,
 		},
+		"safetySettings": []map[string]string{
+			{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+			{"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+			{"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+			{"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+		},
 	})
 	url := fmt.Sprintf("%s/models/%s:generateContent?key=%s", g.apiBase, g.model, g.apiKey)
 
@@ -143,8 +149,12 @@ func (g *gemini) Chat(ctx context.Context, system string, messages []Message) (s
 	}
 
 	var parsed struct {
+		PromptFeedback *struct {
+			BlockReason string `json:"blockReason"`
+		} `json:"promptFeedback"`
 		Candidates []struct {
-			Content struct {
+			FinishReason string `json:"finishReason"`
+			Content      struct {
 				Parts []struct {
 					Text string `json:"text"`
 				} `json:"parts"`
@@ -154,10 +164,29 @@ func (g *gemini) Chat(ctx context.Context, system string, messages []Message) (s
 	if err := sonic.Unmarshal(raw, &parsed); err != nil {
 		return "", newProviderError("Gemini returned an unreadable response.", true, 0)
 	}
-	if len(parsed.Candidates) == 0 || len(parsed.Candidates[0].Content.Parts) == 0 {
+	if parsed.PromptFeedback != nil && !commonstrings.IsEmpty(parsed.PromptFeedback.BlockReason) {
+		return "", newAssistantError(CodeBlocked, "Request blocked by content safety filters.", false, 0)
+	}
+	if len(parsed.Candidates) == 0 {
 		return "", newProviderError("Gemini returned an empty response. Try again.", true, 0)
 	}
-	return parsed.Candidates[0].Content.Parts[0].Text, nil
+	candidate := parsed.Candidates[0]
+	if isGeminiSafetyFinish(candidate.FinishReason) {
+		return "", newAssistantError(CodeBlocked, "Response blocked by content safety filters.", false, 0)
+	}
+	if len(candidate.Content.Parts) == 0 || commonstrings.IsEmpty(strings.TrimSpace(candidate.Content.Parts[0].Text)) {
+		return "", newProviderError("Gemini returned an empty response. Try again.", true, 0)
+	}
+	return candidate.Content.Parts[0].Text, nil
+}
+
+func isGeminiSafetyFinish(reason string) bool {
+	switch strings.ToUpper(strings.TrimSpace(reason)) {
+	case "SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII":
+		return true
+	default:
+		return false
+	}
 }
 
 func mapGeminiHTTPError(model string, status int, raw []byte) *Error {

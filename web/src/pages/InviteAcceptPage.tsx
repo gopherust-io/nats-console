@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router";
 import LoginSplitLayout from "../components/LoginSplitLayout";
@@ -25,6 +25,7 @@ export default function InviteAcceptPage() {
   const [loadError, setLoadError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const [csrfHint, setCsrfHint] = useState(false);
+  const loadGenRef = useRef(0);
 
   useEffect(() => {
     if (user) {
@@ -32,20 +33,35 @@ export default function InviteAcceptPage() {
     }
   }, [user, navigate]);
 
+  useEffect(() => {
+    loadGenRef.current += 1;
+    setInfo(null);
+    setPassword("");
+    setConfirm("");
+    setError("");
+    setLoadError(null);
+    setCsrfHint(false);
+  }, [token]);
+
   const loadInvite = useCallback(() => {
     if (!token) return;
+    const gen = ++loadGenRef.current;
     setLoading(true);
     setLoadError(null);
     api<InviteInfo>(`/api/v1/auth/invite/${encodeURIComponent(token)}`)
       .then((r) => {
+        if (gen !== loadGenRef.current) return;
         setInfo(r.data);
         setLoadError(null);
       })
       .catch((err) => {
+        if (gen !== loadGenRef.current) return;
         setInfo(null);
         setLoadError(err);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (gen === loadGenRef.current) setLoading(false);
+      });
   }, [token]);
 
   useEffect(() => {

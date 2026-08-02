@@ -12,16 +12,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/gopherust-io/env"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 func mustSessionPEMs(t *testing.T) (privPEM, pubPEM string) {
 	t.Helper()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
-	privPEM = string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}))
+	privPEM = commonstrings.BytesToString(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}))
 	pubBytes, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
 	require.NoError(t, err)
-	pubPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes}))
+	pubPEM = commonstrings.BytesToString(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes}))
 	return privPEM, pubPEM
 }
 

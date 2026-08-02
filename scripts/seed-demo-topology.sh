@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 # Seed JetStream demo streams, consumers, and sample messages for the Topology UI.
+# Names align with examples/fleet (32-service live load demo).
 # Requires: docker compose up (nats service running)
 set -eu
 
@@ -11,87 +12,104 @@ run_nats() {
   docker run --rm --network "$NETWORK" "$IMAGE" nats -s "$NATS_URL" "$@"
 }
 
-echo "→ Seeding demo JetStream topology on $NATS_URL"
+add_stream() {
+  name="$1"
+  subjects="$2"
+  retention="${3:-limits}"
+  run_nats stream add "$name" \
+    --subjects "$subjects" \
+    --storage file \
+    --retention "$retention" \
+    --defaults 2>/dev/null || run_nats stream update "$name" --subjects "$subjects" || true
+}
 
-run_nats stream add ORDERS \
-  --subjects "orders.>,events.orders" \
-  --storage file \
-  --retention limits \
-  --defaults 2>/dev/null || run_nats stream update ORDERS --subjects "orders.>,events.orders"
+add_pull() {
+  stream="$1"
+  durable="$2"
+  filter="$3"
+  run_nats consumer add "$stream" "$durable" \
+    --pull \
+    --filter "$filter" \
+    --ack explicit \
+    --deliver all \
+    --defaults 2>/dev/null || true
+}
 
-run_nats stream add PAYMENTS \
-  --subjects "payments.>" \
-  --storage file \
-  --retention limits \
-  --defaults 2>/dev/null || run_nats stream update PAYMENTS --subjects "payments.>"
+echo "→ Seeding demo JetStream topology on $NATS_URL (aligned with examples/fleet)"
 
-run_nats stream add TELEMETRY \
-  --subjects "telemetry.>,logs.app" \
-  --storage file \
-  --retention limits \
-  --defaults 2>/dev/null || run_nats stream update TELEMETRY --subjects "telemetry.>,logs.app"
+# WorkQueue job streams (ORDERS uses explicit subjects so ORDERS_SHARD can own orders.shard.>)
+add_stream ORDERS "orders.created,orders.updated,orders.cancelled" work
+add_stream ORDERS_SHARD "orders.shard.>" work
+add_stream PAYMENTS "payments.>" work
+add_stream INVENTORY "inventory.>" work
+add_stream SHIPPING "shipping.>" work
+add_stream BILLING "billing.>" work
+add_stream FRAUD "fraud.>" work
+add_stream SEARCH "search.>" work
+add_stream WEBHOOKS "webhooks.>" work
+add_stream RETURNS "returns.>" work
+add_stream CART "cart.>" work
+add_stream MEDIA "media.>" work
 
-run_nats consumer add ORDERS orders-fulfillment \
-  --pull \
-  --filter "orders.created" \
-  --ack explicit \
-  --deliver all \
-  --defaults 2>/dev/null || true
+# Limits / fan-out / DLQ (DLQ outside orders.* to avoid subject overlap)
+add_stream ORDERS_DLQ "dlq.orders.>" limits
+add_stream NOTIFICATIONS "notify.>" limits
+add_stream AUDIT "audit.>" limits
+add_stream CATALOG "catalog.>" limits
+add_stream USERS "users.>" limits
+add_stream RECO "reco.>" limits
+add_stream LOYALTY "loyalty.>" limits
+add_stream PRICING "pricing.>" limits
 
-run_nats consumer add ORDERS orders-analytics \
-  --pull \
-  --filter "orders.>" \
-  --ack explicit \
-  --deliver all \
-  --defaults 2>/dev/null || true
+# Interest
+add_stream TELEMETRY "telemetry.>,logs.app" interest
 
-run_nats consumer add PAYMENTS payment-processor \
-  --pull \
-  --filter "payments.card" \
-  --ack explicit \
-  --deliver all \
-  --defaults 2>/dev/null || true
-
-run_nats consumer add PAYMENTS payment-audit \
-  --pull \
-  --filter "payments.>" \
-  --ack explicit \
-  --deliver all \
-  --defaults 2>/dev/null || true
-
-run_nats consumer add TELEMETRY metrics-aggregator \
-  --pull \
-  --filter "telemetry.metrics" \
-  --ack explicit \
-  --deliver all \
-  --defaults 2>/dev/null || true
-
-run_nats consumer add TELEMETRY log-shipper \
-  --pull \
-  --filter "logs.app" \
-  --ack explicit \
-  --deliver all \
-  --defaults 2>/dev/null || true
+# Only pull durables that the live fleet also uses as pull (avoid clashing with
+# push QueueSubscribeBound durables of the same name). Push workers appear when
+# the fleet process is running.
+add_pull ORDERS order-projector "orders.updated"
+add_pull SEARCH search-indexer "search.index"
+add_pull AUDIT audit-logger "audit.>"
+add_pull TELEMETRY metrics-aggregator "telemetry.metrics"
+add_pull TELEMETRY log-shipper "logs.app"
+add_pull CATALOG catalog-sync "catalog.>"
+add_pull USERS user-projector "users.>"
+add_pull LOYALTY loyalty-worker "loyalty.>"
+add_pull PRICING pricing-engine "pricing.>"
 
 echo "→ Publishing sample messages"
-run_nats pub orders.created '{"id":1001,"item":"widget"}'
-run_nats pub orders.shipped '{"id":1001,"carrier":"fedex"}'
-run_nats pub events.orders '{"type":"order.placed"}'
-run_nats pub payments.card '{"amount":42.5,"currency":"USD"}'
-run_nats pub payments.refund '{"amount":10}'
-run_nats pub telemetry.metrics '{"cpu":0.42,"mem":0.61}'
-run_nats pub logs.app '{"level":"info","msg":"topology demo ready"}'
+run_nats pub orders.created '{"id":1001,"item":"widget","service":"seed"}'
+run_nats pub orders.updated '{"id":1001,"service":"seed"}'
+run_nats pub orders.cancelled '{"id":1002,"service":"seed"}'
+run_nats pub orders.shard.0.created '{"id":1003,"shard_key":"user-1","service":"seed"}'
+run_nats pub orders.shard.1.created '{"id":1004,"shard_key":"user-2","service":"seed"}'
+run_nats pub payments.authorize '{"amount":42.5,"currency":"USD","service":"seed"}'
+run_nats pub payments.capture '{"amount":42.5,"service":"seed"}'
+run_nats pub inventory.reserve '{"sku":"SKU-1","service":"seed"}'
+run_nats pub shipping.create '{"order_id":1001,"service":"seed"}'
+run_nats pub billing.invoice '{"order_id":1001,"service":"seed"}'
+run_nats pub fraud.check '{"payment_id":1,"service":"seed"}'
+run_nats pub cart.checkout '{"cart_id":9,"service":"seed"}'
+run_nats pub returns.requested '{"order_id":1001,"service":"seed"}'
+run_nats pub search.index '{"entity":"product","service":"seed"}'
+run_nats pub webhooks.deliver '{"url":"https://example.test/hook","service":"seed"}'
+run_nats pub media.transcode '{"asset":"img-1","service":"seed"}'
+run_nats pub notify.email '{"to":"demo@example.test","service":"seed"}'
+run_nats pub notify.sms '{"to":"+10000000000","service":"seed"}'
+run_nats pub notify.push '{"device":"demo","service":"seed"}'
+run_nats pub audit.order '{"id":1001,"service":"seed"}'
+run_nats pub telemetry.metrics '{"cpu":0.42,"mem":0.61,"service":"seed"}'
+run_nats pub logs.app '{"level":"info","msg":"topology demo ready","service":"seed"}'
+run_nats pub catalog.updated '{"sku":"SKU-1","service":"seed"}'
+run_nats pub users.created '{"user_id":7,"service":"seed"}'
+run_nats pub loyalty.enroll '{"user_id":7,"service":"seed"}'
+run_nats pub pricing.updated '{"sku":"SKU-1","service":"seed"}'
+run_nats pub reco.refresh '{"sku":"SKU-1","service":"seed"}'
+run_nats pub dlq.orders.poison '{"id":17,"reason":"seed-sample","service":"seed"}'
 
 echo ""
-echo "Demo topology seeded:"
-echo "  ORDERS      ← orders.>, events.orders"
-echo "    ├─ orders-fulfillment  (filter: orders.created)"
-echo "    └─ orders-analytics    (filter: orders.>)"
-echo "  PAYMENTS    ← payments.>"
-echo "    ├─ payment-processor   (filter: payments.card)"
-echo "    └─ payment-audit       (filter: payments.>)"
-echo "  TELEMETRY   ← telemetry.>, logs.app"
-echo "    ├─ metrics-aggregator  (filter: telemetry.metrics)"
-echo "    └─ log-shipper         (filter: logs.app)"
+echo "Demo topology seeded (21 streams, fleet-aligned pull consumers)."
+echo "For continuous load, RPC, and feature showcases, run the live fleet:"
+echo "  make fleet-up   # or: TEL_ENABLE=false NATS_URL=nats://127.0.0.1:4222 go run ./examples/fleet"
 echo ""
 echo "Open http://localhost:8080/topology (login: admin / admin)"

@@ -150,8 +150,12 @@ func (s *Store) AcceptUserInvite(ctx context.Context, token, password string) (U
 	if time.Now().UTC().After(inv.ExpiresAt) {
 		return User{}, ErrNotFound
 	}
-	if commonstrings.IsEmpty(strings.TrimSpace(password)) {
+	password = strings.TrimSpace(password)
+	if commonstrings.IsEmpty(password) {
 		return User{}, errors.New("password required")
+	}
+	if len(password) < 8 {
+		return User{}, errors.New("password must be at least 8 characters")
 	}
 	// Hash before opening the transaction: bcrypt is expensive and doesn't
 	// touch the DB, so there's no reason to hold the tx open for it.

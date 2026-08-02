@@ -152,7 +152,8 @@ func (h *AlertsHandler) Acknowledge(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *AlertsHandler) ListRules(ctx *fasthttp.RequestCtx) {
-	if _, _, ok := requireManageAlertRules(ctx); !ok {
+	actor, storeUser, ok := requireManageAlertRules(ctx)
+	if !ok {
 		return
 	}
 	clusterID := commonstrings.BytesToString(ctx.QueryArgs().Peek("clusterId"))
@@ -161,12 +162,17 @@ func (h *AlertsHandler) ListRules(ctx *fasthttp.RequestCtx) {
 			httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 			return
 		}
+		if !auth.CanAccessCluster(storeUser, clusterID) {
+			httpstatus.WriteForbidden(ctx)
+			return
+		}
 	}
 	rules, err := h.alerts.ListRules(httpctx.FromRequest(ctx), clusterID, false)
 	if err != nil {
 		writeAPIError(ctx, err)
 		return
 	}
+	rules = filterAlertRulesForActor(rules, actor, storeUser)
 	httpstatus.WriteDataMeta(ctx, fasthttp.StatusOK, nonNilSlice(rules), totalMeta(len(rules)))
 }
 
@@ -182,7 +188,8 @@ func (h *AlertsHandler) Metrics(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *AlertsHandler) GetRule(ctx *fasthttp.RequestCtx) {
-	if _, _, ok := requireManageAlertRules(ctx); !ok {
+	actor, storeUser, ok := requireManageAlertRules(ctx)
+	if !ok {
 		return
 	}
 	id := httpctx.RouteParam(ctx, "ruleId")
@@ -193,6 +200,10 @@ func (h *AlertsHandler) GetRule(ctx *fasthttp.RequestCtx) {
 	rule, err := h.alerts.GetRule(httpctx.FromRequest(ctx), id)
 	if err != nil {
 		writeAPIError(ctx, err)
+		return
+	}
+	if !canAccessAlertRuleCluster(actor, storeUser, rule.ClusterID) {
+		httpstatus.WriteForbidden(ctx)
 		return
 	}
 	httpstatus.WriteData(ctx, fasthttp.StatusOK, rule)
@@ -218,7 +229,7 @@ func (h *AlertsHandler) CreateRule(ctx *fasthttp.RequestCtx) {
 		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if !commonstrings.IsEmpty(req.ClusterID) && !auth.CanAccessCluster(storeUser, req.ClusterID) {
+	if !canAccessAlertRuleCluster(actor, storeUser, req.ClusterID) {
 		httpstatus.WriteForbidden(ctx)
 		return
 	}
@@ -231,13 +242,22 @@ func (h *AlertsHandler) CreateRule(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *AlertsHandler) UpdateRule(ctx *fasthttp.RequestCtx) {
-	_, storeUser, ok := requireManageAlertRules(ctx)
+	actor, storeUser, ok := requireManageAlertRules(ctx)
 	if !ok {
 		return
 	}
 	id := httpctx.RouteParam(ctx, "ruleId")
 	if err := validateUUID(id); err != nil {
 		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	existing, err := h.alerts.GetRule(httpctx.FromRequest(ctx), id)
+	if err != nil {
+		writeAPIError(ctx, err)
+		return
+	}
+	if !canAccessAlertRuleCluster(actor, storeUser, existing.ClusterID) {
+		httpstatus.WriteForbidden(ctx)
 		return
 	}
 	var req domain.AlertRuleUpdate
@@ -249,7 +269,13 @@ func (h *AlertsHandler) UpdateRule(ctx *fasthttp.RequestCtx) {
 		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if req.ClusterID != nil && !commonstrings.IsEmpty(*req.ClusterID) && !auth.CanAccessCluster(storeUser, *req.ClusterID) {
+	// Scoped actors cannot promote a rule to global (clearCluster / empty clusterId).
+	if req.ClearCluster || (req.ClusterID != nil && commonstrings.IsEmpty(*req.ClusterID)) {
+		if !canManageGlobalAlertRules(actor, storeUser) {
+			httpstatus.WriteForbidden(ctx)
+			return
+		}
+	} else if req.ClusterID != nil && !auth.CanAccessCluster(storeUser, *req.ClusterID) {
 		httpstatus.WriteForbidden(ctx)
 		return
 	}
@@ -262,12 +288,22 @@ func (h *AlertsHandler) UpdateRule(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *AlertsHandler) DeleteRule(ctx *fasthttp.RequestCtx) {
-	if _, _, ok := requireManageAlertRules(ctx); !ok {
+	actor, storeUser, ok := requireManageAlertRules(ctx)
+	if !ok {
 		return
 	}
 	id := httpctx.RouteParam(ctx, "ruleId")
 	if err := validateUUID(id); err != nil {
 		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	existing, err := h.alerts.GetRule(httpctx.FromRequest(ctx), id)
+	if err != nil {
+		writeAPIError(ctx, err)
+		return
+	}
+	if !canAccessAlertRuleCluster(actor, storeUser, existing.ClusterID) {
+		httpstatus.WriteForbidden(ctx)
 		return
 	}
 	if err := h.alerts.DeleteRule(httpctx.FromRequest(ctx), id); err != nil {
@@ -297,6 +333,32 @@ func actorStoreFromContext(ctx *fasthttp.RequestCtx) (domain.User, store.User, b
 		return domain.User{}, store.User{}, false
 	}
 	return auth.StoreUserToDomain(user), user, true
+}
+
+func filterAlertRulesForActor(rules []domain.AlertRule, actor domain.User, storeUser store.User) []domain.AlertRule {
+	if canManageGlobalAlertRules(actor, storeUser) {
+		return rules
+	}
+	out := make([]domain.AlertRule, 0, len(rules))
+	for _, rule := range rules {
+		if canAccessAlertRuleCluster(actor, storeUser, rule.ClusterID) {
+			out = append(out, rule)
+		}
+	}
+	return out
+}
+
+// canManageGlobalAlertRules is true for root / unscoped admins (all clusters).
+func canManageGlobalAlertRules(actor domain.User, storeUser store.User) bool {
+	return accessibleClusterIDs(actor, storeUser) == nil
+}
+
+// canAccessAlertRuleCluster allows empty clusterId (global) only for unscoped actors.
+func canAccessAlertRuleCluster(actor domain.User, storeUser store.User, clusterID string) bool {
+	if commonstrings.IsEmpty(clusterID) {
+		return canManageGlobalAlertRules(actor, storeUser)
+	}
+	return auth.CanAccessCluster(storeUser, clusterID)
 }
 
 // accessibleClusterIDs returns nil when the actor can see all clusters; otherwise the scoped list.

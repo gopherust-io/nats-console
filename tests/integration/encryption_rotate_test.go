@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +26,7 @@ func TestRotateEncryptionKeyDryRun(t *testing.T) {
 	resp, err := srv.Client.Post("http://nats-consol.local/api/v1/admin/rotate-encryption-key?dryRun=true", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	raw := resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	require.Equal(t, http.StatusOK, resp.StatusCode, commonstrings.BytesToString(raw))
 
 	var envelope struct {
 		Data struct {

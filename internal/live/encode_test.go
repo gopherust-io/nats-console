@@ -67,5 +67,5 @@ func TestEncodeMessageFrameOmitsEmptyHeaders(t *testing.T) {
 	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
 	raw, err := live.EncodeMessageFrame(1, "s", nil, now, nil)
 	require.NoError(t, err)
-	assert.NotContains(t, string(raw), `"headers"`)
+	assert.NotContains(t, strings.BytesToString(raw), `"headers"`)
 }

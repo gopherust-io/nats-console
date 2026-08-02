@@ -142,11 +142,36 @@ func (s *Service) LoadUserForSession(ctx context.Context, partial store.User) (s
 	return user, nil
 }
 
+// LoadUserFresh bypasses user and version caches so grant/role revocation is
+// visible immediately on this replica for sensitive authz paths (creds, assign, grants).
+func (s *Service) LoadUserFresh(ctx context.Context, userID string) (store.User, error) {
+	if commonstrings.IsEmpty(userID) {
+		return store.User{}, ErrUnauthorized
+	}
+	s.users.Invalidate(userID)
+	if s.versionCache != nil {
+		s.versionCache.Invalidate(userID)
+	}
+	if s.store == nil {
+		return store.User{}, ErrUnauthorized
+	}
+	user, err := s.store.GetUserByID(ctx, userID)
+	if err != nil {
+		return store.User{}, err
+	}
+	user.SessionVersion = s.CurrentUserVersion(ctx, userID)
+	s.users.Set(user)
+	return user, nil
+}
+
 // InvalidateUser drops the cached user record and bumps its persisted
 // version (H2) so that permission/role changes and forced re-fetches are
 // visible on every replica, not just the one handling this request.
 func (s *Service) InvalidateUser(ctx context.Context, userID string) {
 	s.users.Invalidate(userID)
+	if s.versionCache != nil {
+		s.versionCache.Invalidate(userID)
+	}
 	s.BumpUserVersion(ctx, userID)
 }
 

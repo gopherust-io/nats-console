@@ -50,6 +50,15 @@ export default function ChaosStoryPage() {
   const aiEnabled = Boolean(assistantConfigQuery.data?.aiEnabled) && Boolean(clusterId) && !forceSample;
 
   useEffect(() => {
+    setStory(demoChaosStory());
+    setSeed(demoChaosStorySeed());
+    setActIndex(0);
+    setSimulating(false);
+    setPaused(false);
+    setGenError(null);
+  }, [clusterId]);
+
+  useEffect(() => {
     if (useDemo) {
       setStory(demoChaosStory());
       setSeed(demoChaosStorySeed());

@@ -160,7 +160,7 @@ func CanAccessAccount(user store.User, clusterID, accountName string) bool {
 				return true
 			}
 		case store.ResourceNATSUser:
-			if g.ResourceKey == accountKey || strings.HasPrefix(g.ResourceKey, accountKey+":") {
+			if natsUserGrantCoversAccount(g.ResourceKey, clusterID, accountName) {
 				return true
 			}
 		}
@@ -254,10 +254,14 @@ func CanDownloadCreds(user store.User, clusterID, accountName, natsUserID string
 }
 
 func CanManageSystemAccess(user store.User, clusterID string) bool {
-	if user.IsRoot || CanManageUsers(user) {
+	if user.IsRoot {
 		return true
 	}
-	return hasAdminGrant(user, store.ResourceSystem, clusterID)
+	if hasAdminGrant(user, store.ResourceSystem, clusterID) {
+		return true
+	}
+	// ManageUsers may manage access only on clusters they can already reach.
+	return CanManageUsers(user) && CanAccessCluster(user, clusterID)
 }
 
 func CanManageAccountAccess(user store.User, clusterID, accountName string) bool {
@@ -265,6 +269,25 @@ func CanManageAccountAccess(user store.User, clusterID, accountName string) bool
 		return true
 	}
 	return hasAdminGrant(user, store.ResourceAccount, domain.AccountResourceKey(clusterID, accountName))
+}
+
+// CanMintAdminGrant reports whether the actor may assign the admin grant role
+// on the given resource. ManageUsers alone is not enough — that would bypass
+// AssignableRoles and escalate to CanDownloadCreds / CanManageJetStream.
+func CanMintAdminGrant(user store.User, resourceType, resourceKey string) bool {
+	if user.IsRoot || isLegacyFullAdmin(user) {
+		return true
+	}
+	return hasAdminGrant(user, resourceType, resourceKey)
+}
+
+func natsUserGrantCoversAccount(resourceKey, clusterID, accountName string) bool {
+	prefix := clusterID + ":" + accountName + ":"
+	if !strings.HasPrefix(resourceKey, prefix) {
+		return false
+	}
+	id := strings.TrimPrefix(resourceKey, prefix)
+	return id != "" && !strings.Contains(id, ":")
 }
 
 func hasAdminGrant(user store.User, resourceType, resourceKey string) bool {

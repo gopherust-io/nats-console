@@ -1,10 +1,11 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Alert from "../components/ui/Alert";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { api, clusterPath } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
 import { clusterQueryKey } from "../lib/query";
 
@@ -25,8 +26,10 @@ export default function SharingPage() {
   const { accountName, clusterId: routeCluster } = useParams();
   const { clusterId: contextClusterId } = useCluster();
   const clusterId = routeCluster ?? contextClusterId;
+  const { canManageAccountAccess } = useAuth();
   const qc = useQueryClient();
   const account = accountName ?? "Default";
+  const canMutateSharing = Boolean(clusterId && canManageAccountAccess(clusterId, account));
   const [kind, setKind] = useState<KindId>("service");
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState<ExportItem | null>(null);
@@ -62,6 +65,11 @@ export default function SharingPage() {
     setSubject("");
     setDescription("");
   }
+
+  useEffect(() => {
+    resetForm();
+    setError("");
+  }, [clusterId, account]);
 
   function openCreate() {
     setEditItem(null);
@@ -157,9 +165,11 @@ export default function SharingPage() {
 
       <div className="nc-toolbar">
         <h3 className="nc-section-title" style={{ marginBottom: 0 }}>{t("sharing.exports")}</h3>
-        <button type="button" className="btn" onClick={openCreate}>
-          {createLabel}
-        </button>
+        {canMutateSharing && (
+          <button type="button" className="btn" onClick={openCreate}>
+            {createLabel}
+          </button>
+        )}
       </div>
 
       <div className="nc-subtabs">
@@ -175,7 +185,7 @@ export default function SharingPage() {
         ))}
       </div>
 
-      {showForm && (
+      {showForm && canMutateSharing && (
         <form className="nc-settings-section" onSubmit={onSubmit}>
           <h4>{editItem ? t("sharing.editExport") : createLabel}</h4>
           <div className="nc-form-row">
@@ -217,7 +227,7 @@ export default function SharingPage() {
                   <th>{t("common.subject")}</th>
                   <th>{t("common.description")}</th>
                   <th>{t("common.created")}</th>
-                  <th />
+                  {canMutateSharing && <th />}
                 </tr>
               </thead>
               <tbody>
@@ -227,29 +237,31 @@ export default function SharingPage() {
                     <td className="mono">{item.subject}</td>
                     <td>{item.description || t("common.emDash")}</td>
                     <td>{new Date(item.createdAt).toLocaleString()}</td>
-                    <td>
-                      <div className="actions">
-                        <button type="button" className="btn secondary btn--small" onClick={() => openEdit(item)}>
-                          {t("common.edit")}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn danger btn--small"
-                          onClick={() =>
-                            askConfirm({
-                              title: t("sharing.confirmDeleteTitle"),
-                              description: t("sharing.confirmDelete", { name: item.name }),
-                              action: () => {
-                                setError("");
-                                deleteMutation.mutate(item.id);
-                              },
-                            })
-                          }
-                        >
-                          {t("common.delete")}
-                        </button>
-                      </div>
-                    </td>
+                    {canMutateSharing && (
+                      <td>
+                        <div className="actions">
+                          <button type="button" className="btn secondary btn--small" onClick={() => openEdit(item)}>
+                            {t("common.edit")}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn danger btn--small"
+                            onClick={() =>
+                              askConfirm({
+                                title: t("sharing.confirmDeleteTitle"),
+                                description: t("sharing.confirmDelete", { name: item.name }),
+                                action: () => {
+                                  setError("");
+                                  deleteMutation.mutate(item.id);
+                                },
+                              })
+                            }
+                          >
+                            {t("common.delete")}
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

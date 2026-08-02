@@ -19,6 +19,7 @@ export default function KVBucketsPage() {
   const { clusterId: contextClusterId } = useCluster();
   const clusterId = routeCluster ?? contextClusterId;
   const { canManageJetStream } = useAuth();
+  const canManageJS = canManageJetStream(clusterId);
   const queryClient = useQueryClient();
   const jsBase = clusterId ? jetStreamUIBase(clusterId, accountName) : "";
   const [actionError, setActionError] = useState("");
@@ -81,7 +82,7 @@ export default function KVBucketsPage() {
       {confirmDialog}
       <div className="page-header">
         <h1>KV Stores</h1>
-        {canManageJetStream && (
+        {canManageJS && (
           <button
             className="btn"
             type="button"
@@ -131,7 +132,7 @@ export default function KVBucketsPage() {
                 <td>{b.values}</td>
                 <td>{b.history}</td>
                 <td>
-                  {canManageJetStream && (
+                  {canManageJS && (
                     <button className="btn danger btn--small" type="button" onClick={() => deleteBucket(b.bucket)}>
                       Delete
                     </button>

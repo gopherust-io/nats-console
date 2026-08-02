@@ -171,7 +171,7 @@ func recipientEmails(ctx context.Context, st *store.Store, clusterID string) ([]
 		if mail.IsPlaceholderEmail(email) {
 			continue
 		}
-		if !auth.CanAccessClusterOrAccount(user, clusterID) {
+		if !auth.CanAccessCluster(user, clusterID) {
 			continue
 		}
 		key := strings.ToLower(email)

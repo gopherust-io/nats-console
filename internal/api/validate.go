@@ -13,7 +13,8 @@ import (
 
 var (
 	resourceNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._\-/]{0,255}$`)
-	uuidPattern         = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	// Case-insensitive; prefer strings.ToLower for storage/RBAC comparisons.
+	uuidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 )
 
 func validateResourceName(name string) error {
@@ -85,6 +86,8 @@ func validateMonitoringURL(raw string) error {
 // and fe80::/10). Ordinary loopback/private addresses are intentionally
 // still allowed since clusters are commonly reached over localhost or a
 // private network in development and self-hosted deployments.
+// Fetch paths additionally re-check redirect targets and resolved IPs
+// (see monitoring_failover CheckRedirect and gopherust-io/nats Monitoring).
 func isBlockedSSRFHost(host string) bool {
 	h := strings.ToLower(strings.TrimSpace(host))
 	if commonstrings.IsEmpty(h) {
@@ -104,6 +107,19 @@ func isBlockedSSRFHost(host string) bool {
 func validateUUID(id string) error {
 	if !uuidPattern.MatchString(id) {
 		return errors.New("invalid id")
+	}
+	return nil
+}
+
+const minPasswordLen = 8
+
+func validatePassword(password string) error {
+	password = strings.TrimSpace(password)
+	if commonstrings.IsEmpty(password) {
+		return errors.New("password required")
+	}
+	if len(password) < minPasswordLen {
+		return errors.New("password must be at least 8 characters")
 	}
 	return nil
 }

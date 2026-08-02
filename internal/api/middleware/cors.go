@@ -24,7 +24,7 @@ func (mw *MwHandler) VerifyCors(next fasthttp.RequestHandler) fasthttp.RequestHa
 			}
 		}
 		ctx.Response.Header.Set(HeaderAccessControlAllowMethods, "GET, POST, PUT, DELETE, OPTIONS")
-		ctx.Response.Header.Set(HeaderAccessControlAllowMethods, "Accept, Authorization, Content-Type, X-Request-ID, X-CSRF-Token")
+		ctx.Response.Header.Set(HeaderAccessControlAllowHeaders, "Accept, Authorization, Content-Type, Content-Encoding, X-Request-ID, X-CSRF-Token")
 
 		if ctx.IsOptions() {
 			if !strings.IsEmpty(origin) {

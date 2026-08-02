@@ -11,12 +11,14 @@ import (
 
 //go:generate envgen -type Config -output config_env_gen.go
 
+// goalign:ignore // env-backed; trailing bool padding is unavoidable
 type HTTPConfig struct {
-	Addr               string        `default:":8080"   env:"HTTP_ADDR"`
-	WriteTimeout       time.Duration `default:"30s"     env:"HTTP_WRITE_TIMEOUT"`
-	ReadTimeout        time.Duration `default:"10s"     env:"HTTP_READ_TIMEOUT"`
-	IdleTimeout        time.Duration `default:"60s"     env:"HTTP_IDLE_TIMEOUT"`
-	MaxRequestBodySize int64         `default:"1048576" env:"MAX_REQUEST_BODY_SIZE"`
+	Addr                string        `default:":8080"   env:"HTTP_ADDR"`
+	WriteTimeout        time.Duration `default:"30s"     env:"HTTP_WRITE_TIMEOUT"`
+	ReadTimeout         time.Duration `default:"10s"     env:"HTTP_READ_TIMEOUT"`
+	IdleTimeout         time.Duration `default:"60s"     env:"HTTP_IDLE_TIMEOUT"`
+	MaxRequestBodySize  int64         `default:"1048576" env:"MAX_REQUEST_BODY_SIZE"`
+	ResponseCompression bool          `default:"true"    env:"HTTP_RESPONSE_COMPRESSION"`
 }
 
 type DBConfig struct {

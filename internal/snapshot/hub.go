@@ -33,10 +33,12 @@ type ClusterSnapshot struct {
 }
 
 // Hub is a process-local cache of the latest monitoring snapshots per cluster.
+//
+// goalign:ignore // seq+mu false-share notes are accepted for this hot cache hub
 type Hub struct {
+	seq       atomic.Uint64
 	entries   map[string]*ClusterSnapshot
 	listeners map[string]map[chan SnapshotEvent]struct{} // per-cluster
-	seq       atomic.Uint64
 	mu        sync.RWMutex
 }
 

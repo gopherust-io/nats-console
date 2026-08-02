@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router";
+import { Link, useParams } from "react-router";
 import Alert from "../components/ui/Alert";
 import QueryErrorState from "../components/ui/QueryErrorState";
 import { api, clusterPath } from "../lib/api";
@@ -87,11 +87,13 @@ export default function SystemsPage() {
 
 export function SystemUsagePage() {
   const { t } = useTranslation();
-  const { clusterId } = useCluster();
+  const { clusterId: routeCluster } = useParams();
+  const { clusterId: contextCluster } = useCluster();
+  const id = routeCluster ?? contextCluster;
   const accountQuery = useQuery({
-    queryKey: clusterQueryKey(clusterId, "account"),
-    queryFn: async () => (await api(clusterPath(clusterId!, "/account"))).data,
-    enabled: Boolean(clusterId),
+    queryKey: clusterQueryKey(id, "account"),
+    queryFn: async () => (await api(clusterPath(id!, "/account"))).data,
+    enabled: Boolean(id),
     refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
   });
 

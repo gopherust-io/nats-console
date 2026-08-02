@@ -32,6 +32,11 @@ const (
 		DELETE FROM access_grants
 		WHERE user_id = $1 AND resource_type = $2 AND resource_key = $3`
 
+	queryDeleteAccessGrantsByResourceKey = `
+		DELETE FROM access_grants
+		WHERE resource_type = $1 AND resource_key = $2
+		RETURNING user_id`
+
 	queryInsertUserInvite = `
 		INSERT INTO user_invites (token, user_id, expires_at, created_at)
 		VALUES ($1, $2, $3, $4)`

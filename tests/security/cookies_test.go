@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gopherust-io/nats-consol/internal/config"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,7 +26,7 @@ func TestLoginSetsSecureSessionCookies(t *testing.T) {
 		strings.NewReader(`{"username":"admin","password":"admin"}`),
 	)
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode, "status body = %s", string(resp.Body))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "status body = %s", commonstrings.BytesToString(resp.Body))
 
 	var sessionCookie, refreshCookie, csrfCookie *testutil.Cookie
 	for _, c := range resp.Cookies() {

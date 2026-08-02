@@ -26,8 +26,9 @@ export default function JetStreamHubPage() {
   const { t } = useTranslation();
   const { clusterId: routeCluster, accountName } = useParams();
   const { clusterId } = useCluster();
-  const { canManageJetStream } = useAuth();
   const id = routeCluster ?? clusterId;
+  const { canManageJetStream } = useAuth();
+  const canManageJS = canManageJetStream(id);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -234,11 +235,11 @@ export default function JetStreamHubPage() {
       { id: "consumers", header: t("jetstream.consumers"), width: "108px", align: "right" },
       { id: "storage", header: t("jetstream.storage"), width: "96px" },
     ];
-    if (canManageJetStream) {
+    if (canManageJS) {
       cols.push({ id: "actions", header: "", width: "112px", align: "right" });
     }
     return cols;
-  }, [t, canManageJetStream]);
+  }, [t, canManageJS]);
 
   const consumerColumns = useMemo<VirtualTableColumn[]>(
     () => [
@@ -283,7 +284,7 @@ export default function JetStreamHubPage() {
         case "storage":
           return s.config.storage;
         case "actions":
-          return canManageJetStream ? (
+          return canManageJS ? (
             <button
               className="btn danger btn--small"
               type="button"
@@ -296,7 +297,7 @@ export default function JetStreamHubPage() {
           return null;
       }
     },
-    [base, canManageJetStream, id, t],
+    [base, canManageJS, id, t],
   );
 
   const renderConsumerCell = useCallback(
@@ -370,7 +371,7 @@ export default function JetStreamHubPage() {
           <h1 className="nc-page-title">{t("jetstream.title")}</h1>
           <p className="nc-page-sub">{t("jetstream.subtitle")}</p>
         </div>
-        {canManageJetStream && section === "streams" && (
+        {canManageJS && section === "streams" && (
           <div className="nc-dropdown" ref={menuRef}>
             <button
               type="button"

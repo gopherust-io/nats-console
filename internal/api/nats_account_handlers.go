@@ -8,10 +8,11 @@ import (
 
 	"github.com/gopherust-io/nats-consol/internal/app"
 	"github.com/gopherust-io/nats-consol/internal/auth"
-	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/httpctx/httpstatus"
+	"github.com/gopherust-io/nats-consol/internal/store"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
@@ -51,6 +52,42 @@ func requireAccountAccess(ctx *fasthttp.RequestCtx, account string) bool {
 	return true
 }
 
+// requireManageAccountAccess gates assign/share flows that mint credential grants.
+func requireManageAccountAccess(ctx *fasthttp.RequestCtx, account string) bool {
+	user, ok := auth.UserFromContext(httpctx.FromRequest(ctx))
+	if !ok {
+		httpstatus.WriteUnauthorized(ctx)
+		return false
+	}
+	if !auth.CanManageAccountAccess(user, clusterID(ctx), account) {
+		httpstatus.WriteForbidden(ctx)
+		return false
+	}
+	return true
+}
+
+// requireMutateAccountAccess gates create/update/delete of NATS users, signing
+// groups, and exports. Account observers and nats_user-only grants may read
+// (via requireAccountAccess) but must not mutate account control-plane data.
+// Cluster-write operators and account admins are allowed.
+func requireMutateAccountAccess(ctx *fasthttp.RequestCtx, account string) bool {
+	user, ok := auth.UserFromContext(httpctx.FromRequest(ctx))
+	if !ok {
+		httpstatus.WriteUnauthorized(ctx)
+		return false
+	}
+	cid := clusterID(ctx)
+	if !auth.CanAccessAccount(user, cid, account) {
+		httpstatus.WriteForbidden(ctx)
+		return false
+	}
+	if auth.CanManageAccountAccess(user, cid, account) || auth.CanWriteCluster(user, cid) {
+		return true
+	}
+	httpstatus.WriteForbidden(ctx)
+	return false
+}
+
 // natsUserIDFromCtx returns the route userId after UUID validation.
 // Non-UUID values (e.g. static path segments mis-routed as {userId}) get a 400.
 func natsUserIDFromCtx(ctx *fasthttp.RequestCtx) (string, bool) {
@@ -73,6 +110,9 @@ func (h *NATSAccountHandler) ListUsers(ctx *fasthttp.RequestCtx) {
 		writeAPIError(ctx, err)
 		return
 	}
+	if storeUser, ok := auth.UserFromContext(httpctx.FromRequest(ctx)); ok {
+		users = filterNATSUsersForGrants(storeUser, clusterID, account, users)
+	}
 	httpstatus.WriteDataMeta(ctx, fasthttp.StatusOK, nonNilSlice(users), totalMeta(len(users)))
 }
 
@@ -91,6 +131,11 @@ func (h *NATSAccountHandler) SubjectPermissions(ctx *fasthttp.RequestCtx) {
 		writeAPIError(ctx, err)
 		return
 	}
+	if storeUser, ok := auth.UserFromContext(httpctx.FromRequest(ctx)); ok {
+		if !canListAllAccountNATSUsers(storeUser, clusterID(ctx), account) {
+			result = filterSubjectPermissionsForGrants(storeUser, clusterID(ctx), account, result)
+		}
+	}
 	httpstatus.WriteData(ctx, fasthttp.StatusOK, result)
 }
 
@@ -103,7 +148,14 @@ func (h *NATSAccountHandler) GetUser(ctx *fasthttp.RequestCtx) {
 	if !requireAccountAccess(ctx, account) {
 		return
 	}
-	user, err := h.accounts.GetUser(httpctx.FromRequest(ctx), clusterID(ctx), account, userID)
+	cid := clusterID(ctx)
+	if storeUser, ok := auth.UserFromContext(httpctx.FromRequest(ctx)); ok {
+		if !canViewNATSUser(storeUser, cid, account, userID) {
+			httpstatus.WriteForbidden(ctx)
+			return
+		}
+	}
+	user, err := h.accounts.GetUser(httpctx.FromRequest(ctx), cid, account, userID)
 	if errors.Is(err, domain.ErrNotFound) {
 		httpstatus.WriteError(ctx, fasthttp.StatusNotFound, err)
 		return
@@ -113,6 +165,104 @@ func (h *NATSAccountHandler) GetUser(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	httpstatus.WriteData(ctx, fasthttp.StatusOK, user)
+}
+
+// canListAllAccountNATSUsers is true for cluster-wide or account-level grants.
+func canListAllAccountNATSUsers(user store.User, clusterID, account string) bool {
+	if auth.CanAccessCluster(user, clusterID) {
+		return true
+	}
+	accountKey := domain.AccountResourceKey(clusterID, account)
+	for _, g := range user.Grants {
+		if g.ResourceType == store.ResourceAccount && g.ResourceKey == accountKey {
+			return true
+		}
+	}
+	return false
+}
+
+func grantedNATSUserIDs(user store.User, clusterID, account string) map[string]struct{} {
+	prefix := domain.AccountResourceKey(clusterID, account) + ":"
+	out := make(map[string]struct{})
+	for _, g := range user.Grants {
+		if g.ResourceType != store.ResourceNATSUser {
+			continue
+		}
+		if !strings.HasPrefix(g.ResourceKey, prefix) {
+			continue
+		}
+		id := strings.TrimPrefix(g.ResourceKey, prefix)
+		if id == "" || strings.Contains(id, ":") {
+			continue
+		}
+		out[id] = struct{}{}
+	}
+	return out
+}
+
+func canViewNATSUser(user store.User, clusterID, account, natsUserID string) bool {
+	if canListAllAccountNATSUsers(user, clusterID, account) {
+		return true
+	}
+	_, ok := grantedNATSUserIDs(user, clusterID, account)[natsUserID]
+	return ok
+}
+
+func filterNATSUsersForGrants(user store.User, clusterID, account string, users []domain.NATSAccountUser) []domain.NATSAccountUser {
+	if canListAllAccountNATSUsers(user, clusterID, account) {
+		return users
+	}
+	allowed := grantedNATSUserIDs(user, clusterID, account)
+	if len(allowed) == 0 {
+		return nil
+	}
+	out := make([]domain.NATSAccountUser, 0, len(allowed))
+	for _, u := range users {
+		if _, ok := allowed[u.ID]; ok {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+func filterSubjectPermissionsForGrants(user store.User, clusterID, account string, result domain.SubjectPermissionsResult) domain.SubjectPermissionsResult {
+	allowed := grantedNATSUserIDs(user, clusterID, account)
+	if len(allowed) == 0 {
+		result.Publish = nil
+		result.Subscribe = nil
+		result.QueueSubscribe = nil
+		return result
+	}
+	result.Publish = filterSubjectPermissionEntries(result.Publish, allowed)
+	result.Subscribe = filterSubjectPermissionEntries(result.Subscribe, allowed)
+	result.QueueSubscribe = filterSubjectPermissionEntries(result.QueueSubscribe, allowed)
+	return result
+}
+
+func filterSubjectPermissionEntries(entries []domain.SubjectPermissionEntry, allowed map[string]struct{}) []domain.SubjectPermissionEntry {
+	if len(entries) == 0 {
+		return entries
+	}
+	out := make([]domain.SubjectPermissionEntry, 0, len(entries))
+	for _, e := range entries {
+		if _, ok := allowed[e.UserID]; ok {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func requireListAllAccountNATSUsers(ctx *fasthttp.RequestCtx, account string) bool {
+	user, ok := auth.UserFromContext(httpctx.FromRequest(ctx))
+	if !ok {
+		httpstatus.WriteUnauthorized(ctx)
+		return false
+	}
+	if !canListAllAccountNATSUsers(user, clusterID(ctx), account) {
+		httpstatus.WriteForbidden(ctx)
+		return false
+	}
+	return true
 }
 
 // goalign:ignore
@@ -152,7 +302,11 @@ func (h *NATSAccountHandler) CreateUser(ctx *fasthttp.RequestCtx) {
 	if commonstrings.IsEmpty(req.AccountName) {
 		req.AccountName = "Default"
 	}
-	if !requireAccountAccess(ctx, req.AccountName) {
+	if err := domain.ValidateAccountName(req.AccountName); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	if !requireMutateAccountAccess(ctx, req.AccountName) {
 		return
 	}
 	user, err := h.accounts.CreateUser(httpctx.FromRequest(ctx), domain.NATSAccountUserCreate{
@@ -219,7 +373,7 @@ func (h *NATSAccountHandler) UpdateUser(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	account := h.accountFromCtx(ctx)
-	if !requireAccountAccess(ctx, account) {
+	if !requireMutateAccountAccess(ctx, account) {
 		return
 	}
 	user, err := h.accounts.UpdateUser(httpctx.FromRequest(ctx), clusterID(ctx), account, userID, domain.NATSAccountUserUpdate{
@@ -259,10 +413,11 @@ func (h *NATSAccountHandler) DeleteUser(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	account := h.accountFromCtx(ctx)
-	if !requireAccountAccess(ctx, account) {
+	if !requireMutateAccountAccess(ctx, account) {
 		return
 	}
-	err := h.accounts.DeleteUser(httpctx.FromRequest(ctx), clusterID(ctx), account, userID)
+	c := httpctx.FromRequest(ctx)
+	affected, err := h.accounts.DeleteUser(c, clusterID(ctx), account, userID)
 	if errors.Is(err, domain.ErrNotFound) {
 		httpstatus.WriteError(ctx, fasthttp.StatusNotFound, err)
 		return
@@ -270,6 +425,9 @@ func (h *NATSAccountHandler) DeleteUser(ctx *fasthttp.RequestCtx) {
 	if err != nil {
 		writeAPIError(ctx, err)
 		return
+	}
+	for _, id := range affected {
+		h.auth.InvalidateUser(c, id)
 	}
 	ctx.SetStatusCode(fasthttp.StatusNoContent)
 }
@@ -304,10 +462,7 @@ func (h *NATSAccountHandler) RotateUser(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	account := h.accountFromCtx(ctx)
-	if !requireAccountAccess(ctx, account) {
-		return
-	}
-	if !requireDownloadCreds(ctx, account, userID) {
+	if !requireMutateAccountAccess(ctx, account) {
 		return
 	}
 	creds, err := h.accounts.RotateUser(httpctx.FromRequest(ctx), clusterID(ctx), account, userID, h.cfg.NATS.AccountSeed)
@@ -352,7 +507,9 @@ func (h *NATSAccountHandler) AssignPerson(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	account := h.accountFromCtx(ctx)
-	if !requireAccountAccess(ctx, account) {
+	// Assign mints a credential_downloader grant — operators with write must not
+	// self-escalate into CanDownloadCreds via assign alone.
+	if !requireManageAccountAccess(ctx, account) {
 		return
 	}
 	var req struct {
@@ -397,6 +554,12 @@ func (h *NATSAccountHandler) ListSigningGroups(ctx *fasthttp.RequestCtx) {
 	if !requireAccountAccess(ctx, account) {
 		return
 	}
+	if storeUser, ok := auth.UserFromContext(httpctx.FromRequest(ctx)); ok {
+		if !canListAllAccountNATSUsers(storeUser, clusterID(ctx), account) {
+			httpstatus.WriteForbidden(ctx)
+			return
+		}
+	}
 	groups, err := h.accounts.ListSigningGroups(httpctx.FromRequest(ctx), clusterID(ctx), account)
 	if err != nil {
 		writeAPIError(ctx, err)
@@ -428,7 +591,11 @@ func (h *NATSAccountHandler) CreateSigningGroup(ctx *fasthttp.RequestCtx) {
 	if commonstrings.IsEmpty(req.AccountName) {
 		req.AccountName = h.accountFromCtx(ctx)
 	}
-	if !requireAccountAccess(ctx, req.AccountName) {
+	if err := domain.ValidateAccountName(req.AccountName); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	if !requireMutateAccountAccess(ctx, req.AccountName) {
 		return
 	}
 	group, err := h.accounts.CreateSigningGroup(httpctx.FromRequest(ctx), domain.SigningGroupCreate{
@@ -458,7 +625,7 @@ func (h *NATSAccountHandler) UpdateSigningGroup(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	account := h.accountFromCtx(ctx)
-	if !requireAccountAccess(ctx, account) {
+	if !requireMutateAccountAccess(ctx, account) {
 		return
 	}
 	group, err := h.accounts.UpdateSigningGroup(httpctx.FromRequest(ctx), clusterID(ctx), account, httpctx.RouteParam(ctx, "groupId"), domain.SigningGroupUpdate{
@@ -484,7 +651,7 @@ func (h *NATSAccountHandler) UpdateSigningGroup(ctx *fasthttp.RequestCtx) {
 
 func (h *NATSAccountHandler) DeleteSigningGroup(ctx *fasthttp.RequestCtx) {
 	account := h.accountFromCtx(ctx)
-	if !requireAccountAccess(ctx, account) {
+	if !requireMutateAccountAccess(ctx, account) {
 		return
 	}
 	err := h.accounts.DeleteSigningGroup(httpctx.FromRequest(ctx), clusterID(ctx), account, httpctx.RouteParam(ctx, "groupId"))
@@ -499,6 +666,12 @@ func (h *NATSAccountHandler) ListExports(ctx *fasthttp.RequestCtx) {
 	account := h.accountFromCtx(ctx)
 	if !requireAccountAccess(ctx, account) {
 		return
+	}
+	if storeUser, ok := auth.UserFromContext(httpctx.FromRequest(ctx)); ok {
+		if !canListAllAccountNATSUsers(storeUser, clusterID(ctx), account) {
+			httpstatus.WriteForbidden(ctx)
+			return
+		}
 	}
 	kind := commonstrings.BytesToString(ctx.QueryArgs().Peek("kind"))
 	items, err := h.accounts.ListExports(httpctx.FromRequest(ctx), clusterID(ctx), account, kind)
@@ -530,7 +703,11 @@ func (h *NATSAccountHandler) CreateExport(ctx *fasthttp.RequestCtx) {
 	if commonstrings.IsEmpty(req.AccountName) {
 		req.AccountName = "Default"
 	}
-	if !requireAccountAccess(ctx, req.AccountName) {
+	if err := domain.ValidateAccountName(req.AccountName); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
+	if !requireMutateAccountAccess(ctx, req.AccountName) {
 		return
 	}
 	item, err := h.accounts.CreateExport(httpctx.FromRequest(ctx), domain.NATSAccountExportCreate{
@@ -559,7 +736,7 @@ func (h *NATSAccountHandler) UpdateExport(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	account := h.accountFromCtx(ctx)
-	if !requireAccountAccess(ctx, account) {
+	if !requireMutateAccountAccess(ctx, account) {
 		return
 	}
 	item, err := h.accounts.UpdateExport(httpctx.FromRequest(ctx), clusterID(ctx), account, httpctx.RouteParam(ctx, "exportId"), domain.NATSAccountExportUpdate{
@@ -580,7 +757,7 @@ func (h *NATSAccountHandler) UpdateExport(ctx *fasthttp.RequestCtx) {
 
 func (h *NATSAccountHandler) DeleteExport(ctx *fasthttp.RequestCtx) {
 	account := h.accountFromCtx(ctx)
-	if !requireAccountAccess(ctx, account) {
+	if !requireMutateAccountAccess(ctx, account) {
 		return
 	}
 	err := h.accounts.DeleteExport(httpctx.FromRequest(ctx), clusterID(ctx), account, httpctx.RouteParam(ctx, "exportId"))

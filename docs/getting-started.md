@@ -101,7 +101,20 @@ You should see it appear in the browser in real time.
 make seed-demo
 ```
 
-This creates sample streams/consumers so **Topology** and **Dashboard** look more interesting.
+This creates sample streams/consumers (aligned with the fleet demo) so **Topology** and **Dashboard** look more interesting.
+
+For **live load and Account → Connections** (one NATS client per service), enable the root compose **`fleet`** profile ([`examples/fleet`](../examples/fleet); image build needs a sibling [`gopherust-io/nats`](https://github.com/gopherust-io/nats) checkout for `go.mod` replace). Fleet containers join the same `nats-consol` Docker Desktop project:
+
+```bash
+make fleet-up
+# or: docker compose -p nats-consol -f examples/fleet/docker-compose.yml --profile fleet up -d --build
+```
+
+Each container connects as `fleet-<service>` (visible under **Connections**). Single-process local run:
+
+```bash
+TEL_ENABLE=false NATS_URL=nats://127.0.0.1:4222 go run ./examples/fleet
+```
 
 ---
 

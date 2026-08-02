@@ -264,6 +264,14 @@
   background: var(--accent, #3b82f6);
 }
 
+.raft-node__dot--hotStandby {
+  background: color-mix(in srgb, var(--success, #10b981) 55%, var(--text-muted, #6b7280));
+}
+
+.raft-node__dot--follower {
+  background: color-mix(in srgb, var(--warning-text, #d97706) 70%, var(--text-muted, #6b7280));
+}
+
 .raft-node__dot--offline {
   background: var(--danger, #ef4444);
 }
@@ -314,10 +322,20 @@
   background: color-mix(in srgb, var(--accent, #3b82f6) 14%, var(--raft-inner));
 }
 
-.raft-node__badge--hotStandby,
+.raft-node__badge--hotStandby {
+  color: color-mix(in srgb, var(--success, #10b981) 70%, var(--raft-ink));
+  border-color: color-mix(in srgb, var(--success, #10b981) 28%, transparent);
+  background: color-mix(in srgb, var(--success, #10b981) 10%, var(--raft-inner));
+}
+
 .raft-node__badge--follower {
-  color: var(--text-secondary, #9ca3af);
-  border-color: color-mix(in srgb, var(--text-secondary, #9ca3af) 22%, transparent);
+  color: color-mix(in srgb, var(--warning-text, #d97706) 85%, var(--raft-ink));
+  border-color: color-mix(in srgb, var(--warning-text, #d97706) 32%, transparent);
+  background: color-mix(in srgb, var(--warning-text, #d97706) 12%, var(--raft-inner));
+}
+
+.raft-node--hot-standby {
+  opacity: 1;
 }
 
 .raft-node--follower {

@@ -44,7 +44,7 @@ func NewHandler(svc *app.Services, cfg config.Config, hub *snapshot.Hub) *Handle
 		}, snapshot.DefaultConnzInterval)
 		replicas = snapshot.NewConnzBroker(func(ctx context.Context, clusterID string) ([]byte, error) {
 			return fetchReplicasSnapshotJSON(ctx, svc, hub, clusterID, cfg.MaxMonitoringBodyBytes)
-		}, snapshot.DefaultReplicasInterval).WithScrapeTimeout(snapshot.DefaultReplicasScrapeTimeout)
+		}, snapshot.DefaultReplicasInterval).WithScrapeTimeout(snapshot.ReplicasScrapeTimeout(8))
 	}
 	return &Handler{svc: svc, cfg: cfg, hub: hub, connz: connz, replicas: replicas}
 }

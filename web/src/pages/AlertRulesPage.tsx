@@ -29,6 +29,8 @@ type FormState = {
   threshold: string;
   enabled: boolean;
   scopeAll: boolean;
+  /** Captured when scoping; does not follow live shell cluster switches. */
+  scopeClusterId: string | null;
 };
 
 const emptyForm = (): FormState => ({
@@ -40,6 +42,7 @@ const emptyForm = (): FormState => ({
   threshold: "90",
   enabled: true,
   scopeAll: true,
+  scopeClusterId: null,
 });
 
 function formFromRule(rule: AlertRule): FormState {
@@ -52,6 +55,7 @@ function formFromRule(rule: AlertRule): FormState {
     threshold: String(rule.threshold),
     enabled: rule.enabled,
     scopeAll: !rule.clusterId,
+    scopeClusterId: rule.clusterId ?? null,
   };
 }
 
@@ -151,7 +155,7 @@ export default function AlertRulesPage() {
           threshold,
           enabled: form.enabled,
           clearCluster: form.scopeAll,
-          clusterId: form.scopeAll ? undefined : clusterId || undefined,
+          clusterId: form.scopeAll ? undefined : form.scopeClusterId || undefined,
         },
       });
       return;
@@ -164,7 +168,7 @@ export default function AlertRulesPage() {
       comparator: form.comparator,
       threshold,
       enabled: form.enabled,
-      clusterId: form.scopeAll ? undefined : clusterId || undefined,
+      clusterId: form.scopeAll ? undefined : form.scopeClusterId || undefined,
     });
   }
 
@@ -250,13 +254,24 @@ export default function AlertRulesPage() {
             <input
               type="checkbox"
               checked={form.scopeAll}
-              onChange={(e) => setForm((f) => ({ ...f, scopeAll: e.target.checked }))}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  scopeAll: e.target.checked,
+                  scopeClusterId: e.target.checked ? null : f.scopeClusterId || clusterId || null,
+                }))
+              }
             />
             {t("alerts.allClusters")}
           </label>
           {!form.scopeAll && (
             <p className="text-muted">
-              {t("alerts.scopedTo", { name: clusters.find((c) => c.id === clusterId)?.name ?? clusterId ?? "—" })}
+              {t("alerts.scopedTo", {
+                name:
+                  clusters.find((c) => c.id === form.scopeClusterId)?.name ??
+                  form.scopeClusterId ??
+                  "—",
+              })}
             </p>
           )}
           <label className="role-chip">

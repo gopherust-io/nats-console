@@ -1,5 +1,6 @@
-.PHONY: dev dev-web build run docker-up docker-down \
+.PHONY: dev dev-web dev-web-docker reload-front build run docker-up docker-down \
 	nats-up nats-down nats-auth-up nats-cluster-up nats-cluster-down nats-down-all tidy generate \
+	fleet-up fleet-down \
 	test test-unit test-integration test-contract test-security test-regression \
 	test-e2e test-smoke test-performance test-stress test-web ci lint lint-go lint-go-fix lint-web lint-web-docker lint-web-local align reload-api
 
@@ -8,10 +9,11 @@ NATS_CLUSTER_COMPOSE := docker/nats/cluster/docker-compose.yml
 NATS_AUTH_COMPOSE := docker/nats/auth/docker-compose.yml
 NATS_SUPERCLUSTER_COMPOSE := docker/nats/supercluster/docker-compose.yml
 NATS_HEALTHZ := http://127.0.0.1:8222/healthz
+CLUSTER_SERVICES := nats-1 nats-2 nats-3 nats-4 nats-5
 
 NODE_IMAGE ?= node:22-alpine
 WEB_DIR := web
-GOALIGN_VERSION := v1.3.0
+GOALIGN_VERSION := v1.4.0
 GOALIGN_BIN := $(HOME)/go/bin/goalign
 GOALIGN_FLAGS := analyze -r --arch=amd64 --fail-on-findings --min-waste=1 -e web/,bin/,node_modules/ .
 
@@ -34,15 +36,8 @@ dev-web:
 	cd $(WEB_DIR) && npm install && npm run dev
 
 dev-web-docker:
-	docker stop nats-consol-web-dev 2>/dev/null || true
-	docker rm nats-consol-web-dev 2>/dev/null || true
-	CONSOLE_PORT=8081 docker compose up -d --force-recreate console
-	docker run -d --name nats-consol-web-dev \
-		--network nats-consol_default \
-		-v "$(CURDIR)/$(WEB_DIR):/web" -w /web \
-		-p 8080:8080 \
-		-e VITE_API_PROXY_TARGET=http://console:8080 \
-		$(NODE_IMAGE) sh -lc "npm install && npm run dev -- --host 0.0.0.0"
+	-docker rm -f nats-consol-web-dev 2>/dev/null || true
+	CONSOLE_PORT=8081 NODE_IMAGE=$(NODE_IMAGE) docker compose --profile web up -d --build --force-recreate console web-dev
 
 reload-front: dev-web-docker
 
@@ -95,22 +90,35 @@ nats-auth-up:
 	@echo "Auth lab up. Users: orders-pub/pubpass, orders-worker/workerpass, js-admin/adminpass"
 
 nats-cluster-up:
-	docker compose -f $(NATS_CLUSTER_COMPOSE) up -d
-	@echo "Cluster lab up (ports 4222-4226 / 8222-8226). See docker/nats/cluster/README.md"
-	@echo "Stop root compose nats first if ports clash: docker compose stop nats"
+	docker compose stop nats
+	docker compose --profile cluster up -d $(CLUSTER_SERVICES)
+	@echo "Cluster lab up (ports 4222-4226 / 8222-8226) in project nats-consol. See docker/nats/cluster/README.md"
+	@echo "Restart single broker later with: docker compose up -d nats"
 
 nats-cluster-down:
-	docker compose -f $(NATS_CLUSTER_COMPOSE) down -v
+	docker compose -p nats-consol -f $(NATS_CLUSTER_COMPOSE) --profile cluster down -v
+	@echo "Cluster nodes removed. Restart single broker with: docker compose up -d nats"
 
 nats-down-all:
 	-docker compose -f $(NATS_COMPOSE) down -v
-	-docker compose -f $(NATS_CLUSTER_COMPOSE) down -v
+	-docker compose -p nats-consol -f $(NATS_CLUSTER_COMPOSE) --profile cluster down -v
 	-docker compose -f $(NATS_AUTH_COMPOSE) down -v
 	-docker compose -f $(NATS_SUPERCLUSTER_COMPOSE) down -v
 
 seed-demo:
 	chmod +x scripts/seed-demo-topology.sh
 	./scripts/seed-demo-topology.sh
+
+# Fleet profile on root compose (uses published gopherust-io/nats; optional sibling for docker build-context).
+FLEET_COMPOSE ?= examples/fleet/docker-compose.yml
+FLEET_NATS_URL ?= nats://nats:4222
+
+fleet-up:
+	@test -d ../nats || (echo "missing sibling ../nats (docker build-context for examples/fleet image)" >&2; exit 1)
+	NATS_URL=$(FLEET_NATS_URL) docker compose -p nats-consol -f $(FLEET_COMPOSE) --profile fleet up -d --build
+
+fleet-down:
+	docker compose -p nats-consol -f $(FLEET_COMPOSE) --profile fleet down
 
 tidy:
 	go mod tidy

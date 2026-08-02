@@ -254,8 +254,10 @@ func (rh *Router) InitRouter() fasthttp.RequestHandler {
 	}
 
 	handler := middleware.Chain(
+		rh.mw.ApplyResponseCompression,
 		rh.mw.ApplyRequestID,
 		rh.mw.ApplySecurityHeaders,
+		rh.mw.DecompressRequestBody,
 		rh.mw.CheckBodySizeLimit,
 		rh.mw.VerifyAuthRateLimit,
 		rh.mw.ApplyMetrics,

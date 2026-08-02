@@ -136,6 +136,12 @@
     "password": "Password",
     "submitPassword": "Sign in",
     "loginFailed": "Login failed",
+    "errors": {
+      "access_denied": "Sign-in was denied. Ask your administrator for access.",
+      "session_expired": "Your session expired. Sign in again.",
+      "invalid_request": "Sign-in request was invalid. Try again.",
+      "server_error": "Authentication service error. Try again later."
+    },
     "helpLink": "Having trouble signing in?",
     "helpCopy": "Contact your console administrator for an invite link or password reset. Self-hosted NATS Consol does not offer public sign-up.",
     "acceptInvite": "Accept invite",
@@ -189,7 +195,7 @@
     "empty": "No server peers reported from monitoring.",
     "peersTitle": "Peers",
     "colName": "Name",
-    "colRole": "Role",
+    "colRole": "Source",
     "colStatus": "Status",
     "colLeader": "Leader",
     "colUptime": "Uptime",
@@ -217,13 +223,14 @@
     "election": {
       "title": "RAFT election",
       "captionStable": "Stable · JetStream meta leader from monitoring",
+      "captionLeaderUnreachable": "Leader unreachable ({{from}}) · waiting for JetStream meta",
       "captionDemoting": "Leader stepping down (was {{from}})…",
       "captionCandidate": "Election: {{candidate}} is candidate (was {{from}})",
       "captionPromoting": "Election: {{candidate}} → leader (was {{from}})",
       "captionSettled": "New leader: {{to}} (was {{from}})",
       "role": {
         "follower": "Follower",
-        "hotStandby": "Follower",
+        "hotStandby": "Hot standby",
         "candidate": "Candidate",
         "leader": "Leader",
         "offline": "Offline"

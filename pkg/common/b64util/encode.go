@@ -25,10 +25,8 @@ func EncodeToString(src []byte) string {
 		buf = buf[:n]
 	}
 	base64.StdEncoding.Encode(buf, src)
-	out := string(buf)
-	if cap(*scratch) >= n {
-		*scratch = (*scratch)[:0]
-		scratchPool.Put(scratch)
-	}
+	out := string(buf) // must copy; BytesToString would alias the pooled scratch
+	*scratch = buf[:0]
+	scratchPool.Put(scratch)
 	return out
 }

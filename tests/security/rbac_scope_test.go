@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gopherust-io/nats-consol/internal/store"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,12 +43,12 @@ func TestScopedViewerCannotAccessOtherCluster(t *testing.T) {
 	require.NoError(t, err)
 	body := resp.Body
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Contains(t, string(body), clusterID)
+	assert.Contains(t, commonstrings.BytesToString(body), clusterID)
 
 	otherCluster := "660e8400-e29b-41d4-a716-446655440001"
 	resp, err = srv.Client.Do(&testutil.Request{
 		Method: http.MethodGet,
-		URL:    srv.BaseURL(otherCluster)+"/streams",
+		URL:    srv.BaseURL(otherCluster) + "/streams",
 		Header: http.Header{
 			"Authorization": {basicAuth("scoped-viewer", "scoped-pass")},
 		},
@@ -57,7 +58,7 @@ func TestScopedViewerCannotAccessOtherCluster(t *testing.T) {
 
 	resp, err = srv.Client.Do(&testutil.Request{
 		Method: http.MethodGet,
-		URL:    srv.BaseURL(otherCluster)+"/metrics/history",
+		URL:    srv.BaseURL(otherCluster) + "/metrics/history",
 		Header: http.Header{
 			"Authorization": {basicAuth("scoped-viewer", "scoped-pass")},
 		},
@@ -141,5 +142,5 @@ func TestViewerWithoutClusterAccessGetsEmptyList(t *testing.T) {
 	require.NoError(t, err)
 	body := resp.Body
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Contains(t, string(body), `"meta":{"total":0}`)
+	assert.Contains(t, commonstrings.BytesToString(body), `"meta":{"total":0}`)
 }

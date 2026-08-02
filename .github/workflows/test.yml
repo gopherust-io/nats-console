@@ -36,13 +36,13 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/go/bin/goalign
-          key: goalign-v1.3.0-${{ runner.os }}
+          key: goalign-v1.4.0-${{ runner.os }}
       - name: Install goalign
         if: steps.goalign-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           mkdir -p "${HOME}/go/bin"
-          go install github.com/gopherust-io/goalign@v1.3.0
+          go install github.com/gopherust-io/goalign@v1.4.0
       - name: Run goalign
         run: |
           echo "${HOME}/go/bin" >> "${GITHUB_PATH}"

@@ -8,6 +8,7 @@ const (
 	HeaderAccessControlAllowOrigin      = "Access-Control-Allow-Origin"
 	HeaderAccessControlAllowCredentials = "Access-Control-Allow-Credentials"
 	HeaderAccessControlAllowMethods     = "Access-Control-Allow-Methods"
+	HeaderAccessControlAllowHeaders     = "Access-Control-Allow-Headers"
 	HeaderOrigin                        = "Origin"
 	HeaderVary                          = "Vary"
 	HeaderAuthorization                 = "Authorization"

@@ -82,6 +82,7 @@ export default function ConsumerDetailPage() {
           ? t("topology.backToTopology")
           : t("consumers.backToStream", { name });
   const { canManageJetStream } = useAuth();
+  const canManageJS = canManageJetStream(id);
   const queryClient = useQueryClient();
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -173,6 +174,22 @@ export default function ConsumerDetailPage() {
   useEffect(() => {
     seededReplayRef.current = false;
     setError("");
+    setSuccess("");
+    setEditOpen(false);
+    setEditError("");
+    setReplayMode("reset");
+    setReplayScope("continuous");
+    setReplayFrom("seq");
+    setReplaySeq("");
+    setReplayUntilSeq("");
+    setReplayTime("");
+    setReplayUntilTime("");
+    setReplayPolicy("instant");
+    setFilterSubject("");
+    setSidecarDurable("");
+    setReplaying(false);
+    setCreatedDurable(null);
+    setReplayConfirmBody(null);
   }, [id, name, consumer]);
 
   useEffect(() => {
@@ -180,7 +197,7 @@ export default function ConsumerDetailPage() {
     seededReplayRef.current = true;
     const hint = info.ackFloor?.streamSeq || info.delivered?.streamSeq;
     if (hint) {
-      setReplaySeq((prev) => prev || String(hint));
+      setReplaySeq(String(hint));
     }
   }, [info]);
 
@@ -442,7 +459,7 @@ export default function ConsumerDetailPage() {
           ) : null}
           {info.config.description ? <p className="text-muted">{info.config.description}</p> : null}
         </div>
-        {canManageJetStream && (
+        {canManageJS && (
           <div className="actions">
             <button
               type="button"
@@ -557,12 +574,12 @@ export default function ConsumerDetailPage() {
 
       <div
         className={
-          canManageJetStream
+          canManageJS
             ? "consumer-replay-config mt-32"
             : "consumer-replay-config consumer-replay-config--solo mt-32"
         }
       >
-        {canManageJetStream && (
+        {canManageJS && (
           <section className="consumer-replay-config__panel">
             <h2 className="consumer-replay-config__title">Replay</h2>
             <form className="form-grid card consumer-replay-config__card" onSubmit={submitReplay}>

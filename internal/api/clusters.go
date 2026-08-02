@@ -2,12 +2,17 @@ package api
 
 import (
 	"errors"
+	"net/url"
+	"strings"
 
 	"github.com/valyala/fasthttp"
 
+	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/httpctx/httpstatus"
+	"github.com/gopherust-io/nats-consol/internal/store"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 func (h *Handler) ListClusters(ctx *fasthttp.RequestCtx) {
@@ -18,6 +23,11 @@ func (h *Handler) ListClusters(ctx *fasthttp.RequestCtx) {
 	}
 	if actor, ok := actorFromContext(ctx); ok {
 		clusters = filterClustersForActor(clusters, actor)
+	}
+	if storeUser, ok := auth.UserFromContext(httpctx.FromRequest(ctx)); ok {
+		for i := range clusters {
+			clusters[i] = redactClusterURLs(clusters[i], storeUser)
+		}
 	}
 	clusters = nonNilSlice(clusters)
 	httpstatus.WriteDataMeta(ctx, fasthttp.StatusOK, clusters, totalMeta(len(clusters)))
@@ -34,7 +44,44 @@ func (h *Handler) GetCluster(ctx *fasthttp.RequestCtx) {
 		writeAPIError(ctx, err)
 		return
 	}
+	if storeUser, ok := auth.UserFromContext(httpctx.FromRequest(ctx)); ok {
+		cluster = redactClusterURLs(cluster, storeUser)
+	}
 	httpstatus.WriteData(ctx, fasthttp.StatusOK, cluster)
+}
+
+// redactClusterURLs strips URL userinfo always, and hides nats/monitoring URLs
+// from principals without system-level cluster access (account-scoped readers).
+func redactClusterURLs(cluster domain.Cluster, user store.User) domain.Cluster {
+	cluster.NATSURL = redactURLUserinfo(cluster.NATSURL)
+	cluster.MonitoringURL = redactURLUserinfo(cluster.MonitoringURL)
+	if !auth.CanAccessCluster(user, cluster.ID) {
+		cluster.NATSURL = ""
+		cluster.MonitoringURL = ""
+	}
+	return cluster
+}
+
+func redactURLUserinfo(raw string) string {
+	if commonstrings.IsEmpty(raw) {
+		return raw
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		u, err := url.Parse(part)
+		if err != nil || u.User == nil {
+			out = append(out, part)
+			continue
+		}
+		u.User = nil
+		out = append(out, u.String())
+	}
+	return strings.Join(out, ",")
 }
 
 func (h *Handler) TestCluster(ctx *fasthttp.RequestCtx) {
@@ -118,5 +165,5 @@ func (h *Handler) DeleteCluster(ctx *fasthttp.RequestCtx) {
 }
 
 func clusterID(ctx *fasthttp.RequestCtx) string {
-	return httpctx.RouteParam(ctx, "clusterId")
+	return strings.ToLower(httpctx.RouteParam(ctx, "clusterId"))
 }

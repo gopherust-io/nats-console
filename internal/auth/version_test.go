@@ -12,6 +12,7 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/store"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 func versionTestConfig(t *testing.T) config.Config {
@@ -20,12 +21,12 @@ func versionTestConfig(t *testing.T) config.Config {
 	if err != nil {
 		t.Fatal(err)
 	}
-	privPEM := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}))
+	privPEM := commonstrings.BytesToString(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}))
 	pubBytes, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pubPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes}))
+	pubPEM := commonstrings.BytesToString(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes}))
 	return config.Config{
 		Auth: config.AuthConfig{
 			SessionTTL:        time.Hour,

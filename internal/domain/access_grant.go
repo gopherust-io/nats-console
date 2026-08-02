@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 const (
 	ResourceSystem   = "system"
@@ -50,4 +54,16 @@ func AccountResourceKey(clusterID, accountName string) string {
 // NATSUserResourceKey builds "{clusterId}:{accountName}:{natsUserId}".
 func NATSUserResourceKey(clusterID, accountName, natsUserID string) string {
 	return clusterID + ":" + accountName + ":" + natsUserID
+}
+
+// ValidateAccountName rejects empty names and names containing ':' which would
+// break resource-key parsing.
+func ValidateAccountName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("%w: account name is required", ErrInvalidInput)
+	}
+	if strings.Contains(name, ":") {
+		return fmt.Errorf("%w: account name must not contain ':'", ErrInvalidInput)
+	}
+	return nil
 }

@@ -10,13 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/gopherust-io/nats-consol/internal/snapshot"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 func TestConnzBrokerStartsOnFirstStopsOnLast(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
-	payload := []byte(`{"num_connections":1,"connections":[]}`)
+	payload := commonstrings.StringToBytes(`{"num_connections":1,"connections":[]}`)
 	broker := snapshot.NewConnzBroker(func(ctx context.Context, clusterID string) ([]byte, error) {
 		calls.Add(1)
 		assert.Equal(t, "c1", clusterID)
@@ -30,14 +31,14 @@ func TestConnzBrokerStartsOnFirstStopsOnLast(t *testing.T) {
 
 	select {
 	case got := <-updates1:
-		assert.JSONEq(t, string(payload), string(got))
+		assert.JSONEq(t, commonstrings.BytesToString(payload), commonstrings.BytesToString(got))
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for first scrape")
 	}
 	require.GreaterOrEqual(t, calls.Load(), int32(1))
 
 	updates2, latest2, unsub2 := broker.Subscribe("c1")
-	require.JSONEq(t, string(payload), string(latest2))
+	require.JSONEq(t, commonstrings.BytesToString(payload), commonstrings.BytesToString(latest2))
 	assert.Equal(t, 2, broker.SubscriberCount("c1"))
 	assert.Equal(t, 1, broker.ActiveClusters())
 
@@ -77,10 +78,10 @@ func TestConnzBrokerIndependentClusters(t *testing.T) {
 		switch clusterID {
 		case "c1":
 			c1Calls.Add(1)
-			return []byte(`{"cluster":"c1"}`), nil
+			return commonstrings.StringToBytes(`{"cluster":"c1"}`), nil
 		case "c2":
 			c2Calls.Add(1)
-			return []byte(`{"cluster":"c2"}`), nil
+			return commonstrings.StringToBytes(`{"cluster":"c2"}`), nil
 		default:
 			t.Fatalf("unexpected cluster %s", clusterID)
 			return nil, nil
@@ -105,4 +106,14 @@ func TestConnzBrokerIndependentClusters(t *testing.T) {
 	assert.Equal(t, 1, broker.ActiveClusters())
 	assert.Equal(t, 0, broker.SubscriberCount("c1"))
 	assert.Equal(t, 1, broker.SubscriberCount("c2"))
+}
+
+func TestReplicasScrapeTimeout(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, snapshot.DefaultReplicasScrapeTimeout, snapshot.ReplicasScrapeTimeout(0))
+	assert.Equal(t, snapshot.DefaultReplicasScrapeTimeout, snapshot.ReplicasScrapeTimeout(1))
+	// 5 candidates: 2×5×3s + 6s = 36s
+	assert.Equal(t, 36*time.Second, snapshot.ReplicasScrapeTimeout(5))
+	assert.Equal(t, 54*time.Second, snapshot.ReplicasScrapeTimeout(8))
 }

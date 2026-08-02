@@ -86,16 +86,17 @@ func (v *muxViewer) trySendFrame(frame []byte) bool {
 	}
 }
 
+// goalign:ignore // trailing bool padding after mutex is unavoidable
 type sharedSub struct {
+	key     muxKey
+	subErr  error
 	viewers map[*muxViewer]struct{}
 	sub     *nats.Subscription
-	subErr  error
 	// ready is closed once the first attach for this key has finished
 	// attempting the underlying JetStream subscribe (success or failure),
 	// so concurrent late-arriving attach calls wait for that single attempt
 	// instead of racing to subscribe themselves.
 	ready      chan struct{}
-	key        muxKey
 	mu         sync.Mutex
 	subStarted bool
 }

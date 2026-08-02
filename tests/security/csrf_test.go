@@ -15,6 +15,7 @@ import (
 
 	"github.com/gopherust-io/nats-consol/internal/httpctx/httpstatus"
 	"github.com/gopherust-io/nats-consol/internal/store"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/nats-consol/tests/testutil"
 )
 
@@ -70,7 +71,7 @@ func TestExpiredInviteReturnsGone(t *testing.T) {
 	srv := stack.NewServer(t, nil)
 	resp, err := srv.Client.Get("http://nats-consol.local/api/v1/auth/invite/" + inv.Token)
 	require.NoError(t, err)
-	require.Equal(t, http.StatusGone, resp.StatusCode, string(resp.Body))
+	require.Equal(t, http.StatusGone, resp.StatusCode, commonstrings.BytesToString(resp.Body))
 
 	var envelope struct {
 		Error httpstatus.ErrorBody `json:"error"`

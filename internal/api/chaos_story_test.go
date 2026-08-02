@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
@@ -27,7 +28,7 @@ func TestChaosStoryGenerateNotEnabled(t *testing.T) {
 	h := &Handler{svc: nil}
 	ctx := &fasthttp.RequestCtx{}
 	ctx.Request.Header.SetMethod(fasthttp.MethodPost)
-	ctx.Request.SetBody([]byte(`{"hint":"Black Friday"}`))
+	ctx.Request.SetBody(commonstrings.StringToBytes(`{"hint":"Black Friday"}`))
 	h.ChaosStoryGenerate(ctx)
 	assert.Equal(t, fasthttp.StatusNotFound, ctx.Response.StatusCode())
 	var body map[string]any

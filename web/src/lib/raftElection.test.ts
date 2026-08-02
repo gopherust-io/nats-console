@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyVisualRoles,
   diffLeaderChange,
+  electionCaptionKey,
   pickCandidate,
   pickSimulateTarget,
   planElectionSequence,
@@ -108,5 +109,38 @@ describe("applyVisualRoles", () => {
     });
     expect(roles["nats-3"]).toBe("leader");
     expect(roles["nats-1"]).toBe("hotStandby");
+  });
+
+  it("does not invent a candidate when leader is unreachable", () => {
+    const offlineLeader = [
+      { name: "nats-1", online: false, leader: true },
+      { name: "nats-2", online: true },
+      { name: "nats-3", online: true },
+    ];
+    const roles = applyVisualRoles(offlineLeader, "nats-1", {
+      phase: "leaderUnreachable",
+      fromLeader: "nats-1",
+    });
+    expect(roles["nats-1"]).toBe("offline");
+    expect(roles["nats-2"]).toBe("hotStandby");
+    expect(roles["nats-3"]).toBe("hotStandby");
+    expect(Object.values(roles)).not.toContain("candidate");
+  });
+
+  it("treats unknown current as hot standby", () => {
+    const unknown = [
+      { name: "nats-1", online: true, leader: true },
+      { name: "nats-2", online: true },
+    ];
+    const roles = applyVisualRoles(unknown, "nats-1");
+    expect(roles["nats-2"]).toBe("hotStandby");
+  });
+});
+
+describe("electionCaptionKey", () => {
+  it("uses leader-unreachable caption", () => {
+    expect(
+      electionCaptionKey({ phase: "leaderUnreachable", fromLeader: "nats-1" }),
+    ).toBe("replicas.election.captionLeaderUnreachable");
   });
 });

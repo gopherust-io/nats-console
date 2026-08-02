@@ -236,6 +236,7 @@ make lint
 | `LIVE_WS_IDLE_TIMEOUT` | `5m` | Close idle live WebSocket connections after |
 | `LIVE_WS_RATE_LIMIT` | `100ms` | Minimum interval between live message frames |
 | `MAX_REQUEST_BODY_SIZE` | `1048576` | Maximum API request body size in bytes (1 MiB) |
+| `HTTP_RESPONSE_COMPRESSION` | `true` | Compress API/SPA responses (brotli/gzip) when the client accepts it |
 | `AUTH_RATE_LIMIT` | `10` | Max auth attempts per IP per window |
 | `AUTH_RATE_LIMIT_WINDOW` | `1m` | Window for auth rate limiting |
 | `SLOW_CONSUMER_PENDING_THRESHOLD` | `1000` | Pending msgs ≥ this → slow consumer |
@@ -296,6 +297,7 @@ NATS Consol applies defense-in-depth for browser and API traffic:
 - **CORS** — Cross-origin access is denied unless the origin is listed in `CORS_ALLOWED_ORIGINS` (no wildcard reflection).
 - **Rate limiting** — Login endpoints are limited per client IP (`AUTH_RATE_LIMIT`, `AUTH_RATE_LIMIT_WINDOW`).
 - **Request limits** — Body size capped via `MAX_REQUEST_BODY_SIZE`; server read/write/idle timeouts via `HTTP_*_TIMEOUT`.
+- **Payload compression** — Bodies larger than 32 KiB are compressed (responses: brotli then gzip when negotiated via `HTTP_RESPONSE_COMPRESSION`; requests: brotli with gzip fallback). Smaller bodies stay uncompressed.
 - **RBAC & audit** — All `/api/*` routes except health/auth config require authentication. Mutations are audit-logged. Cluster tokens/creds are never returned in API JSON.
 - **Production** — Set `ENV=production`, `ENCRYPTION_KEY`, `SESSION_PRIVATE_KEY` / `SESSION_PUBLIC_KEY`, and a strong `ADMIN_PASSWORD`. The server refuses to start if these are missing or weak.
 

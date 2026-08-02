@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import Alert from "../components/ui/Alert";
@@ -19,6 +19,7 @@ export default function KVKeyPage() {
   const { clusterId: contextClusterId } = useCluster();
   const clusterId = routeCluster ?? contextClusterId;
   const { canManageJetStream } = useAuth();
+  const canManageJS = canManageJetStream(clusterId);
   const navigate = useNavigate();
   const jsBase = clusterId ? jetStreamUIBase(clusterId, accountName) : "";
   const [entry, setEntry] = useState<KVEntry | null>(null);
@@ -27,9 +28,11 @@ export default function KVKeyPage() {
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [missing, setMissing] = useState(false);
+  const loadGenRef = useRef(0);
 
   const load = useCallback(async () => {
     if (!clusterId || !bucket || !decodedKey) return;
+    const gen = ++loadGenRef.current;
     setError("");
     try {
       const [entryRes, historyRes] = await Promise.all([
@@ -46,12 +49,14 @@ export default function KVKeyPage() {
           ),
         ),
       ]);
+      if (gen !== loadGenRef.current) return;
       const entryData = entryRes.data;
       setEntry(entryData);
       setHistory(historyRes.data ?? []);
       setEditValue(decodeBase64(entryData.value));
       setMissing(false);
     } catch (err) {
+      if (gen !== loadGenRef.current) return;
       const message = err instanceof Error ? err.message : "Failed to load key";
       setError(message);
       setMissing(true);
@@ -60,12 +65,18 @@ export default function KVKeyPage() {
   }, [clusterId, bucket, decodedKey]);
 
   useEffect(() => {
+    loadGenRef.current += 1;
+    setEntry(null);
+    setHistory([]);
+    setEditValue("");
+    setMissing(false);
+    setError("");
     void load();
   }, [load]);
 
   async function onSave(event: FormEvent) {
     event.preventDefault();
-    if (!clusterId || !canManageJetStream) return;
+    if (!clusterId || !canManageJS) return;
     setSaving(true);
     setError("");
     try {
@@ -85,7 +96,7 @@ export default function KVKeyPage() {
   }
 
   function onDelete() {
-    if (!clusterId || !canManageJetStream) return;
+    if (!clusterId || !canManageJS) return;
     askConfirm({
       title: t("kv.confirmDeleteKeyTitle"),
       description: t("kv.confirmDeleteKey", { key: decodedKey }),
@@ -130,7 +141,7 @@ export default function KVKeyPage() {
           </Link>
           <h1>{decodedKey}</h1>
         </div>
-        {canManageJetStream && entry && (
+        {canManageJS && entry && (
           <button type="button" className="btn danger" disabled={saving} onClick={onDelete}>
             {t("common.delete")}
           </button>
@@ -148,7 +159,7 @@ export default function KVKeyPage() {
         </div>
       )}
 
-      {canManageJetStream && (
+      {canManageJS && (
         <form className="nc-settings-section mt-24" onSubmit={onSave}>
           <h3>{entry ? t("kv.editValue") : t("kv.putValue")}</h3>
           <div className="nc-form-row">

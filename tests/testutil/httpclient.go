@@ -140,7 +140,7 @@ func (c *HTTPClient) Do(r *Request) (*Response, error) {
 func parseSetCookies(h *fasthttp.ResponseHeader) []*Cookie {
 	var out []*Cookie
 	for key, value := range h.All() {
-		if !bytes.EqualFold(key, []byte("Set-Cookie")) {
+		if !bytes.EqualFold(key, commonstrings.StringToBytes("Set-Cookie")) {
 			continue
 		}
 		ck := fasthttp.AcquireCookie()
@@ -149,7 +149,7 @@ func parseSetCookies(h *fasthttp.ResponseHeader) []*Cookie {
 			fasthttp.ReleaseCookie(ck)
 			continue
 		}
-		name := string(ck.Key())
+		name := string(ck.Key()) // copy before ReleaseCookie reuses pooled buffers
 		if commonstrings.IsEmpty(name) {
 			fasthttp.ReleaseCookie(ck)
 			continue

@@ -4,7 +4,6 @@ import {
   applyVisualRoles,
   diffLeaderChange,
   electionCaptionKey,
-  pickSimulateTarget,
   planElectionSequence,
   type ElectionOverlay,
   type ElectionPhase,
@@ -29,7 +28,7 @@ export function useRaftElection(
   const prevLeaderRef = useRef<string | undefined>(undefined);
   const primedRef = useRef(false);
   const busyRef = useRef(false);
-  const provisionalForRef = useRef<string | undefined>(undefined);
+  const unreachableForRef = useRef<string | undefined>(undefined);
   const timersRef = useRef<number[]>([]);
   const peersRef = useRef(peers);
   peersRef.current = peers;
@@ -98,7 +97,7 @@ export function useRaftElection(
   useEffect(() => {
     primedRef.current = false;
     prevLeaderRef.current = undefined;
-    provisionalForRef.current = undefined;
+    unreachableForRef.current = undefined;
     stopSequence();
     setOverlay(null);
   }, [clusterId, stopSequence]);
@@ -118,9 +117,9 @@ export function useRaftElection(
     if (prev !== next) {
       const diff = diffLeaderChange(prev, next, peersNow);
       prevLeaderRef.current = next;
-      provisionalForRef.current = undefined;
+      unreachableForRef.current = undefined;
       if (diff.kind === "change" && diff.next) {
-        // Interrupt provisional overlay so the real meta leader always wins.
+        // Interrupt unreachable overlay so the real meta leader always wins.
         runSequence(diff.old || undefined, diff.next, { force: true });
       } else {
         stopSequence();
@@ -129,31 +128,25 @@ export function useRaftElection(
       return;
     }
 
-    // Same reported leader, but peer is missing/offline — hold a candidate
-    // overlay (no fake settled leader) until JetStream publishes a new leader.
+    // Same reported leader, but peer is missing/offline — wait for meta; do not
+    // invent a candidate election on an arbitrary standby.
     if (next) {
       const leaderPeer = peersNow.find((p) => p.name === next);
       if (!leaderPeer || !leaderPeer.online) {
-        if (provisionalForRef.current !== next) {
-          const pick = pickSimulateTarget(peersNow, next);
-          if (pick?.to) {
-            provisionalForRef.current = next;
-            setOverlay({
-              phase: "candidate",
-              fromLeader: next,
-              toLeader: pick.to,
-              candidate: pick.to,
-            });
-            busyRef.current = false;
-            clearTimers();
-          }
+        if (unreachableForRef.current !== next) {
+          unreachableForRef.current = next;
+          stopSequence();
+          setOverlay({
+            phase: "leaderUnreachable",
+            fromLeader: next,
+          });
         }
-      } else if (provisionalForRef.current === next) {
-        provisionalForRef.current = undefined;
+      } else if (unreachableForRef.current === next) {
+        unreachableForRef.current = undefined;
         setOverlay(null);
       }
     }
-  }, [jetstreamLeader, peers, runSequence, stopSequence, clearTimers]);
+  }, [jetstreamLeader, peers, runSequence, stopSequence]);
 
   const visualRoles = useMemo(
     () => applyVisualRoles(peers, jetstreamLeader, overlay),

@@ -1,7 +1,8 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
+import Pager, { DEFAULT_PAGE_SIZE } from "../components/Pager";
 import Alert from "../components/ui/Alert";
 import ClockNumber from "../components/ui/ClockNumber";
 import PageLoader from "../components/ui/PageLoader";
@@ -74,10 +75,16 @@ export default function ConnectionsPage() {
   const [groupBy, setGroupBy] = useState("none");
   const [sortBy, setSortBy] = useState("start");
   const [filter, setFilter] = useState("");
+  const [offset, setOffset] = useState(0);
+  const limit = DEFAULT_PAGE_SIZE;
   const isNarrow = useMediaQuery("(max-width: 720px)");
   const isCompact = useMediaQuery("(max-width: 1100px)");
 
   useConnzEvents(clusterId);
+
+  useEffect(() => {
+    setOffset(0);
+  }, [clusterId, filter, sortBy, groupBy]);
 
   const connzQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "connz"),
@@ -86,7 +93,8 @@ export default function ConnectionsPage() {
     enabled: Boolean(clusterId),
     staleTime: 5_000,
     refetchOnWindowFocus: false,
-    placeholderData: keepPreviousData,
+    // Do not keepPreviousData across cluster keys — auth identities from the
+    // prior cluster would flash under the new system URL.
   });
 
   const connections = useMemo(() => {
@@ -122,8 +130,13 @@ export default function ConnectionsPage() {
     return list;
   }, [connzQuery.data, filter, sortBy]);
 
+  const pageRows = useMemo(() => {
+    if (groupBy !== "none") return connections;
+    return connections.slice(offset, offset + limit);
+  }, [connections, groupBy, limit, offset]);
+
   const grouped = useMemo(() => {
-    if (groupBy === "none") return { All: connections };
+    if (groupBy === "none") return { All: pageRows };
     const map: Record<string, ConnzConnection[]> = {};
     for (const c of connections) {
       const key =
@@ -135,7 +148,7 @@ export default function ConnectionsPage() {
       (map[key] ??= []).push(c);
     }
     return map;
-  }, [connections, groupBy]);
+  }, [connections, groupBy, pageRows]);
 
   const slowCount = useMemo(
     () => connections.filter((c) => isSlowConsumerConnection(c)).length,
@@ -338,21 +351,26 @@ export default function ConnectionsPage() {
       {connections.length === 0 ? (
         <div className="nc-empty">{t("connections.empty")}</div>
       ) : (
-        Object.entries(grouped).map(([group, rows]) => (
-          <div key={group} className="table-wrap table-wrap--fit nc-conn-table-wrap mt-16">
-            {groupBy !== "none" && <div className="card-label">{group}</div>}
-            <VirtualTable
-              columns={columns}
-              items={rows}
-              empty={t("connections.empty")}
-              getKey={getKey}
-              renderCell={renderCell}
-              rowHeight={64}
-              maxHeight={tableMaxHeight}
-              overflowX="hidden"
-            />
-          </div>
-        ))
+        <>
+          {Object.entries(grouped).map(([group, rows]) => (
+            <div key={group} className="table-wrap table-wrap--fit nc-conn-table-wrap mt-16">
+              {groupBy !== "none" && <div className="card-label">{group}</div>}
+              <VirtualTable
+                columns={columns}
+                items={rows}
+                empty={t("connections.empty")}
+                getKey={getKey}
+                renderCell={renderCell}
+                rowHeight={64}
+                maxHeight={tableMaxHeight}
+                overflowX="hidden"
+              />
+            </div>
+          ))}
+          {groupBy === "none" ? (
+            <Pager total={connections.length} offset={offset} limit={limit} onPageChange={setOffset} />
+          ) : null}
+        </>
       )}
     </div>
   );
