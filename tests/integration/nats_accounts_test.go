@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/bytedance/sonic"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,7 +29,7 @@ func TestNATSAccountUsersLifecycle(t *testing.T) {
 	resp, err := srv.Client.Post(base+"/nats-users", "application/json", strings.NewReader(createBody))
 	require.NoError(t, err)
 	respBody := resp.Body
-	require.Equal(t, http.StatusCreated, resp.StatusCode, "create nats user: %s", string(respBody))
+	require.Equal(t, http.StatusCreated, resp.StatusCode, "create nats user: %s", commonstrings.BytesToString(respBody))
 
 	var created map[string]any
 	require.NoError(t, sonic.Unmarshal(respBody, &created))
@@ -43,7 +44,7 @@ func TestNATSAccountUsersLifecycle(t *testing.T) {
 	resp, err = srv.Client.Get(base + "/nats-users?account=Default")
 	require.NoError(t, err)
 	respBody = resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "list nats users: %s", string(respBody))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "list nats users: %s", commonstrings.BytesToString(respBody))
 	var list struct {
 		Meta struct {
 			Total int `json:"total"`
@@ -55,7 +56,7 @@ func TestNATSAccountUsersLifecycle(t *testing.T) {
 	resp, err = srv.Client.Get(base + "/nats-users/" + userID + "?account=Default")
 	require.NoError(t, err)
 	respBody = resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "get nats user: %s", string(respBody))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "get nats user: %s", commonstrings.BytesToString(respBody))
 	var got struct {
 		Data struct {
 			ID   string `json:"id"`
@@ -72,7 +73,7 @@ func TestNATSAccountUsersLifecycle(t *testing.T) {
 	}`
 	resp, err = srv.Client.Do(&testutil.Request{
 		Method: http.MethodPut,
-		URL:    base+"/nats-users/"+userID+"?account=Default",
+		URL:    base + "/nats-users/" + userID + "?account=Default",
 		Body:   strings.NewReader(updateBody),
 		Header: http.Header{
 			"Content-Type": {"application/json"},
@@ -80,12 +81,12 @@ func TestNATSAccountUsersLifecycle(t *testing.T) {
 	})
 	require.NoError(t, err)
 	respBody = resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "update nats user: %s", string(respBody))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "update nats user: %s", commonstrings.BytesToString(respBody))
 
 	resp, err = srv.Client.Get(base + "/nats-users/subject-permissions?account=Default&subject=orders.create")
 	require.NoError(t, err)
 	respBody = resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "subject permissions: %s", string(respBody))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "subject permissions: %s", commonstrings.BytesToString(respBody))
 	var perms struct {
 		Data struct {
 			Subject string `json:"subject"`
@@ -105,11 +106,11 @@ func TestNATSAccountUsersLifecycle(t *testing.T) {
 			break
 		}
 	}
-	require.True(t, found, "expected user in publish permissions: %s", string(respBody))
+	require.True(t, found, "expected user in publish permissions: %s", commonstrings.BytesToString(respBody))
 
 	resp, err = srv.Client.Do(&testutil.Request{
 		Method: http.MethodDelete,
-		URL:    base+"/nats-users/"+userID+"?account=Default",
+		URL:    base + "/nats-users/" + userID + "?account=Default",
 	})
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNoContent, resp.StatusCode, "delete nats user")
@@ -130,7 +131,7 @@ func TestNATSAccountSigningGroupsLifecycle(t *testing.T) {
 	resp, err := srv.Client.Post(base+"/signing-groups", "application/json", strings.NewReader(createBody))
 	require.NoError(t, err)
 	respBody := resp.Body
-	require.Equal(t, http.StatusCreated, resp.StatusCode, "create signing group: %s", string(respBody))
+	require.Equal(t, http.StatusCreated, resp.StatusCode, "create signing group: %s", commonstrings.BytesToString(respBody))
 	var created struct {
 		Data struct {
 			ID   string `json:"id"`
@@ -144,7 +145,7 @@ func TestNATSAccountSigningGroupsLifecycle(t *testing.T) {
 	resp, err = srv.Client.Get(base + "/signing-groups?account=Default")
 	require.NoError(t, err)
 	respBody = resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "list signing groups: %s", string(respBody))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "list signing groups: %s", commonstrings.BytesToString(respBody))
 	var list struct {
 		Meta struct {
 			Total int `json:"total"`
@@ -160,7 +161,7 @@ func TestNATSAccountSigningGroupsLifecycle(t *testing.T) {
 	}`
 	resp, err = srv.Client.Do(&testutil.Request{
 		Method: http.MethodPut,
-		URL:    base+"/signing-groups/"+created.Data.ID+"?account=Default",
+		URL:    base + "/signing-groups/" + created.Data.ID + "?account=Default",
 		Body:   strings.NewReader(updateBody),
 		Header: http.Header{
 			"Content-Type": {"application/json"},
@@ -168,15 +169,15 @@ func TestNATSAccountSigningGroupsLifecycle(t *testing.T) {
 	})
 	require.NoError(t, err)
 	respBody = resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "update signing group: %s", string(respBody))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "update signing group: %s", commonstrings.BytesToString(respBody))
 
 	resp, err = srv.Client.Do(&testutil.Request{
 		Method: http.MethodDelete,
-		URL:    base+"/signing-groups/"+created.Data.ID+"?account=Default",
+		URL:    base + "/signing-groups/" + created.Data.ID + "?account=Default",
 	})
 	require.NoError(t, err)
 	body := resp.Body
-	require.Equal(t, http.StatusNoContent, resp.StatusCode, "delete signing group: %s", string(body))
+	require.Equal(t, http.StatusNoContent, resp.StatusCode, "delete signing group: %s", commonstrings.BytesToString(body))
 }
 
 func TestNATSAccountExportsLifecycle(t *testing.T) {
@@ -194,7 +195,7 @@ func TestNATSAccountExportsLifecycle(t *testing.T) {
 	resp, err := srv.Client.Post(base+"/sharing/exports", "application/json", strings.NewReader(createBody))
 	require.NoError(t, err)
 	respBody := resp.Body
-	require.Equal(t, http.StatusCreated, resp.StatusCode, "create export: %s", string(respBody))
+	require.Equal(t, http.StatusCreated, resp.StatusCode, "create export: %s", commonstrings.BytesToString(respBody))
 	var created struct {
 		Data struct {
 			ID   string `json:"id"`
@@ -207,7 +208,7 @@ func TestNATSAccountExportsLifecycle(t *testing.T) {
 	resp, err = srv.Client.Get(base + "/sharing/exports?account=Default")
 	require.NoError(t, err)
 	respBody = resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "list exports: %s", string(respBody))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "list exports: %s", commonstrings.BytesToString(respBody))
 	var list struct {
 		Meta struct {
 			Total int `json:"total"`
@@ -223,7 +224,7 @@ func TestNATSAccountExportsLifecycle(t *testing.T) {
 	}`)
 	resp, err = srv.Client.Do(&testutil.Request{
 		Method: http.MethodPut,
-		URL:    base+"/sharing/exports/"+created.Data.ID+"?account=Default",
+		URL:    base + "/sharing/exports/" + created.Data.ID + "?account=Default",
 		Body:   strings.NewReader(updateBody),
 		Header: http.Header{
 			"Content-Type": {"application/json"},
@@ -231,11 +232,11 @@ func TestNATSAccountExportsLifecycle(t *testing.T) {
 	})
 	require.NoError(t, err)
 	respBody = resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "update export: %s", string(respBody))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "update export: %s", commonstrings.BytesToString(respBody))
 
 	resp, err = srv.Client.Do(&testutil.Request{
 		Method: http.MethodDelete,
-		URL:    base+"/sharing/exports/"+created.Data.ID+"?account=Default",
+		URL:    base + "/sharing/exports/" + created.Data.ID + "?account=Default",
 	})
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNoContent, resp.StatusCode, "delete export")

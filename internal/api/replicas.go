@@ -53,8 +53,8 @@ func fetchReplicasSnapshotJSON(ctx context.Context, svc *app.Services, hub *snap
 	if svc == nil {
 		return nil, errors.New("services unavailable")
 	}
-	// Prefer hub /jsz when present (collector refreshes it). Always scrape routez/varz
-	// for peer projection; broker SHA skip avoids SSE notify when unchanged.
+	// Always scrape routez/varz. Hub topology /jsz is used only when it has meta_cluster.
+	// Leave CapturedAt zero so broker SHA can skip SSE notify when peers are unchanged.
 	varzs, routez, jsz, err := loadReplicasMonitoring(ctx, svc, hub, clusterID, false, maxBody)
 	if err != nil {
 		return nil, err
@@ -63,8 +63,35 @@ func fetchReplicasSnapshotJSON(ctx context.Context, svc *app.Services, hub *snap
 	if err != nil {
 		return nil, err
 	}
-	snap.CapturedAt = time.Now().UTC()
 	return serializer.Marshal(snap)
+}
+
+// jszHasMetaCluster reports whether raw /jsz JSON includes a meta_cluster object.
+// Slim hub /jsz (streams/consumers/messages only) returns false.
+func jszHasMetaCluster(raw []byte) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var probe struct {
+		MetaCluster *struct{} `json:"meta_cluster"`
+	}
+	if err := serializer.Unmarshal(raw, &probe); err != nil {
+		return false
+	}
+	return probe.MetaCluster != nil
+}
+
+// hubJSZForReplicas returns cached topology /jsz only when it carries meta_cluster.
+// Slim hub /jsz is never used — it omits raft meta.
+func hubJSZForReplicas(hub *snapshot.Hub, clusterID string) []byte {
+	if hub == nil || clusterID == "" {
+		return nil
+	}
+	data, _, ok := hub.MonitoringPayload(clusterID, snapshot.TopologyJSZPath)
+	if !ok || !jszHasMetaCluster(data) {
+		return nil
+	}
+	return data
 }
 
 func loadReplicasMonitoring(
@@ -88,13 +115,8 @@ func loadReplicasMonitoring(
 		return nil, nil, nil, errors.New("no monitoring URL configured")
 	}
 
-	if !fresh && hub != nil {
-		// Prefer lightweight /jsz (meta_cluster only); fall back to topology cache.
-		if data, _, ok := hub.MonitoringPayload(clusterID, "/jsz"); ok {
-			jsz = data
-		} else if data, _, ok := hub.MonitoringPayload(clusterID, snapshot.TopologyJSZPath); ok {
-			jsz = data
-		}
+	if !fresh {
+		jsz = hubJSZForReplicas(hub, clusterID)
 	}
 
 	// Resolve routez first so varz/jsz prefer the same monitoring base.
@@ -112,7 +134,7 @@ func loadReplicasMonitoring(
 	}
 
 	if jsz == nil {
-		// Lightweight path — replicas only need meta_cluster, not streams/consumers.
+		// Live /jsz — replicas need meta_cluster (slim hub cache omits it).
 		data, _, monErr = fetchMonitoringWithFailover(c, ordered, "/jsz")
 		if monErr != nil {
 			jsz = nil
@@ -148,7 +170,8 @@ func preferBase(bases []string, preferred string) []string {
 }
 
 type replicasSnapshot struct {
-	CapturedAt      time.Time     `json:"capturedAt"`
+	// CapturedAt is set on REST responses; omitted on SSE payloads so broker SHA dedup works.
+	CapturedAt      time.Time     `json:"capturedAt,omitzero"`
 	ClusterName     string        `json:"clusterName,omitempty"`
 	MonitoredServer string        `json:"monitoredServer,omitempty"`
 	JetStreamLeader string        `json:"jetstreamLeader,omitempty"`
@@ -166,6 +189,7 @@ type replicaPeer struct {
 	Connections *int     `json:"connections,omitempty"`
 	CPU         *float64 `json:"cpu,omitempty"`
 	Mem         *int64   `json:"mem,omitempty"`
+	Current     *bool    `json:"current,omitempty"` // nil = unknown; false = lagging; true = caught up
 	Name        string   `json:"name"`
 	Role        string   `json:"role"`
 	Uptime      string   `json:"uptime,omitempty"`
@@ -174,7 +198,6 @@ type replicaPeer struct {
 	Version     string   `json:"version,omitempty"`
 	IP          string   `json:"ip,omitempty"`
 	Online      bool     `json:"online"`
-	Current     bool     `json:"current"` // must not omitempty — false means lagging
 	Leader      bool     `json:"leader,omitempty"`
 }
 
@@ -327,14 +350,16 @@ func buildReplicasSnapshot(varzRaws [][]byte, routezRaw, jszRaw []byte) (replica
 			out.ClusterSize = meta.Size
 			if p := upsert(meta.Leader); p != nil {
 				p.Leader = true
-				p.Current = true
+				cur := true
+				p.Current = &cur
 			}
 			for _, r := range meta.Replicas {
 				p := upsert(r.Name)
 				if p == nil {
 					continue
 				}
-				p.Current = r.Current
+				cur := r.Current
+				p.Current = &cur
 				if r.Offline {
 					// Live /varz presence wins over stale meta offline; routez alone does not.
 					if p.CPU == nil && p.Mem == nil {

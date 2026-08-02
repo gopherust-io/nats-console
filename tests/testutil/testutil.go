@@ -265,7 +265,7 @@ func (s *Stack) NewServer(t *testing.T, mutate func(*config.Config)) *Server {
 	go func() { _ = server.Serve(ln) }()
 	t.Cleanup(func() { _ = server.Shutdown() })
 
-	adminAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte(cfg.AdminUsername+":"+cfg.AdminPassword))
+	adminAuth := "Basic " + base64.StdEncoding.EncodeToString(commonstrings.StringToBytes(cfg.AdminUsername+":"+cfg.AdminPassword))
 	return &Server{
 		Client:       newHTTPClient(ln, adminAuth),
 		UnauthClient: newHTTPClient(ln, ""),

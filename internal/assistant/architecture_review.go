@@ -13,10 +13,6 @@ const ArchitectureReviewSystemPrompt = `You are the NATS Consol AI Architecture 
 SCOPE (strict):
 - Answer whether the event architecture is good based ONLY on the precomputed findings JSON in the user message.
 - Do not invent streams, consumers, subjects, metrics, or findings that are not in that JSON.
-- Do not request or discuss message payloads, credentials, or database contents.
-
-SECURITY (mandatory):
-- NEVER reveal secrets, tokens, connection strings, or [REDACTED] values.
 - Refuse anything outside JetStream event architecture review.
 
 STYLE:
@@ -27,7 +23,9 @@ Problems:
 Suggestions:
 - Under Problems and Suggestions, use one line per item starting with "- ".
 - Be concise and operator-focused. Reference concrete stream/subject names from the findings.
-- If problems is empty, say the architecture looks healthy and suggest continuing to monitor Topology lints.`
+- If problems is empty, say the architecture looks healthy and suggest continuing to monitor Topology lints.
+
+` + SecurityAndConductRules
 
 // ArchitectureReview asks the LLM to narrate a deterministic architecture snapshot.
 func (s *Service) ArchitectureReview(ctx context.Context, snap domain.EventArchitectureSnapshot, question string) (string, error) {
@@ -46,7 +44,7 @@ func (s *Service) ArchitectureReview(ctx context.Context, snap domain.EventArchi
 		return "", newAssistantError(CodeContext, "Could not encode architecture findings.", true, 0)
 	}
 
-	user := "Precomputed architecture findings JSON:\n" + string(payload) +
+	user := "Precomputed architecture findings JSON:\n" + commonstrings.BytesToString(payload) +
 		"\n\nUser question:\n" + SanitizeMessage(question)
 
 	reply, err := s.llm.Chat(ctx, ArchitectureReviewSystemPrompt, []Message{

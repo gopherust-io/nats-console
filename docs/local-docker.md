@@ -4,20 +4,34 @@ Run JetStream locally without installing `nats-server` on the host. Compose file
 
 **Not for production:** no TLS (auth lab uses plaintext passwords). Stop the root compose `nats` service before starting these labs when ports overlap (`4222` / `8222`).
 
+## Unified `nats-consol` project
+
+Root [`docker-compose.yml`](../docker-compose.yml) is one Compose project (`name: nats-consol`). Optional stacks are **profiles** so Docker Desktop shows a single group:
+
+| Profile | Make target | What it adds |
+|---------|-------------|--------------|
+| _(default)_ | `make docker-up` | postgres, single `nats`, console |
+| `web` | `make dev-web-docker` | Vite `web-dev` on `:8080` (console moves to `:8081`) |
+| `fleet` | `make fleet-up` | 32 demo fleet workers on the project network |
+| `cluster` | `make nats-cluster-up` | 5-node JetStream lab (stops single `nats` first) |
+| `mail` | `docker compose --profile mail up` | Mailpit |
+
+`make nats-cluster-up` stops root `nats` then starts only `nats-1`…`nats-5` (avoids binding `4222`/`8222` twice). Restore the single broker with `docker compose up -d nats` after `make nats-cluster-down`.
+
 ## Quick compare
 
 | Mode | Compose file | Client `Address` | Notes |
 |------|--------------|------------------|-------|
-| Single | [`docker/nats/single`](../docker/nats/single/) | `nats://127.0.0.1:4222` | Everyday Consol / broker |
-| Cluster | [`docker/nats/cluster`](../docker/nats/cluster/) | `nats://127.0.0.1:4222,…,nats://127.0.0.1:4226` | `Replicas: 5`, Replicas page |
+| Single | root compose `nats` or [`docker/nats/single`](../docker/nats/single/) | `nats://127.0.0.1:4222` | Everyday Consol / broker |
+| Cluster | root profile `cluster` ([`docker/nats/cluster`](../docker/nats/cluster/)) | `nats://127.0.0.1:4222,…,nats://127.0.0.1:4226` | `Replicas: 5`, Replicas page |
 | Supercluster | [`docker/nats/supercluster`](../docker/nats/supercluster/) | East `4222,4223` or West `4225,4226` | Gateways + JetStream domains |
 | Auth (users) | [`docker/nats/auth`](../docker/nats/auth/) | `nats://127.0.0.1:4222` + User/Password | Practice subject AuthZ |
 
 Image: `nats:2.14`. Do not run **cluster** and **supercluster** together (port overlap on `4222`–`4226`). Auth / single also bind `4222` — stop other stacks first.
 
 ```bash
-make nats-up            # single
-make nats-cluster-up    # 5-node
+make nats-up            # standalone single lab (docker/nats/single)
+make nats-cluster-up    # 5-node (root project, profile cluster)
 make nats-auth-up       # users + permissions
 make nats-down-all      # tear down all lab stacks (-v)
 ```
@@ -47,8 +61,12 @@ Use stream `Replicas: 1`. Monitoring: [http://127.0.0.1:8222](http://127.0.0.1:8
 
 ```bash
 make nats-cluster-up
+# equivalent:
+#   docker compose stop nats
+#   docker compose --profile cluster up -d nats-1 nats-2 nats-3 nats-4 nats-5
 ```
 
+- Same Docker Desktop project as console (`nats-consol`); nodes also join the default network (reachable as `nats-cluster-1`, …)
 - Shared JetStream domain: `hub`
 - Host ports: clients `4222–4226`, monitors `8222–8226`
 - One named volume per node (`js-n1` … `js-n5`)

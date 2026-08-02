@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,10 +17,10 @@ func mustSessionPEMs(t *testing.T) (privPEM, pubPEM string) {
 	t.Helper()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
-	privPEM = string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}))
+	privPEM = commonstrings.BytesToString(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}))
 	pubBytes, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
 	require.NoError(t, err)
-	pubPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes}))
+	pubPEM = commonstrings.BytesToString(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes}))
 	return privPEM, pubPEM
 }
 
@@ -53,10 +54,10 @@ func TestParseSessionRSAKeyPairRejectsMismatch(t *testing.T) {
 func TestParseSessionRSAKeyPairRejectsSmallKey(t *testing.T) {
 	priv, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
-	privPEM := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}))
+	privPEM := commonstrings.BytesToString(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}))
 	pubBytes, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
 	require.NoError(t, err)
-	pubPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes}))
+	pubPEM := commonstrings.BytesToString(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes}))
 
 	_, _, err = ParseSessionRSAKeyPair(privPEM, pubPEM)
 	require.Error(t, err)

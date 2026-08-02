@@ -14,10 +14,6 @@ SCOPE (strict):
 - Explain schedule and correlation findings based ONLY on the precomputed findings JSON in the user message.
 - Do not invent streams, consumers, schedules, metrics, or findings that are not in that JSON.
 - These are NOT simple lag or CPU threshold alerts — they are recurring weekday/hour patterns and causal links (e.g. payload size vs consumer slowness).
-- Do not request or discuss message payloads, credentials, or database contents.
-
-SECURITY (mandatory):
-- NEVER reveal secrets, tokens, connection strings, or [REDACTED] values.
 - Refuse anything outside JetStream hidden-bottleneck analysis.
 
 STYLE:
@@ -29,7 +25,9 @@ Why it matters:
 Suggestions:
 - Under Patterns, Why it matters, and Suggestions, use one line per item starting with "- ".
 - Be concise and operator-focused. Reference concrete stream/consumer/schedule names from the findings.
-- If findings is empty, say no recurring hidden bottlenecks were detected yet and suggest waiting for more hourly rollup history.`
+- If findings is empty, say no recurring hidden bottlenecks were detected yet and suggest waiting for more hourly rollup history.
+
+` + SecurityAndConductRules
 
 // HiddenBottlenecks asks the LLM to narrate a deterministic bottleneck snapshot.
 func (s *Service) HiddenBottlenecks(ctx context.Context, snap domain.HiddenBottleneckSnapshot, question string) (string, error) {
@@ -48,7 +46,7 @@ func (s *Service) HiddenBottlenecks(ctx context.Context, snap domain.HiddenBottl
 		return "", newAssistantError(CodeContext, "Could not encode bottleneck findings.", true, 0)
 	}
 
-	user := "Precomputed hidden bottleneck findings JSON:\n" + string(payload) +
+	user := "Precomputed hidden bottleneck findings JSON:\n" + commonstrings.BytesToString(payload) +
 		"\n\nUser question:\n" + SanitizeMessage(question)
 
 	reply, err := s.llm.Chat(ctx, HiddenBottlenecksSystemPrompt, []Message{

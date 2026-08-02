@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"testing"
 
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -11,7 +12,7 @@ import (
 func TestEncodeToStringStableAfterPoolReuse(t *testing.T) {
 	t.Parallel()
 
-	src := []byte("hello-pool-reuse-corruption-check")
+	src := commonstrings.StringToBytes("hello-pool-reuse-corruption-check")
 	first := EncodeToString(src)
 	want := base64.StdEncoding.EncodeToString(src)
 	require.Equal(t, want, first)

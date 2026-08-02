@@ -1,0 +1,218 @@
+# One container per fleet service → distinct NATS client names (fleet-<service>)
+# visible in nats-consol Account → Connections.
+#
+# Included by the root nats-consol compose project (profile: fleet):
+#   make fleet-up
+#   # or: docker compose --profile fleet up -d --build
+# Cluster broker:
+#   NATS_URL=nats://nats-cluster-1:4222 docker compose --profile fleet up -d --build
+#
+# Build context is the nats-consol module root; sibling ../nats satisfies go.mod replace.
+
+x-fleet: &fleet
+  profiles: ["fleet"]
+  image: nats-fleet:local
+  build:
+    context: ../..
+    dockerfile: examples/fleet/Dockerfile
+    additional_contexts:
+      nats: ../../../nats
+  restart: unless-stopped
+
+x-fleet-env: &fleet-env
+  NATS_URL: ${NATS_URL:-nats://nats:4222}
+  TEL_ENABLE: ${TEL_ENABLE:-false}
+
+services:
+  order-api:
+    <<: *fleet
+    container_name: fleet-order-api
+    environment:
+      <<: *fleet-env
+      SERVICE: order-api
+  order-fulfillment:
+    <<: *fleet
+    container_name: fleet-order-fulfillment
+    environment:
+      <<: *fleet-env
+      SERVICE: order-fulfillment
+  order-projector:
+    <<: *fleet
+    container_name: fleet-order-projector
+    environment:
+      <<: *fleet-env
+      SERVICE: order-projector
+  order-shard-0:
+    <<: *fleet
+    container_name: fleet-order-shard-0
+    environment:
+      <<: *fleet-env
+      SERVICE: order-shard-0
+  order-shard-1:
+    <<: *fleet
+    container_name: fleet-order-shard-1
+    environment:
+      <<: *fleet-env
+      SERVICE: order-shard-1
+  payment-api:
+    <<: *fleet
+    container_name: fleet-payment-api
+    environment:
+      <<: *fleet-env
+      SERVICE: payment-api
+  payment-processor:
+    <<: *fleet
+    container_name: fleet-payment-processor
+    environment:
+      <<: *fleet-env
+      SERVICE: payment-processor
+  inventory-worker:
+    <<: *fleet
+    container_name: fleet-inventory-worker
+    environment:
+      <<: *fleet-env
+      SERVICE: inventory-worker
+  shipping-dispatcher:
+    <<: *fleet
+    container_name: fleet-shipping-dispatcher
+    environment:
+      <<: *fleet-env
+      SERVICE: shipping-dispatcher
+  billing-worker:
+    <<: *fleet
+    container_name: fleet-billing-worker
+    environment:
+      <<: *fleet-env
+      SERVICE: billing-worker
+  fraud-scanner:
+    <<: *fleet
+    container_name: fleet-fraud-scanner
+    environment:
+      <<: *fleet-env
+      SERVICE: fraud-scanner
+  cart-worker:
+    <<: *fleet
+    container_name: fleet-cart-worker
+    environment:
+      <<: *fleet-env
+      SERVICE: cart-worker
+  returns-processor:
+    <<: *fleet
+    container_name: fleet-returns-processor
+    environment:
+      <<: *fleet-env
+      SERVICE: returns-processor
+  search-indexer:
+    <<: *fleet
+    container_name: fleet-search-indexer
+    environment:
+      <<: *fleet-env
+      SERVICE: search-indexer
+  webhook-delivery:
+    <<: *fleet
+    container_name: fleet-webhook-delivery
+    environment:
+      <<: *fleet-env
+      SERVICE: webhook-delivery
+  media-transcoder:
+    <<: *fleet
+    container_name: fleet-media-transcoder
+    environment:
+      <<: *fleet-env
+      SERVICE: media-transcoder
+  email-notifier:
+    <<: *fleet
+    container_name: fleet-email-notifier
+    environment:
+      <<: *fleet-env
+      SERVICE: email-notifier
+  sms-notifier:
+    <<: *fleet
+    container_name: fleet-sms-notifier
+    environment:
+      <<: *fleet-env
+      SERVICE: sms-notifier
+  push-notifier:
+    <<: *fleet
+    container_name: fleet-push-notifier
+    environment:
+      <<: *fleet-env
+      SERVICE: push-notifier
+  audit-logger:
+    <<: *fleet
+    container_name: fleet-audit-logger
+    environment:
+      <<: *fleet-env
+      SERVICE: audit-logger
+  metrics-aggregator:
+    <<: *fleet
+    container_name: fleet-metrics-aggregator
+    environment:
+      <<: *fleet-env
+      SERVICE: metrics-aggregator
+  log-shipper:
+    <<: *fleet
+    container_name: fleet-log-shipper
+    environment:
+      <<: *fleet-env
+      SERVICE: log-shipper
+  catalog-sync:
+    <<: *fleet
+    container_name: fleet-catalog-sync
+    environment:
+      <<: *fleet-env
+      SERVICE: catalog-sync
+  user-projector:
+    <<: *fleet
+    container_name: fleet-user-projector
+    environment:
+      <<: *fleet-env
+      SERVICE: user-projector
+  loyalty-worker:
+    <<: *fleet
+    container_name: fleet-loyalty-worker
+    environment:
+      <<: *fleet-env
+      SERVICE: loyalty-worker
+  pricing-engine:
+    <<: *fleet
+    container_name: fleet-pricing-engine
+    environment:
+      <<: *fleet-env
+      SERVICE: pricing-engine
+  inventory-rpc:
+    <<: *fleet
+    container_name: fleet-inventory-rpc
+    environment:
+      <<: *fleet-env
+      SERVICE: inventory-rpc
+  pricing-rpc:
+    <<: *fleet
+    container_name: fleet-pricing-rpc
+    environment:
+      <<: *fleet-env
+      SERVICE: pricing-rpc
+  fraud-rpc:
+    <<: *fleet
+    container_name: fleet-fraud-rpc
+    environment:
+      <<: *fleet-env
+      SERVICE: fraud-rpc
+  user-rpc:
+    <<: *fleet
+    container_name: fleet-user-rpc
+    environment:
+      <<: *fleet-env
+      SERVICE: user-rpc
+  checkout-gateway:
+    <<: *fleet
+    container_name: fleet-checkout-gateway
+    environment:
+      <<: *fleet-env
+      SERVICE: checkout-gateway
+  risk-gateway:
+    <<: *fleet
+    container_name: fleet-risk-gateway
+    environment:
+      <<: *fleet-env
+      SERVICE: risk-gateway

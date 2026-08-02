@@ -22,6 +22,8 @@ function hintForCode(code: AssistantErrorCode): string | null {
       return "Set AI_ENABLED=true and configure AI_API_KEY in .env.";
     case "timeout":
       return "Increase AI_REQUEST_TIMEOUT if responses are often slow.";
+    case "blocked":
+      return "Do not ask for passwords, API keys, tokens, or other secrets. Keep questions on JetStream operations.";
     default:
       return null;
   }

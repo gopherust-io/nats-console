@@ -83,6 +83,7 @@ export default function LiveStreamPage() {
   const followRef = useRef(true);
   const pendingRef = useRef<LiveMessage[]>([]);
   const flushTimerRef = useRef<number | null>(null);
+  const flushGenRef = useRef(0);
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -93,11 +94,13 @@ export default function LiveStreamPage() {
     followRef.current = follow;
   }, [follow]);
 
-  const flushPending = useCallback(() => {
+  const flushPending = useCallback((gen: number) => {
+    if (gen !== flushGenRef.current) return;
     const batch = pendingRef.current;
     if (batch.length === 0) return;
     pendingRef.current = [];
     setMessages((prev) => {
+      if (gen !== flushGenRef.current) return prev;
       const combined = prev.concat(batch);
       if (combined.length <= MAX_MESSAGES) {
         return combined;
@@ -127,6 +130,8 @@ export default function LiveStreamPage() {
   useEffect(() => {
     if (!id || !name) return;
 
+    flushGenRef.current += 1;
+    const gen = flushGenRef.current;
     const url = getWebSocketURL(id, name, subjectFilter || undefined, fromSeq);
     const ws = new WebSocket(url);
     wsRef.current = ws;
@@ -139,7 +144,7 @@ export default function LiveStreamPage() {
       flushTimerRef.current = null;
     }
 
-    const isActive = () => wsRef.current === ws;
+    const isActive = () => wsRef.current === ws && gen === flushGenRef.current;
 
     ws.onopen = () => {
       if (!isActive()) return;
@@ -169,7 +174,7 @@ export default function LiveStreamPage() {
         if (flushTimerRef.current === null) {
           flushTimerRef.current = window.setTimeout(() => {
             flushTimerRef.current = null;
-            flushPending();
+            flushPending(gen);
           }, WS_BATCH_MS);
         }
       } else if (frame.type === "error") {
@@ -179,6 +184,8 @@ export default function LiveStreamPage() {
     };
 
     return () => {
+      flushGenRef.current += 1;
+      pendingRef.current = [];
       if (flushTimerRef.current !== null) {
         window.clearTimeout(flushTimerRef.current);
         flushTimerRef.current = null;
@@ -235,6 +242,7 @@ export default function LiveStreamPage() {
     if (action === "pause") setPaused(true);
     if (action === "resume") setPaused(false);
     if (action === "clear") {
+      flushGenRef.current += 1;
       pendingRef.current = [];
       if (flushTimerRef.current !== null) {
         window.clearTimeout(flushTimerRef.current);

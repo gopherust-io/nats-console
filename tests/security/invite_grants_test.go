@@ -59,14 +59,14 @@ func TestInviteAcceptAndSystemGrant(t *testing.T) {
 	resp, err = srv.Client.Do(&testutil.Request{
 		Method: http.MethodPost,
 		URL:    "http://nats-consol.local/api/v1/auth/invite/accept",
-		Body:   strings.NewReader(`{"token":"`+inv.Token+`","password":"secret-pass"}`),
+		Body:   strings.NewReader(`{"token":"` + inv.Token + `","password":"secret-pass"}`),
 		Header: http.Header{
 			"Content-Type": {"application/json"},
 		},
 	})
 	require.NoError(t, err)
 	body := resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.Equal(t, http.StatusOK, resp.StatusCode, commonstrings.BytesToString(body))
 
 	resp, err = srv.Client.Do(&testutil.Request{
 		Method: http.MethodGet,
@@ -82,11 +82,11 @@ func TestInviteAcceptAndSystemGrant(t *testing.T) {
 
 	resp, err = srv.Client.Do(&testutil.Request{
 		Method: http.MethodPost,
-		URL:    srv.BaseURL(clusterID)+"/streams",
+		URL:    srv.BaseURL(clusterID) + "/streams",
 		Body:   strings.NewReader(`{"name":"X","subjects":["x.>"]}`),
 		Header: http.Header{
 			"Authorization": {basicAuth("invited-person", "secret-pass")},
-			"Content-Type": {"application/json"},
+			"Content-Type":  {"application/json"},
 		},
 	})
 	require.NoError(t, err)
@@ -128,7 +128,7 @@ func TestCredentialDownloaderGate(t *testing.T) {
 
 	resp, err := srv.Client.Do(&testutil.Request{
 		Method: http.MethodGet,
-		URL:    srv.BaseURL(clusterID)+"/nats-users/"+natsUser.ID+"/creds?account=Default",
+		URL:    srv.BaseURL(clusterID) + "/nats-users/" + natsUser.ID + "/creds?account=Default",
 		Header: http.Header{
 			"Authorization": {basicAuth("cred-dl", "cred-pass")},
 		},

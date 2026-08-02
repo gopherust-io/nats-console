@@ -1,4 +1,4 @@
-import { clusterPath } from "./api";
+import { clusterPath, getCSRFToken } from "./api";
 import { safeDecodeURIComponent } from "./safeDecode";
 
 export type AssistantMessage = {
@@ -128,10 +128,15 @@ export async function sendAssistantMessage(
 ): Promise<string> {
   let response: Response;
   try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const csrf = getCSRFToken();
+    if (csrf) {
+      headers["X-CSRF-Token"] = csrf;
+    }
     response = await fetch(clusterPath(clusterId, "/assistant/chat"), {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ message, history, page }),
     });
   } catch {

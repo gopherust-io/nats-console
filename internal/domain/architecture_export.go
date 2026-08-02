@@ -150,7 +150,7 @@ func ZipArchitectureExport(bundle ArchitectureExportBundle) ([]byte, error) {
 			_ = w.Close()
 			return nil, err
 		}
-		if _, err := fw.Write([]byte(f.Content)); err != nil {
+		if _, err := fw.Write(commonstrings.StringToBytes(f.Content)); err != nil {
 			_ = w.Close()
 			return nil, err
 		}
@@ -361,7 +361,7 @@ func renderExcalidraw(inv ArchitectureInventory) string {
 	if err != nil {
 		return "{}\n"
 	}
-	return string(raw) + "\n"
+	return commonstrings.BytesToString(raw) + "\n"
 }
 
 func renderDrawIO(inv ArchitectureInventory) string {

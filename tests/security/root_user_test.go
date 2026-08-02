@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gopherust-io/nats-consol/internal/store"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,8 +42,8 @@ func TestRootUserSeededAtBootstrap(t *testing.T) {
 	})
 	require.NoError(t, err)
 	body := resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "me status body = %s", string(body))
-	assert.Contains(t, string(body), `"isRoot":true`, "expected isRoot in response")
+	require.Equal(t, http.StatusOK, resp.StatusCode, "me status body = %s", commonstrings.BytesToString(body))
+	assert.Contains(t, commonstrings.BytesToString(body), `"isRoot":true`, "expected isRoot in response")
 }
 
 func TestDelegatedAdminCannotModifyRoot(t *testing.T) {
@@ -80,7 +81,7 @@ func TestDelegatedAdminCannotModifyRoot(t *testing.T) {
 
 	resp, err := srv.Client.Do(&testutil.Request{
 		Method: http.MethodDelete,
-		URL:    "http://nats-consol.local/api/v1/users/"+rootID,
+		URL:    "http://nats-consol.local/api/v1/users/" + rootID,
 		Header: http.Header{
 			"Authorization": {basicAuth("delegate-admin", "delegate-pass")},
 		},
@@ -113,13 +114,13 @@ func TestRootCanCreateDelegatedAdmin(t *testing.T) {
 		Body:   strings.NewReader(body),
 		Header: http.Header{
 			"Authorization": {basicAuth("admin", "admin")},
-			"Content-Type": {"application/json"},
+			"Content-Type":  {"application/json"},
 		},
 	})
 	require.NoError(t, err)
 	respBody := resp.Body
-	require.Equal(t, http.StatusCreated, resp.StatusCode, "create admin body = %s", string(respBody))
-	assert.Contains(t, string(respBody), `"username":"scoped-admin"`)
+	require.Equal(t, http.StatusCreated, resp.StatusCode, "create admin body = %s", commonstrings.BytesToString(respBody))
+	assert.Contains(t, commonstrings.BytesToString(respBody), `"username":"scoped-admin"`)
 }
 
 func TestDelegatedAdminCannotEscalateRoles(t *testing.T) {
@@ -152,11 +153,11 @@ func TestDelegatedAdminCannotEscalateRoles(t *testing.T) {
 
 	resp, err := srv.Client.Do(&testutil.Request{
 		Method: http.MethodPut,
-		URL:    "http://nats-consol.local/api/v1/users/"+target.ID+"/roles",
+		URL:    "http://nats-consol.local/api/v1/users/" + target.ID + "/roles",
 		Body:   strings.NewReader(`{"roles":["admin"]}`),
 		Header: http.Header{
 			"Authorization": {basicAuth("delegate-admin", "delegate-pass")},
-			"Content-Type": {"application/json"},
+			"Content-Type":  {"application/json"},
 		},
 	})
 	require.NoError(t, err)

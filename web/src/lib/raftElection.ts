@@ -13,7 +13,13 @@ export type LeaderDiff =
   | { kind: "change"; old: string; next: string; candidate: string }
   | { kind: "lost"; old: string };
 
-export type ElectionPhase = "stable" | "demoting" | "candidate" | "promoting" | "settled";
+export type ElectionPhase =
+  | "stable"
+  | "demoting"
+  | "candidate"
+  | "promoting"
+  | "settled"
+  | "leaderUnreachable";
 
 export type ElectionOverlay = {
   phase: ElectionPhase;
@@ -132,10 +138,13 @@ export function applyVisualRoles(
 ): Record<string, RaftVisualRole> {
   const roles: Record<string, RaftVisualRole> = {};
   const phase = overlay?.phase ?? "stable";
+  // leaderUnreachable: keep reported meta leader; do not invent a candidate.
   const effectiveLeader =
     phase === "demoting" || phase === "candidate"
       ? undefined
-      : (overlay?.toLeader ?? leader);
+      : phase === "leaderUnreachable"
+        ? leader
+        : (overlay?.toLeader ?? leader);
 
   for (const peer of peers) {
     if (!peer.online) {
@@ -171,6 +180,7 @@ export function applyVisualRoles(
 
 export function electionCaptionKey(overlay: ElectionOverlay | null | undefined): string {
   if (!overlay || overlay.phase === "stable") return "replicas.election.captionStable";
+  if (overlay.phase === "leaderUnreachable") return "replicas.election.captionLeaderUnreachable";
   if (overlay.phase === "demoting") return "replicas.election.captionDemoting";
   if (overlay.phase === "candidate") return "replicas.election.captionCandidate";
   if (overlay.phase === "promoting") return "replicas.election.captionPromoting";

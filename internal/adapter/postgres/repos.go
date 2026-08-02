@@ -206,8 +206,9 @@ func (u *UnitOfWork) UpdateNATSAccountUser(
 	return user, mapError(err)
 }
 
-func (u *UnitOfWork) DeleteNATSAccountUser(ctx context.Context, clusterID, accountName, userID string) error {
-	return mapError(u.store.DeleteNATSAccountUser(ctx, clusterID, accountName, userID))
+func (u *UnitOfWork) DeleteNATSAccountUser(ctx context.Context, clusterID, accountName, userID string) ([]string, error) {
+	ids, err := u.store.DeleteNATSAccountUser(ctx, clusterID, accountName, userID)
+	return ids, mapError(err)
 }
 
 func (u *UnitOfWork) GetNATSAccountUserCreds(ctx context.Context, clusterID, accountName, userID string) (domain.NATSAccountUserCreds, error) {

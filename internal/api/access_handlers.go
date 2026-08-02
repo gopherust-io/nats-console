@@ -47,6 +47,10 @@ func (h *AccessHandler) ListAccountAccess(ctx *fasthttp.RequestCtx) {
 	if commonstrings.IsEmpty(account) {
 		account = "Default"
 	}
+	if err := domain.ValidateAccountName(account); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
 	h.listResourceAccess(ctx, domain.ResourceAccount, domain.AccountResourceKey(clusterID(ctx), account))
 }
 
@@ -55,6 +59,10 @@ func (h *AccessHandler) UpsertAccountAccess(ctx *fasthttp.RequestCtx) {
 	if commonstrings.IsEmpty(account) {
 		account = "Default"
 	}
+	if err := domain.ValidateAccountName(account); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
+	}
 	h.upsertResourceAccess(ctx, domain.ResourceAccount, domain.AccountResourceKey(clusterID(ctx), account), false)
 }
 
@@ -62,6 +70,10 @@ func (h *AccessHandler) DeleteAccountAccess(ctx *fasthttp.RequestCtx) {
 	account := httpctx.RouteParam(ctx, "account")
 	if commonstrings.IsEmpty(account) {
 		account = "Default"
+	}
+	if err := domain.ValidateAccountName(account); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
+		return
 	}
 	h.deleteResourceAccess(ctx, domain.ResourceAccount, domain.AccountResourceKey(clusterID(ctx), account))
 }
@@ -269,6 +281,10 @@ func (h *AccessHandler) upsertResourceAccess(ctx *fasthttp.RequestCtx, resourceT
 	}
 	if systemOnly && req.Role == domain.GrantCredentialDownloader {
 		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errors.New("credential_downloader is account-scoped"))
+		return
+	}
+	if req.Role == domain.GrantAdmin && !auth.CanMintAdminGrant(actor, resourceType, resourceKey) {
+		httpstatus.WriteForbidden(ctx)
 		return
 	}
 	grant, err := h.access.UpsertGrant(httpctx.FromRequest(ctx), domain.AccessGrantUpsert{

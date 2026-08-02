@@ -7,8 +7,24 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
 
+	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/store"
 )
+
+func TestRequiresFreshAuthz(t *testing.T) {
+	t.Parallel()
+	assert.True(t, requiresFreshAuthz("/api/v1/clusters/x/nats-users/y/creds", fasthttp.MethodGet))
+	assert.True(t, requiresFreshAuthz("/api/v1/clusters/x/nats-users/y/assign", fasthttp.MethodPost))
+	assert.True(t, requiresFreshAuthz("/api/v1/clusters/x/nats-users/y/rotate", fasthttp.MethodPost))
+	assert.True(t, requiresFreshAuthz("/api/v1/clusters/x/nats-users", fasthttp.MethodPost))
+	assert.True(t, requiresFreshAuthz("/api/v1/clusters/x/signing-groups", fasthttp.MethodPut))
+	assert.True(t, requiresFreshAuthz("/api/v1/clusters/x/sharing/exports", fasthttp.MethodDelete))
+	assert.False(t, requiresFreshAuthz("/api/v1/clusters/x/nats-users", fasthttp.MethodGet))
+	assert.True(t, requiresFreshAuthz("/api/v1/clusters/x/access", fasthttp.MethodPost))
+	assert.False(t, requiresFreshAuthz("/api/v1/clusters/x/streams", fasthttp.MethodGet))
+	assert.True(t, requiresFreshAuthz("/api/v1/users", fasthttp.MethodPost))
+	assert.False(t, requiresFreshAuthz("/api/v1/users", fasthttp.MethodGet))
+}
 
 func TestIsPublicPath(t *testing.T) {
 	public := []string{
@@ -58,6 +74,15 @@ func TestIsLongRunningProfilePathStillWorks(t *testing.T) {
 	assert.True(t, isPprofPath("/debug/pprof"))
 }
 
+func TestIsAITimeoutPath(t *testing.T) {
+	assert.True(t, isAITimeoutPath("/api/v1/assistant/config"))
+	assert.True(t, isAITimeoutPath("/api/v1/clusters/abc/assistant/chat"))
+	assert.True(t, isAITimeoutPath("/api/v1/clusters/abc/architecture-review/ask"))
+	assert.True(t, isAITimeoutPath("/api/v1/clusters/abc/chaos-story/generate"))
+	assert.False(t, isAITimeoutPath("/api/v1/clusters/abc/streams"))
+	assert.False(t, isAITimeoutPath("/api/health"))
+}
+
 func TestIsLongRunningProfilePath(t *testing.T) {
 	assert.True(t, isLongRunningProfilePath("/debug/pprof/profile"))
 	assert.True(t, isLongRunningProfilePath("/api/v1/pprof/profile/cpu"))
@@ -104,6 +129,17 @@ func TestIsAccountScopedClusterPath(t *testing.T) {
 	}
 }
 
+func TestClusterIDFromPathMixedCase(t *testing.T) {
+	t.Parallel()
+	lower := "550e8400-e29b-41d4-a716-446655440000"
+	upper := "550E8400-E29B-41D4-A716-446655440000"
+	assert.Equal(t, lower, clusterIDFromPath("/api/v1/clusters/"+upper+"/streams"))
+	assert.Equal(t, lower, clusterIDFromPath("/api/v1/clusters/"+lower+"/streams"))
+
+	outsider := store.User{Roles: []string{store.RoleViewer}}
+	assert.False(t, canReadClusterPath(outsider, clusterIDFromPath("/api/v1/clusters/"+upper+"/streams"), "/api/v1/clusters/"+upper+"/streams"))
+}
+
 func TestCanReadClusterPath(t *testing.T) {
 	clusterID := "550e8400-e29b-41d4-a716-446655440000"
 	accountUser := store.User{
@@ -133,4 +169,21 @@ func TestCanReadClusterPath(t *testing.T) {
 	}
 	assert.True(t, canReadClusterPath(systemUser, clusterID, "/api/v1/clusters/"+clusterID+"/streams"))
 	assert.True(t, canReadClusterPath(systemUser, clusterID, "/api/v1/clusters/"+clusterID+"/nats-users"))
+}
+
+func TestCanMutateClusterPathAccountAdminWithoutClusterWrite(t *testing.T) {
+	clusterID := "550e8400-e29b-41d4-a716-446655440000"
+	accountAdmin := store.User{
+		Roles: []string{store.RoleViewer},
+		Grants: []store.AccessGrant{{
+			ResourceType: store.ResourceAccount,
+			ResourceKey:  clusterID + ":Default",
+			Role:         store.GrantAdmin,
+		}},
+	}
+
+	assert.False(t, auth.CanWriteCluster(accountAdmin, clusterID))
+	assert.True(t, canMutateClusterPath(accountAdmin, clusterID, "/api/v1/clusters/"+clusterID+"/nats-users"))
+	assert.True(t, canMutateClusterPath(accountAdmin, clusterID, "/api/v1/clusters/"+clusterID+"/signing-groups"))
+	assert.False(t, canMutateClusterPath(accountAdmin, clusterID, "/api/v1/clusters/"+clusterID+"/streams"))
 }

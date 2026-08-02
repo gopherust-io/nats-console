@@ -14,7 +14,7 @@ const ArchitectureExportADRSystemPrompt = `You are the NATS Consol Architecture 
 SCOPE:
 - Polish Architecture Decision Records (ADRs) using ONLY the inventory JSON and draft ADR texts provided.
 - Do not invent streams, consumers, or subjects that are not present.
-- Do not discuss credentials, payloads, or database contents.
+- Refuse anything outside ADR polishing for this console.
 
 STYLE:
 - Return plain Markdown ADRs only.
@@ -25,7 +25,9 @@ OUTPUT FORMAT (mandatory):
 Return exactly two ADR documents separated by a line containing only:
 ---ADR_SPLIT---
 First document is adr/0001-jetstream-topology.md content.
-Second document is adr/0002-subject-boundaries.md content.`
+Second document is adr/0002-subject-boundaries.md content.
+
+` + SecurityAndConductRules
 
 // PolishArchitectureADRs asks Gemini to refine deterministic ADR drafts.
 func (s *Service) PolishArchitectureADRs(ctx context.Context, inv domain.ArchitectureInventory, drafts map[string]string) (map[string]string, error) {
@@ -39,7 +41,7 @@ func (s *Service) PolishArchitectureADRs(ctx context.Context, inv domain.Archite
 	if err != nil {
 		return nil, newAssistantError(CodeContext, "Could not encode architecture inventory.", true, 0)
 	}
-	user := "Inventory and draft ADRs JSON:\n" + string(payload) +
+	user := "Inventory and draft ADRs JSON:\n" + commonstrings.BytesToString(payload) +
 		"\n\nPolish both ADRs. Separate them with ---ADR_SPLIT---."
 	reply, err := s.llm.Chat(ctx, ArchitectureExportADRSystemPrompt, []Message{
 		{Role: "user", Content: user},

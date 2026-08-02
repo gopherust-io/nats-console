@@ -29,6 +29,7 @@ export default function ObjectBucketsPage() {
   const { clusterId: contextClusterId } = useCluster();
   const clusterId = routeCluster ?? contextClusterId;
   const { canManageJetStream } = useAuth();
+  const canManageJS = canManageJetStream(clusterId);
   const jsBase = clusterId ? jetStreamUIBase(clusterId, accountName) : "";
   const queryClient = useQueryClient();
   const [actionError, setActionError] = useState("");
@@ -95,7 +96,7 @@ export default function ObjectBucketsPage() {
         title="Object Stores"
         subtitle="Store and retrieve opaque blobs — ideal for backups, artifacts, and large payloads."
         actions={
-          canManageJetStream ? (
+          canManageJS ? (
             <button
               className="btn"
               type="button"
@@ -134,7 +135,7 @@ export default function ObjectBucketsPage() {
           title="No object buckets yet"
           description="Create a bucket to start storing files and binary payloads in JetStream object storage."
           action={
-            canManageJetStream ? (
+            canManageJS ? (
               <button
                 className="btn"
                 type="button"
@@ -170,7 +171,7 @@ export default function ObjectBucketsPage() {
                 case "size":
                   return formatBytes(item.size);
                 case "actions":
-                  return canManageJetStream ? (
+                  return canManageJS ? (
                     <button className="btn danger btn--small" type="button" onClick={() => deleteBucket(item.bucket)}>
                       Delete
                     </button>

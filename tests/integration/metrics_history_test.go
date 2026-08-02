@@ -11,6 +11,7 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/store"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,7 +44,7 @@ func TestMetricsHistoryQuery(t *testing.T) {
 	resp, err := srv.Client.Get(url)
 	require.NoError(t, err)
 	body := resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.Equal(t, http.StatusOK, resp.StatusCode, commonstrings.BytesToString(body))
 
 	var history struct {
 		Data struct {

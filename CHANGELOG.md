@@ -4,6 +4,19 @@ All notable changes to NATS Consol are documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-02
+
+### Added
+
+- **Fleet lab** — `examples/fleet/` multi-service JetStream topology (compose, RPC, work queues) for local demos.
+- **HTTP response compression** middleware (`internal/api/middleware/compress.go`).
+
+### Changed
+
+- Depend on [env](https://github.com/gopherust-io/env) **v0.6.0**, [tel](https://github.com/gopherust-io/tel) **v0.4.0**, [nats](https://github.com/gopherust-io/nats) **v0.5.0**; goalign **v1.4.0**.
+- Regenerate config loader for env v0.6; `config.Load` reloads Snapshot after dotenv.
+- API/auth/replicas/UI and docs hardening across monitoring, RBAC, and assistant surfaces.
+
 ## [0.12.0] - 2026-08-01
 
 ### Added

@@ -74,36 +74,33 @@ export default function ClustersPage() {
   }
 
   async function testCluster(cluster: Cluster) {
+    const nonce = (availability[cluster.id]?.nonce ?? 0) + 1;
     setAvailability((prev) => ({
       ...prev,
-      [cluster.id]: {
-        status: "checking",
-        nonce: (prev[cluster.id]?.nonce ?? 0) + 1,
-      },
+      [cluster.id]: { status: "checking", nonce },
     }));
 
     try {
       const result = (await api<TestResponse>(`/api/v1/clusters/${cluster.id}/test`, { method: "POST" })).data;
-      setAvailability((prev) => ({
-        ...prev,
-        [cluster.id]: {
-          status: "done",
-          result,
-          nonce: (prev[cluster.id]?.nonce ?? 0) + 1,
-        },
-      }));
+      setAvailability((prev) => {
+        if (prev[cluster.id]?.nonce !== nonce) return prev;
+        return { ...prev, [cluster.id]: { status: "done", result, nonce } };
+      });
     } catch (err) {
-      setAvailability((prev) => ({
-        ...prev,
-        [cluster.id]: {
-          status: "done",
-          result: {
-            ok: false,
-            message: err instanceof Error ? err.message : t("clusters.checkFailed"),
+      setAvailability((prev) => {
+        if (prev[cluster.id]?.nonce !== nonce) return prev;
+        return {
+          ...prev,
+          [cluster.id]: {
+            status: "done",
+            result: {
+              ok: false,
+              message: err instanceof Error ? err.message : t("clusters.checkFailed"),
+            },
+            nonce,
           },
-          nonce: (prev[cluster.id]?.nonce ?? 0) + 1,
-        },
-      }));
+        };
+      });
     }
   }
 

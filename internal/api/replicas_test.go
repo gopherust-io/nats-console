@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gopherust-io/nats-consol/internal/snapshot"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
@@ -69,13 +70,17 @@ func TestBuildReplicasSnapshotFivePeers(t *testing.T) {
 
 	assert.Equal(t, "route", byName["nats-2"].Role)
 	assert.True(t, byName["nats-2"].Leader)
-	assert.True(t, byName["nats-2"].Current)
+	require.NotNil(t, byName["nats-2"].Current)
+	assert.True(t, *byName["nats-2"].Current)
 	assert.True(t, byName["nats-2"].Online)
 	assert.Equal(t, "10.0.0.2", byName["nats-2"].IP)
 
 	assert.Equal(t, "route", byName["nats-5"].Role)
 	assert.False(t, byName["nats-5"].Online)
-	assert.False(t, byName["nats-5"].Current)
+	require.NotNil(t, byName["nats-5"].Current)
+	assert.False(t, *byName["nats-5"].Current)
+	// Monitored peer not listed in meta.replicas — current stays unknown (nil).
+	assert.Nil(t, byName["nats-1"].Current)
 
 	// Leader sorts first, then monitored, then name.
 	assert.Equal(t, "nats-2", snap.Peers[0].Name)
@@ -218,17 +223,64 @@ func TestBuildReplicasSnapshotLiveVarzBeatsMetaOffline(t *testing.T) {
 func TestReplicaPeerCurrentFalseSurvivesJSON(t *testing.T) {
 	t.Parallel()
 
+	cur := false
 	raw, err := serializer.Marshal(replicaPeer{
 		Name:    "nats-5",
 		Role:    "route",
 		Online:  true,
-		Current: false,
+		Current: &cur,
 	})
 	require.NoError(t, err)
-	assert.Contains(t, string(raw), `"current":false`)
+	assert.Contains(t, commonstrings.BytesToString(raw), `"current":false`)
 
 	var got replicaPeer
 	require.NoError(t, serializer.Unmarshal(raw, &got))
-	assert.False(t, got.Current)
+	require.NotNil(t, got.Current)
+	assert.False(t, *got.Current)
 	assert.True(t, got.Online)
+}
+
+func TestReplicaPeerCurrentOmittedWhenUnknown(t *testing.T) {
+	t.Parallel()
+
+	raw, err := serializer.Marshal(replicaPeer{
+		Name:   "nats-1",
+		Role:   "monitored",
+		Online: true,
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, commonstrings.BytesToString(raw), `"current"`)
+
+	var got replicaPeer
+	require.NoError(t, serializer.Unmarshal(raw, &got))
+	assert.Nil(t, got.Current)
+}
+
+func TestJSZHasMetaCluster(t *testing.T) {
+	t.Parallel()
+
+	assert.False(t, jszHasMetaCluster(nil))
+	assert.False(t, jszHasMetaCluster(commonstrings.StringToBytes(`{"streams":1,"consumers":2,"messages":3}`)))
+	assert.False(t, jszHasMetaCluster(commonstrings.StringToBytes(`{"meta_cluster":null}`)))
+	assert.True(t, jszHasMetaCluster(commonstrings.StringToBytes(`{"meta_cluster":{"leader":"n1","cluster_size":3}}`)))
+}
+
+func TestHubJSZForReplicasIgnoresSlimJSZ(t *testing.T) {
+	t.Parallel()
+
+	hub := snapshot.NewHub()
+	hub.Publish("c1", snapshot.ClusterSnapshot{
+		Jsz:         commonstrings.StringToBytes(`{"streams":1,"consumers":2,"messages":3}`),
+		JszTopology: commonstrings.StringToBytes(`{"server_name":"n1","meta_cluster":{"leader":"n1","cluster_size":2}}`),
+	})
+
+	got := hubJSZForReplicas(hub, "c1")
+	require.NotNil(t, got)
+	assert.True(t, jszHasMetaCluster(got))
+
+	hubSlimOnly := snapshot.NewHub()
+	hubSlimOnly.Publish("c1", snapshot.ClusterSnapshot{
+		Jsz: commonstrings.StringToBytes(`{"streams":1,"consumers":2,"messages":3}`),
+	})
+	assert.Nil(t, hubJSZForReplicas(hubSlimOnly, "c1"))
 }

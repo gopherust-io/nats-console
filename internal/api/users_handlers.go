@@ -60,8 +60,8 @@ func (h *UsersHandler) Create(ctx *fasthttp.RequestCtx) {
 		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("username"))
 		return
 	}
-	if strings.IsEmpty(req.Password) {
-		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("password"))
+	if err := validatePassword(req.Password); err != nil {
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	if len(req.Roles) == 0 {
@@ -108,6 +108,10 @@ func (h *UsersHandler) Update(ctx *fasthttp.RequestCtx) {
 		update.Email = req.Email
 	}
 	if req.Password != nil {
+		if err := validatePassword(*req.Password); err != nil {
+			httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
+			return
+		}
 		update.Password = req.Password
 	}
 	if req.Roles != nil {

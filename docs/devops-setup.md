@@ -309,6 +309,7 @@ make test-security
 | `HTTP_*_TIMEOUT` | Increase if NATS clusters are high-latency |
 | `NATS_CLIENT_CACHE_TTL` | How long idle NATS connections stay pooled |
 | `MAX_REQUEST_BODY_SIZE` | Default 1 MiB |
+| `HTTP_RESPONSE_COMPRESSION` | Default `true`; disable if an edge proxy already compresses |
 | `AUTH_RATE_LIMIT` | Brute-force protection on login |
 
 Full list: [README configuration table](../README.md#configuration).

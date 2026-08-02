@@ -7,7 +7,9 @@ import (
 	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
-const defaultUserCacheTTL = 45 * time.Second
+// Keep in step with userVersionCacheTTL so revoked grants are not served from
+// a long-lived user cache after the version stamp has already been refreshed.
+const defaultUserCacheTTL = 5 * time.Second
 
 type userCache struct {
 	cache *ttlCache[string, store.User]

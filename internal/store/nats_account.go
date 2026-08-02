@@ -217,15 +217,50 @@ func (s *Store) CreateNATSAccountUserWithSeed(ctx context.Context, in NATSAccoun
 	return out, nil
 }
 
-func (s *Store) DeleteNATSAccountUser(ctx context.Context, clusterID, accountName, userID string) error {
-	tag, err := s.pool.Exec(ctx, queryDeleteNATSAccountUser, clusterID, accountName, userID)
+// DeleteNATSAccountUser removes the NATS user and any nats_user grants for it.
+// Returns console user IDs whose grants were removed (for session invalidation).
+func (s *Store) DeleteNATSAccountUser(ctx context.Context, clusterID, accountName, userID string) ([]string, error) {
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	resourceKey := domainAccountNATSUserKey(clusterID, accountName, userID)
+	rows, err := tx.Query(ctx, queryDeleteAccessGrantsByResourceKey, ResourceNATSUser, resourceKey)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	var affected []string
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if _, ok := seen[uid]; ok {
+			continue
+		}
+		seen[uid] = struct{}{}
+		affected = append(affected, uid)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	tag, err := tx.Exec(ctx, queryDeleteNATSAccountUser, clusterID, accountName, userID)
+	if err != nil {
+		return nil, err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
-	return nil
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return affected, nil
 }
 
 func (s *Store) GetNATSAccountUser(ctx context.Context, clusterID, accountName, userID string) (NATSAccountUser, error) {
@@ -423,8 +458,9 @@ func (s *Store) AssignNATSAccountUserPerson(ctx context.Context, clusterID, acco
 	}
 	if !strings.IsEmpty(consoleUserID) {
 		grantID := newID()
+		// Assign shares download rights only — not full account admin on the NATS user.
 		if _, err := tx.Exec(ctx, queryUpsertAccessGrantNoReturning,
-			grantID, consoleUserID, ResourceNATSUser, resourceKey, GrantAdmin, now); err != nil {
+			grantID, consoleUserID, ResourceNATSUser, resourceKey, GrantCredentialDownloader, now); err != nil {
 			return NATSAccountUser{}, err
 		}
 	}

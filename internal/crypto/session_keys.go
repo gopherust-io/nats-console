@@ -71,7 +71,7 @@ func parseRSAPublicKeyPEM(pemStr string) (*rsa.PublicKey, error) {
 		return nil, errors.New("is required")
 	}
 
-	block, _ := pem.Decode([]byte(normalizePEM(pemStr)))
+	block, _ := pem.Decode(commonstrings.StringToBytes(normalizePEM(pemStr)))
 	if block == nil {
 		return nil, errors.New("invalid PEM")
 	}

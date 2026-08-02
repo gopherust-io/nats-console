@@ -20,12 +20,29 @@ const (
 	// the Replicas page is open.
 	DefaultReplicasInterval = 5 * time.Second
 
-	// DefaultReplicasScrapeTimeout is the per-tick budget for multi-peer
+	// DefaultReplicasScrapeTimeout is the minimum per-tick budget for multi-peer
 	// varz/routez/jsz failover (must exceed DefaultReplicasInterval).
 	DefaultReplicasScrapeTimeout = 12 * time.Second
 
+	// replicasMonitorHopTimeout matches api.replicasMonitorTimeout (per-base HTTP).
+	replicasMonitorHopTimeout = 3 * time.Second
+
 	connzSubscriberBuffer = 4
 )
+
+// ReplicasScrapeTimeout returns a scrape budget for routez+jsz sequential failover
+// across candidateCount monitoring bases, plus varz fan-out headroom.
+func ReplicasScrapeTimeout(candidateCount int) time.Duration {
+	if candidateCount < 1 {
+		candidateCount = 1
+	}
+	// Worst case: routez failover + jsz failover (each up to N hops) + varz headroom.
+	d := time.Duration(candidateCount*2)*replicasMonitorHopTimeout + 6*time.Second
+	if d < DefaultReplicasScrapeTimeout {
+		return DefaultReplicasScrapeTimeout
+	}
+	return d
+}
 
 // ConnzFetcher loads a connz monitoring payload for a cluster.
 type ConnzFetcher func(ctx context.Context, clusterID string) ([]byte, error)

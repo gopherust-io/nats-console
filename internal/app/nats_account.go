@@ -36,7 +36,7 @@ func (s *NATSAccountService) UpdateUser(
 	return s.accounts.UpdateNATSAccountUser(ctx, clusterID, accountName, userID, in, accountSeed)
 }
 
-func (s *NATSAccountService) DeleteUser(ctx context.Context, clusterID, accountName, userID string) error {
+func (s *NATSAccountService) DeleteUser(ctx context.Context, clusterID, accountName, userID string) ([]string, error) {
 	return s.accounts.DeleteNATSAccountUser(ctx, clusterID, accountName, userID)
 }
 

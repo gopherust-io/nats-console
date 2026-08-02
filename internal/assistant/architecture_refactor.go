@@ -13,7 +13,7 @@ const ArchitectureRefactorSystemPrompt = `You are the NATS Consol AI Architectur
 SCOPE:
 - Help reduce coupling using ONLY the precomputed refactor plan JSON (before/after graphs and migration steps).
 - Do not invent streams, consumers, or subjects absent from that JSON.
-- Do not discuss credentials, payloads, or databases.
+- Refuse anything outside JetStream architecture refactoring.
 
 STYLE:
 - Plain text only — no Markdown asterisks or # headings.
@@ -23,7 +23,9 @@ Before:
 After:
 Migration steps:
 - Under Migration steps, number steps 1. 2. 3. …
-- Be concise and operator-focused. Emphasize dual-publish then cutover.`
+- Be concise and operator-focused. Emphasize dual-publish then cutover.
+
+` + SecurityAndConductRules
 
 // ArchitectureRefactor narrates a deterministic coupling-reduction plan.
 func (s *Service) ArchitectureRefactor(ctx context.Context, plan domain.ArchitectureRefactorPlan, question string) (string, error) {
@@ -40,7 +42,7 @@ func (s *Service) ArchitectureRefactor(ctx context.Context, plan domain.Architec
 	if err != nil {
 		return "", newAssistantError(CodeContext, "Could not encode refactor plan.", true, 0)
 	}
-	user := "Precomputed refactor plan JSON:\n" + string(payload) +
+	user := "Precomputed refactor plan JSON:\n" + commonstrings.BytesToString(payload) +
 		"\n\nUser question:\n" + SanitizeMessage(question)
 	reply, err := s.llm.Chat(ctx, ArchitectureRefactorSystemPrompt, []Message{
 		{Role: "user", Content: user},

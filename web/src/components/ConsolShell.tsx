@@ -252,6 +252,7 @@ function LevelTabs() {
   const { clusterId: routeClusterId, accountName: routeAccount } = useParams();
   const { clusterId } = useCluster();
   const { accountName } = useAccount();
+  const { canManageUsers, canViewAudit } = useAuth();
   const location = useLocation();
   const onDocs = isDocsPath(location.pathname);
   const onTopology = isTopologyPath(location.pathname);
@@ -270,12 +271,16 @@ function LevelTabs() {
   if (location.pathname.startsWith("/admin") && !onTopology) {
     return (
       <nav className="nc-tabs" aria-label={t("nav.ariaAdmin")}>
-        <NavLink to="/admin/users" className={({ isActive }) => `nc-tab${isActive ? " active" : ""}`}>
-          {t("nav.people")}
-        </NavLink>
-        <NavLink to="/admin/audit" className={({ isActive }) => `nc-tab${isActive ? " active" : ""}`}>
-          {t("nav.audit")}
-        </NavLink>
+        {canManageUsers && (
+          <NavLink to="/admin/users" className={({ isActive }) => `nc-tab${isActive ? " active" : ""}`}>
+            {t("nav.people")}
+          </NavLink>
+        )}
+        {canViewAudit && (
+          <NavLink to="/admin/audit" className={({ isActive }) => `nc-tab${isActive ? " active" : ""}`}>
+            {t("nav.audit")}
+          </NavLink>
+        )}
         <NavLink to="/admin/alerts" className={({ isActive }) => `nc-tab${isActive ? " active" : ""}`}>
           {t("nav.alerts")}
         </NavLink>
@@ -338,6 +343,7 @@ function LevelTabs() {
 export default function ConsolShell() {
   const { t } = useTranslation();
   const location = useLocation();
+  const { user } = useAuth();
   const { clusterId, setClusterId } = useCluster();
   const { accountName, setAccountName } = useAccount();
   const params = useParams();
@@ -397,7 +403,7 @@ export default function ConsolShell() {
 
       <SegHintHost />
 
-      {isDocsPath(location.pathname) && (
+      {user && (
         <Suspense fallback={null}>
           <AssistantPanel />
         </Suspense>

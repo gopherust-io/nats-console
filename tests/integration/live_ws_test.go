@@ -30,7 +30,7 @@ func TestLiveWS(t *testing.T) {
 	resp, err := srv.Client.Post(base+"/streams", "application/json", strings.NewReader(createBody))
 	require.NoError(t, err)
 	respBody := resp.Body
-	require.Equal(t, http.StatusCreated, resp.StatusCode, "create stream: %s", string(respBody))
+	require.Equal(t, http.StatusCreated, resp.StatusCode, "create stream: %s", commonstrings.BytesToString(respBody))
 
 	dialer := websocket.Dialer{
 		NetDialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -39,7 +39,7 @@ func TestLiveWS(t *testing.T) {
 	}
 	wsURL := "ws://nats-consol.local/api/v1/clusters/" + clusterID + "/live/ws?stream=LIVE_SMOKE"
 	headers := http.Header{}
-	headers.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("admin:admin")))
+	headers.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString(commonstrings.StringToBytes("admin:admin")))
 	conn, _, err := dialer.Dial(wsURL, headers)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
@@ -62,7 +62,7 @@ func TestLiveWS(t *testing.T) {
 	assert.Equal(t, "live.test", msg["subject"])
 	decoded, err := base64.StdEncoding.DecodeString(msg["data"].(string))
 	require.NoError(t, err)
-	assert.Equal(t, "hello-live", string(decoded))
+	assert.Equal(t, "hello-live", commonstrings.BytesToString(decoded))
 
 	require.NoError(t, conn.WriteMessage(websocket.TextMessage, commonstrings.StringToBytes(`{"action":"pause"}`)))
 	paused := readLiveFrame(t, conn, 2*time.Second)

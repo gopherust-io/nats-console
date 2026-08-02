@@ -25,12 +25,12 @@ func TestObjectBucketAndObjectLifecycle(t *testing.T) {
 	resp, err := srv.Client.Post(base+"/objects/buckets", "application/json", strings.NewReader(createBody))
 	require.NoError(t, err)
 	respBody := resp.Body
-	require.Equal(t, http.StatusCreated, resp.StatusCode, "create object bucket: %s", string(respBody))
+	require.Equal(t, http.StatusCreated, resp.StatusCode, "create object bucket: %s", commonstrings.BytesToString(respBody))
 
 	resp, err = srv.Client.Get(base + "/objects/buckets")
 	require.NoError(t, err)
 	respBody = resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "list object buckets: %s", string(respBody))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "list object buckets: %s", commonstrings.BytesToString(respBody))
 	var list struct {
 		Meta struct {
 			Total int `json:"total"`
@@ -42,7 +42,7 @@ func TestObjectBucketAndObjectLifecycle(t *testing.T) {
 	resp, err = srv.Client.Get(base + "/objects/buckets/ARTIFACTS")
 	require.NoError(t, err)
 	respBody = resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "get object bucket: %s", string(respBody))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "get object bucket: %s", commonstrings.BytesToString(respBody))
 	var bucket struct {
 		Data struct {
 			Bucket string `json:"bucket"`
@@ -55,7 +55,7 @@ func TestObjectBucketAndObjectLifecycle(t *testing.T) {
 	putBody := fmt.Sprintf(`{"data":%q}`, dataB64)
 	resp, err = srv.Client.Do(&testutil.Request{
 		Method: http.MethodPut,
-		URL:    base+"/objects/buckets/ARTIFACTS/objects/readme.txt",
+		URL:    base + "/objects/buckets/ARTIFACTS/objects/readme.txt",
 		Body:   strings.NewReader(putBody),
 		Header: http.Header{
 			"Content-Type": {"application/json"},
@@ -63,12 +63,12 @@ func TestObjectBucketAndObjectLifecycle(t *testing.T) {
 	})
 	require.NoError(t, err)
 	respBody = resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "put object: %s", string(respBody))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "put object: %s", commonstrings.BytesToString(respBody))
 
 	resp, err = srv.Client.Get(base + "/objects/buckets/ARTIFACTS/objects/readme.txt")
 	require.NoError(t, err)
 	respBody = resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "get object: %s", string(respBody))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "get object: %s", commonstrings.BytesToString(respBody))
 	var obj struct {
 		Data struct {
 			Name string `json:"name"`
@@ -82,7 +82,7 @@ func TestObjectBucketAndObjectLifecycle(t *testing.T) {
 	resp, err = srv.Client.Get(base + "/objects/buckets/ARTIFACTS/objects")
 	require.NoError(t, err)
 	respBody = resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "list objects: %s", string(respBody))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "list objects: %s", commonstrings.BytesToString(respBody))
 	var objects struct {
 		Data []string `json:"data"`
 		Meta struct {
@@ -95,14 +95,14 @@ func TestObjectBucketAndObjectLifecycle(t *testing.T) {
 
 	resp, err = srv.Client.Do(&testutil.Request{
 		Method: http.MethodDelete,
-		URL:    base+"/objects/buckets/ARTIFACTS/objects/readme.txt",
+		URL:    base + "/objects/buckets/ARTIFACTS/objects/readme.txt",
 	})
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNoContent, resp.StatusCode, "delete object")
 
 	resp, err = srv.Client.Do(&testutil.Request{
 		Method: http.MethodDelete,
-		URL:    base+"/objects/buckets/ARTIFACTS",
+		URL:    base + "/objects/buckets/ARTIFACTS",
 	})
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNoContent, resp.StatusCode, "delete object bucket")

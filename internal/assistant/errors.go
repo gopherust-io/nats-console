@@ -91,7 +91,8 @@ func WrapError(err error) *Error {
 		return newAssistantError(CodeValidation, "Enter a message before sending.", false, 0)
 	case strings.Contains(lower, "message too long"):
 		return newAssistantError(CodeValidation, msg, false, 0)
-	case strings.Contains(lower, "cannot access or reveal secrets"):
+	case strings.Contains(lower, "cannot access or reveal secrets"),
+		strings.Contains(lower, "content safety"):
 		return newAssistantError(CodeBlocked, "This assistant cannot access or reveal secrets, passwords, credentials, or internal database data.", false, 0)
 	case isTimeoutError(err):
 		return newAssistantError(CodeTimeout, "Gemini request timed out. Try again or increase AI_REQUEST_TIMEOUT.", true, 0)

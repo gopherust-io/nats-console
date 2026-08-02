@@ -16,7 +16,7 @@ SCOPE (strict):
 - Use ONLY stream, consumer, and subject names from the provided inventory seed JSON.
 - You MAY invent failure modes, timing (e.g. Black Friday), and narrative beats.
 - Do NOT invent inventory names that are not in the seed.
-- Do NOT include secrets, tokens, passwords, connection strings, or message payloads.
+- Keep descriptions professional — no graphic, sexual, or abusive language.
 
 OUTPUT (mandatory):
 - Return ONLY a single JSON object (no markdown fences, no commentary) with this shape:
@@ -38,7 +38,9 @@ OUTPUT (mandatory):
   "recoveryHints": [string]
 }
 - Include 4–6 acts that escalate then recover.
-- Prefer concrete operator-focused descriptions.`
+- Prefer concrete operator-focused descriptions.
+
+` + SecurityAndConductRules
 
 // GenerateChaosStory invents a typed disaster narrative from inventory seed names.
 func (s *Service) GenerateChaosStory(ctx context.Context, seed domain.ChaosStorySeed, hint string) (domain.ChaosStory, error) {
@@ -57,7 +59,7 @@ func (s *Service) GenerateChaosStory(ctx context.Context, seed domain.ChaosStory
 		return domain.ChaosStory{}, newAssistantError(CodeContext, "Could not encode chaos story seed.", true, 0)
 	}
 
-	user := "Inventory seed JSON (use only these names):\n" + string(seedJSON) +
+	user := "Inventory seed JSON (use only these names):\n" + commonstrings.BytesToString(seedJSON) +
 		"\n\nOperator hint:\n" + SanitizeMessage(hint) +
 		"\n\nReturn only the chaos story JSON object."
 
@@ -85,7 +87,7 @@ func ParseChaosStoryJSON(raw string) (domain.ChaosStory, error) {
 		return domain.ChaosStory{}, newAssistantError(CodeBlocked, "model did not return valid chaos story JSON", true, 0)
 	}
 	var story domain.ChaosStory
-	if err := json.Unmarshal([]byte(candidate), &story); err != nil {
+	if err := json.Unmarshal(commonstrings.StringToBytes(candidate), &story); err != nil {
 		return domain.ChaosStory{}, newAssistantError(CodeBlocked, "model did not return valid chaos story JSON", true, 0)
 	}
 	if commonstrings.IsEmpty(story.Title) || len(story.Acts) == 0 {
@@ -108,7 +110,7 @@ func extractJSONObject(raw string) string {
 	}
 	candidate := raw[start : end+1]
 	var v any
-	if err := json.Unmarshal([]byte(candidate), &v); err != nil {
+	if err := json.Unmarshal(commonstrings.StringToBytes(candidate), &v); err != nil {
 		return ""
 	}
 	if _, ok := v.(map[string]any); !ok {

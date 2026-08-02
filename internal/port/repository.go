@@ -89,7 +89,7 @@ type NATSAccountRepository interface {
 	GetNATSAccountUser(ctx context.Context, clusterID, accountName, userID string) (domain.NATSAccountUser, error)
 	CreateNATSAccountUserWithSeed(ctx context.Context, in domain.NATSAccountUserCreate, accountSeed string) (domain.NATSAccountUserCreds, error)
 	UpdateNATSAccountUser(ctx context.Context, clusterID, accountName, userID string, in domain.NATSAccountUserUpdate, accountSeed string) (domain.NATSAccountUser, error)
-	DeleteNATSAccountUser(ctx context.Context, clusterID, accountName, userID string) error
+	DeleteNATSAccountUser(ctx context.Context, clusterID, accountName, userID string) ([]string, error)
 	GetNATSAccountUserCreds(ctx context.Context, clusterID, accountName, userID string) (domain.NATSAccountUserCreds, error)
 	RotateNATSAccountUser(ctx context.Context, clusterID, accountName, userID, accountSeed string) (domain.NATSAccountUserCreds, error)
 	MintNATSAccountUserJWT(ctx context.Context, clusterID, accountName, userID, accountSeed string) (domain.NATSAccountUserCreds, error)

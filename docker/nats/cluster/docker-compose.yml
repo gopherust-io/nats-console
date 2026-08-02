@@ -1,18 +1,22 @@
 # 5-node NATS JetStream cluster — HA / Replicas: 5 testing (Consol Replicas page).
 #
-#   docker compose -f docker/nats/cluster/docker-compose.yml up -d
-#   # or: make nats-cluster-up
-#   Client: nats://127.0.0.1:4222,nats://127.0.0.1:4223,nats://127.0.0.1:4224,nats://127.0.0.1:4225,nats://127.0.0.1:4226
+# Included by the root nats-consol compose project (profile: cluster):
+#   make nats-cluster-up
+#   # or: docker compose stop nats && docker compose --profile cluster up -d nats-1 nats-2 nats-3 nats-4 nats-5
+#
+# Client: nats://127.0.0.1:4222,…,nats://127.0.0.1:4226
 #
 # Start all nodes together (no healthy-gate): JetStream /healthz waits for
 # cluster routes, so peers must not wait on nats-1 becoming healthy first.
 # Do not run alongside the root compose "nats" service (port clash on 4222/8222).
 
 x-nats-node: &nats-node
+  profiles: ["cluster"]
   image: nats:2.14
   command: ["-c", "/etc/nats/nats.conf"]
   networks:
     - nats-cluster
+    - default
   healthcheck:
     test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz?js-server-only=true"]
     interval: 5s

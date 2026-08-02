@@ -145,7 +145,7 @@ func TestUnauthorizedErrorEnvelopeContract(t *testing.T) {
 	resp, err := srv.UnauthClient.Get("http://nats-consol.local/api/v1/clusters")
 	require.NoError(t, err)
 	body := resp.Body
-	require.Equal(t, http.StatusUnauthorized, resp.StatusCode, string(body))
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode, strings.BytesToString(body))
 
 	testutil.AssertCamelCaseKeys(t, body)
 	var envelope struct {
@@ -166,7 +166,7 @@ func TestNotFoundErrorEnvelopeContract(t *testing.T) {
 	resp, err := srv.Client.Get("http://nats-consol.local/api/v1/clusters/01900000-0000-7000-8000-000000000001")
 	require.NoError(t, err)
 	body := resp.Body
-	require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
+	require.Equal(t, http.StatusNotFound, resp.StatusCode, strings.BytesToString(body))
 
 	testutil.AssertCamelCaseKeys(t, body)
 	var envelope struct {

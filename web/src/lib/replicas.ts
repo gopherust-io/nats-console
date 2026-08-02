@@ -28,15 +28,21 @@ export type ReplicasSnapshot = {
   peers: ReplicaPeer[];
 };
 
-/** Prefer the snapshot with the later capturedAt; equal/missing keeps incoming. */
+/**
+ * Prefer newer capturedAt when both sides are stamped.
+ * SSE payloads omit capturedAt — accept them over prior data, but do not let a
+ * stamped REST scrape clobber a live untimestamped SSE snapshot.
+ */
 export function isReplicasSnapshotNewer(
   incoming: ReplicasSnapshot,
   previous: ReplicasSnapshot | undefined,
 ): boolean {
-  if (!previous?.capturedAt) return true;
-  if (!incoming.capturedAt) return true;
-  const next = Date.parse(incoming.capturedAt);
-  const prev = Date.parse(previous.capturedAt);
+  if (!previous) return true;
+  if (!incoming.capturedAt && previous.capturedAt) return true;
+  if (incoming.capturedAt && !previous.capturedAt) return false;
+  if (!incoming.capturedAt && !previous.capturedAt) return true;
+  const next = Date.parse(incoming.capturedAt!);
+  const prev = Date.parse(previous.capturedAt!);
   if (Number.isNaN(next) || Number.isNaN(prev)) return true;
   return next >= prev;
 }

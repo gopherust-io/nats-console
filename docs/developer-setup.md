@@ -103,7 +103,7 @@ Vite proxies:
 - `/api/*` → `:8081`  
 - `/debug/*` → `:8081` (pprof, when enabled)
 
-For Docker Compose + hot reload, use `make dev-web-docker` from the repo root. It moves the console API to host `:8081` and serves Vite on `:8080`.
+For Docker Compose + hot reload, use `make dev-web-docker` from the repo root. It enables Compose profile `web` (Vite `web-dev` in the same `nats-consol` project), moves the console API to host `:8081`, and serves Vite on `:8080`.
 
 ---
 
@@ -114,7 +114,7 @@ cp .env.example .env   # required — fill secrets
 docker compose up --build
 ```
 
-Includes Postgres + NATS + console. UI at **http://localhost:8080**. Login with the `ADMIN_USERNAME` / `ADMIN_PASSWORD` from your `.env`.
+Includes Postgres + NATS + console under one Compose project (`nats-consol`). Optional profiles: `web` (Vite), `fleet` (demo workers), `cluster` (5-node JetStream), `mail` (Mailpit). UI at **http://localhost:8080**. Login with the `ADMIN_USERNAME` / `ADMIN_PASSWORD` from your `.env`.
 
 > Stock compose is a **local lab**: Postgres/NATS may be plaintext inside the compose network. Production must use `ENV=production`, Postgres `sslmode=require|verify-full`, `tls://` NATS, HTTPS monitoring, and TLS termination on an external reverse proxy or Ingress (see [devops-setup.md](devops-setup.md)).
 
@@ -230,8 +230,11 @@ CI runs on every pull request to `main` (`.github/workflows/test.yml`): Go lint/
 |--------|-------------|
 | `make dev` | `go run ./cmd/server` |
 | `make dev-web` | Vite dev server |
-| `make docker-up` | `docker compose up --build -d` |
+| `make docker-up` | `docker compose up --build -d` (core lab) |
+| `make dev-web-docker` | Profile `web`: Vite on `:8080`, console on `:8081` |
 | `make seed-demo` | Sample streams for topology demo |
+| `make fleet-up` / `fleet-down` | Profile `fleet`: 32 workers; image build needs sibling `../nats` |
+| `make nats-cluster-up` / `nats-cluster-down` | Profile `cluster`: 5-node lab (stops single `nats` first) |
 | `make tidy` | `go mod tidy` |
 
 ---

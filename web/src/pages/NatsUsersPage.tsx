@@ -7,6 +7,7 @@ import QueryErrorState from "../components/ui/QueryErrorState";
 import CreateNatsUserPanel, { NatsUserConfigPayload } from "../components/CreateNatsUserPanel";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { api, clusterPath } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
 import { clusterQueryKey } from "../lib/query";
 
@@ -142,8 +143,13 @@ export default function NatsUsersPage() {
   const { accountName, clusterId: routeCluster } = useParams();
   const { clusterId: contextClusterId } = useCluster();
   const clusterId = routeCluster ?? contextClusterId;
+  const { canManageAccountAccess, canDownloadCreds, canWriteCluster } = useAuth();
   const qc = useQueryClient();
   const account = accountName ?? "Default";
+  const canManageAccount = Boolean(clusterId && canManageAccountAccess(clusterId, account));
+  const canMutateUsers = canManageAccount || Boolean(clusterId && canWriteCluster(clusterId));
+  const canCreds = (natsUserId: string) =>
+    Boolean(clusterId && canDownloadCreds(clusterId, account, natsUserId));
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [editUser, setEditUser] = useState<NATSUser | null>(null);
@@ -164,6 +170,28 @@ export default function NatsUsersPage() {
   );
   const [subjectDraft, setSubjectDraft] = useState(() => searchParams.get("subject") ?? "");
   const [lookupSubject, setLookupSubject] = useState(() => searchParams.get("subject")?.trim() ?? "");
+
+  useEffect(() => {
+    setCreds(null);
+    setDetailId(null);
+    setShowCreate(false);
+    setEditUser(null);
+    setPanelError("");
+    setShowGroup(false);
+    setEditGroup(null);
+    setError("");
+    setAssignUserId("");
+  }, [clusterId, account]);
+
+  useEffect(() => {
+    return () => {
+      setCreds(null);
+    };
+  }, []);
+
+  useEffect(() => {
+    setCreds(null);
+  }, [detailId]);
 
   useEffect(() => {
     const subject = searchParams.get("subject")?.trim() ?? "";
@@ -483,53 +511,63 @@ export default function NatsUsersPage() {
             {t("natsUsers.assignedPerson", { id: u.assignedUserId || t("common.emDash") })}
           </p>
         </div>
-        <div className="nc-settings-section">
-          <h4>{t("natsUsers.assignTitle")}</h4>
-          <div className="nc-form-row">
-            <label htmlFor="assign-console-user">{t("natsUsers.consoleUserId")}</label>
-            <div className="nc-form-actions">
-              <input
-                id="assign-console-user"
-                value={assignUserId}
-                onChange={(e) => setAssignUserId(e.target.value)}
-                placeholder="UUID"
-              />
-              <button
-                type="button"
-                className="btn"
-                disabled={!assignUserId || assignMutation.isPending}
-                onClick={() => assignMutation.mutate()}
-              >
-                {t("natsUsers.assignPerson")}
-              </button>
+        {canManageAccount && (
+          <div className="nc-settings-section">
+            <h4>{t("natsUsers.assignTitle")}</h4>
+            <div className="nc-form-row">
+              <label htmlFor="assign-console-user">{t("natsUsers.consoleUserId")}</label>
+              <div className="nc-form-actions">
+                <input
+                  id="assign-console-user"
+                  value={assignUserId}
+                  onChange={(e) => setAssignUserId(e.target.value)}
+                  placeholder="UUID"
+                />
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={!assignUserId || assignMutation.isPending}
+                  onClick={() => assignMutation.mutate()}
+                >
+                  {t("natsUsers.assignPerson")}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        )}
         <div className="nc-settings-section">
           <h4>{t("common.actions")}</h4>
           <div className="actions">
-            <button
-              type="button"
-              className="btn secondary"
-              onClick={() => {
-                setPanelError("");
-                setEditUser(u);
-              }}
-            >
-              {t("natsUsers.editConfig")}
-            </button>
-            <button type="button" className="btn secondary" onClick={() => downloadMutation.mutate(u.id)}>
-              {t("natsUsers.downloadCreds")}
-            </button>
-            <button type="button" className="btn secondary" onClick={() => rotateMutation.mutate(u.id)}>
-              {t("natsUsers.rotateNKey")}
-            </button>
-            <button type="button" className="btn secondary" onClick={() => mintMutation.mutate(u.id)}>
-              {t("natsUsers.mintJwt")}
-            </button>
-            <button type="button" className="btn danger" onClick={() => confirmDeleteUser(u.id, u.name)}>
-              {t("common.delete")}
-            </button>
+            {canMutateUsers && (
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => {
+                  setPanelError("");
+                  setEditUser(u);
+                }}
+              >
+                {t("natsUsers.editConfig")}
+              </button>
+            )}
+            {canCreds(u.id) && (
+              <>
+                <button type="button" className="btn secondary" onClick={() => downloadMutation.mutate(u.id)}>
+                  {t("natsUsers.downloadCreds")}
+                </button>
+                <button type="button" className="btn secondary" onClick={() => rotateMutation.mutate(u.id)}>
+                  {t("natsUsers.rotateNKey")}
+                </button>
+                <button type="button" className="btn secondary" onClick={() => mintMutation.mutate(u.id)}>
+                  {t("natsUsers.mintJwt")}
+                </button>
+              </>
+            )}
+            {canMutateUsers && (
+              <button type="button" className="btn danger" onClick={() => confirmDeleteUser(u.id, u.name)}>
+                {t("common.delete")}
+              </button>
+            )}
           </div>
         </div>
         {creds && (
@@ -587,12 +625,14 @@ export default function NatsUsersPage() {
       {error && <Alert variant="error">{error}</Alert>}
 
       <h3 className="nc-section-title">{t("natsUsers.groupsTitle")}</h3>
-      <div className="nc-toolbar">
-        <button type="button" className="btn secondary" onClick={openCreateGroup}>
-          {t("natsUsers.createGroup")}
-        </button>
-      </div>
-      {showGroup && (
+      {canMutateUsers && (
+        <div className="nc-toolbar">
+          <button type="button" className="btn secondary" onClick={openCreateGroup}>
+            {t("natsUsers.createGroup")}
+          </button>
+        </div>
+      )}
+      {showGroup && canMutateUsers && (
         <form className="nc-settings-section" onSubmit={onCreateGroup}>
           <h4>{editGroup ? t("natsUsers.editGroup") : t("natsUsers.createGroup")}</h4>
           <div className="nc-form-row">
@@ -659,30 +699,32 @@ export default function NatsUsersPage() {
                   <td>{g.name}</td>
                   <td>{g.scoped ? t("common.yes") : t("common.no")}</td>
                   <td>
-                    <div className="actions">
-                      <button type="button" className="btn secondary btn--small" onClick={() => openEditGroup(g)}>
-                        {t("common.edit")}
-                      </button>
-                      {g.name !== "Default" && (
-                        <button
-                          type="button"
-                          className="btn danger btn--small"
-                          disabled={deleteGroupMutation.isPending}
-                          onClick={() =>
-                            askConfirm({
-                              title: t("natsUsers.confirmDeleteGroupTitle"),
-                              description: t("natsUsers.confirmDeleteGroup", { name: g.name }),
-                              action: () => {
-                                setError("");
-                                deleteGroupMutation.mutate(g.id);
-                              },
-                            })
-                          }
-                        >
-                          {t("common.delete")}
+                    {canMutateUsers && (
+                      <div className="actions">
+                        <button type="button" className="btn secondary btn--small" onClick={() => openEditGroup(g)}>
+                          {t("common.edit")}
                         </button>
-                      )}
-                    </div>
+                        {g.name !== "Default" && (
+                          <button
+                            type="button"
+                            className="btn danger btn--small"
+                            disabled={deleteGroupMutation.isPending}
+                            onClick={() =>
+                              askConfirm({
+                                title: t("natsUsers.confirmDeleteGroupTitle"),
+                                description: t("natsUsers.confirmDeleteGroup", { name: g.name }),
+                                action: () => {
+                                  setError("");
+                                  deleteGroupMutation.mutate(g.id);
+                                },
+                              })
+                            }
+                          >
+                            {t("common.delete")}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -717,16 +759,18 @@ export default function NatsUsersPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                setPanelError("");
-                setShowCreate(true);
-              }}
-            >
-              {t("natsUsers.createUser")}
-            </button>
+            {canMutateUsers && (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setPanelError("");
+                  setShowCreate(true);
+                }}
+              >
+                {t("natsUsers.createUser")}
+              </button>
+            )}
           </>
         ) : null}
       </div>
@@ -875,12 +919,16 @@ export default function NatsUsersPage() {
                     <td>{u.jwtIssued ? t("common.yes") : "--"}</td>
                     <td>
                       <div className="actions">
-                        <button type="button" className="btn secondary btn--small" onClick={() => downloadMutation.mutate(u.id)}>
-                          {t("natsUsers.creds")}
-                        </button>
-                        <button type="button" className="btn danger btn--small" onClick={() => confirmDeleteUser(u.id, u.name)}>
-                          {t("common.delete")}
-                        </button>
+                        {canCreds(u.id) && (
+                          <button type="button" className="btn secondary btn--small" onClick={() => downloadMutation.mutate(u.id)}>
+                            {t("natsUsers.creds")}
+                          </button>
+                        )}
+                        {canMutateUsers && (
+                          <button type="button" className="btn danger btn--small" onClick={() => confirmDeleteUser(u.id, u.name)}>
+                            {t("common.delete")}
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

@@ -17,6 +17,7 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/store"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 const testFingerprint = "fp-test-abcdef0123456789"
@@ -25,16 +26,16 @@ func testSessionConfig(t *testing.T, mutate func(*config.Config)) config.Config 
 	t.Helper()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
-	privPEM := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}))
+	privPEM := commonstrings.BytesToString(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}))
 	pubBytes, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
 	require.NoError(t, err)
-	pubPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes}))
+	pubPEM := commonstrings.BytesToString(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes}))
 	cfg := config.Config{
 		Auth: config.AuthConfig{
 			SessionPrivateKey: privPEM,
-			SessionPublicKey: pubPEM,
-			SessionTTL: time.Hour,
-			RefreshTokenTTL: 24 * time.Hour,
+			SessionPublicKey:  pubPEM,
+			SessionTTL:        time.Hour,
+			RefreshTokenTTL:   24 * time.Hour,
 		},
 	}
 	if mutate != nil {
@@ -93,7 +94,7 @@ func TestParseSessionRejectsHS256(t *testing.T) {
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		},
 	})
-	signed, err := hsToken.SignedString([]byte("not-an-rsa-key-but-hmac-secret!!"))
+	signed, err := hsToken.SignedString(commonstrings.StringToBytes("not-an-rsa-key-but-hmac-secret!!"))
 	require.NoError(t, err)
 
 	_, err = svc.ParseSession(context.Background(), signed, testFingerprint)

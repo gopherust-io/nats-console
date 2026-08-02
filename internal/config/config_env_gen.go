@@ -8,7 +8,7 @@ import (
 
 func LoadConfig() (Config, error) {
 	var cfg Config
-	if err := ReloadConfig(&cfg); err != nil {
+	if err := loadConfig(&cfg, env.Snapshot()); err != nil {
 		return cfg, err
 	}
 	return cfg, nil
@@ -16,7 +16,12 @@ func LoadConfig() (Config, error) {
 
 func ReloadConfig(cfg *Config) error {
 	env.Reload()
-	return loadConfig(cfg, env.Snapshot())
+	var next Config
+	if err := loadConfig(&next, env.Snapshot()); err != nil {
+		return err
+	}
+	*cfg = next
+	return nil
 }
 
 func MustReloadConfig(cfg *Config) {
@@ -52,13 +57,105 @@ func (c Config) Masked() Config {
 	return out
 }
 
+var configAuditSchema = []env.SchemaField{
+	{Key: "HTTP_ADDR", FieldPath: "HTTP.Addr", Default: ":8080", HasDefault: true},
+	{Key: "HTTP_WRITE_TIMEOUT", FieldPath: "HTTP.WriteTimeout", Default: "30s", HasDefault: true},
+	{Key: "HTTP_READ_TIMEOUT", FieldPath: "HTTP.ReadTimeout", Default: "10s", HasDefault: true},
+	{Key: "HTTP_IDLE_TIMEOUT", FieldPath: "HTTP.IdleTimeout", Default: "60s", HasDefault: true},
+	{Key: "MAX_REQUEST_BODY_SIZE", FieldPath: "HTTP.MaxRequestBodySize", Default: "1048576", HasDefault: true},
+	{Key: "HTTP_RESPONSE_COMPRESSION", FieldPath: "HTTP.ResponseCompression", Default: "true", HasDefault: true},
+	{Key: "DATABASE_URL", FieldPath: "DB.URL", Required: true},
+	{Key: "DB_MAX_CONN_LIFETIME", FieldPath: "DB.MaxConnLifetime", Default: "1h", HasDefault: true},
+	{Key: "DB_HEALTH_CHECK_PERIOD", FieldPath: "DB.HealthCheckPeriod", Default: "1m", HasDefault: true},
+	{Key: "DB_MAX_CONN_IDLE_TIME", FieldPath: "DB.MaxConnIdleTime", Default: "30m", HasDefault: true},
+	{Key: "DB_MAX_CONNS", FieldPath: "DB.MaxConns", Default: "25", HasDefault: true},
+	{Key: "DB_MIN_CONNS", FieldPath: "DB.MinConns", Default: "2", HasDefault: true},
+	{Key: "NATS_URL", FieldPath: "NATS.URL", Prefix: "NATS_"},
+	{Key: "NATS_CREDS_FILE", FieldPath: "NATS.CredsFile", Prefix: "NATS_"},
+	{Key: "NATS_TOKEN", FieldPath: "NATS.Token", Prefix: "NATS_"},
+	{Key: "NATS_ACCOUNT_SEED", FieldPath: "NATS.AccountSeed", Prefix: "NATS_", Sensitive: true},
+	{Key: "NATS_MONITORING_URL", FieldPath: "NATS.MonitoringURL", Prefix: "NATS_"},
+	{Key: "NATS_TLS_CA_FILE", FieldPath: "NATS.TlsCAFile", Prefix: "NATS_"},
+	{Key: "NATS_TLS_CERT_FILE", FieldPath: "NATS.TlsCertFile", Prefix: "NATS_"},
+	{Key: "NATS_TLS_KEY_FILE", FieldPath: "NATS.TlsKeyFile", Prefix: "NATS_"},
+	{Key: "NATS_TLS_SERVER_NAME", FieldPath: "NATS.TlsServerName", Prefix: "NATS_"},
+	{Key: "NATS_CLIENT_CACHE_TTL", FieldPath: "NATS.ClientCacheTTL", Default: "5m", Prefix: "NATS_", HasDefault: true},
+	{Key: "NATS_TLS_INSECURE_SKIP_VERIFY", FieldPath: "NATS.TlsInsecureSkipVerify", Default: "false", Prefix: "NATS_", HasDefault: true},
+	{Key: "AI_GEMINI_API_BASE", FieldPath: "AI.GeminiAPIBase", Default: "https://generativelanguage.googleapis.com/v1beta", Prefix: "AI_", HasDefault: true},
+	{Key: "AI_MODEL", FieldPath: "AI.Model", Default: "gemini-2.5-flash", Prefix: "AI_", HasDefault: true},
+	{Key: "AI_API_KEY", FieldPath: "AI.APIKey", Prefix: "AI_", Sensitive: true},
+	{Key: "AI_CONTEXT_CACHE_TTL", FieldPath: "AI.ContextCacheTTL", Default: "45s", Prefix: "AI_", HasDefault: true},
+	{Key: "AI_REQUEST_TIMEOUT", FieldPath: "AI.RequestTimeout", Default: "60s", Prefix: "AI_", HasDefault: true},
+	{Key: "AI_MAX_TOKENS", FieldPath: "AI.MaxTokens", Default: "4096", Prefix: "AI_", HasDefault: true},
+	{Key: "AI_ENABLED", FieldPath: "AI.Enabled", Default: "false", Prefix: "AI_", HasDefault: true},
+	{Key: "SMTP_FROM", FieldPath: "SMTP.From", Prefix: "SMTP_"},
+	{Key: "SMTP_PASSWORD", FieldPath: "SMTP.Password", Prefix: "SMTP_", Sensitive: true},
+	{Key: "SMTP_USERNAME", FieldPath: "SMTP.Username", Prefix: "SMTP_"},
+	{Key: "SMTP_HOST", FieldPath: "SMTP.Host", Prefix: "SMTP_"},
+	{Key: "SMTP_PORT", FieldPath: "SMTP.Port", Default: "587", Prefix: "SMTP_", HasDefault: true},
+	{Key: "SMTP_ENABLED", FieldPath: "SMTP.Enabled", Default: "false", Prefix: "SMTP_", HasDefault: true},
+	{Key: "SMTP_TLS", FieldPath: "SMTP.TLS", Default: "true", Prefix: "SMTP_", HasDefault: true},
+	{Key: "SESSION_PRIVATE_KEY", FieldPath: "Auth.SessionPrivateKey", Required: true, Sensitive: true},
+	{Key: "SESSION_PUBLIC_KEY", FieldPath: "Auth.SessionPublicKey", Required: true},
+	{Key: "SESSION_TTL", FieldPath: "Auth.SessionTTL", Default: "15m", HasDefault: true},
+	{Key: "REFRESH_TOKEN_TTL", FieldPath: "Auth.RefreshTokenTTL", Default: "168h", HasDefault: true},
+	{Key: "AUTH_RATE_LIMIT_WINDOW", FieldPath: "Auth.RateLimitWindow", Default: "1m", HasDefault: true},
+	{Key: "AUTH_RATE_LIMIT", FieldPath: "Auth.RateLimit", Default: "10", HasDefault: true},
+	{Key: "LIVE_WS_IDLE_TIMEOUT", FieldPath: "LiveWS.IdleTimeout", Default: "5m", Prefix: "LIVE_WS_", HasDefault: true},
+	{Key: "LIVE_WS_RATE_LIMIT", FieldPath: "LiveWS.RateLimit", Default: "100ms", Prefix: "LIVE_WS_", HasDefault: true},
+	{Key: "LIVE_WS_MAX_MESSAGES", FieldPath: "LiveWS.MaxMessages", Default: "1000", Prefix: "LIVE_WS_", HasDefault: true},
+	{Key: "LIVE_WS_PAYLOAD_TRUNCATE_BYTES", FieldPath: "LiveWS.PayloadTruncateBytes", Default: "4096", Prefix: "LIVE_WS_", HasDefault: true},
+	{Key: "METRICS_SNAPSHOT_INTERVAL", FieldPath: "MetricsSnapshot.Interval", Default: "60s", Prefix: "METRICS_SNAPSHOT_", HasDefault: true},
+	{Key: "METRICS_SNAPSHOT_RETENTION", FieldPath: "MetricsSnapshot.Retention", Default: "168h", Prefix: "METRICS_SNAPSHOT_", HasDefault: true},
+	{Key: "METRICS_SNAPSHOT_BOTTLENECK_RETENTION", FieldPath: "MetricsSnapshot.BottleneckRetention", Default: "672h", Prefix: "METRICS_SNAPSHOT_", HasDefault: true},
+	{Key: "METRICS_SNAPSHOT_CLEANUP_INTERVAL", FieldPath: "MetricsSnapshot.CleanupInterval", Default: "1h", Prefix: "METRICS_SNAPSHOT_", HasDefault: true},
+	{Key: "METRICS_SNAPSHOT_ENABLED", FieldPath: "MetricsSnapshot.Enabled", Default: "true", Prefix: "METRICS_SNAPSHOT_", HasDefault: true},
+	{Key: "PPROF_CPU_MAX_SECONDS", FieldPath: "Pprof.CPUMaxSeconds", Default: "120", Prefix: "PPROF_", HasDefault: true},
+	{Key: "PPROF_AUTH_ENABLED", FieldPath: "Pprof.AuthEnabled", Default: "true", Prefix: "PPROF_", HasDefault: true},
+	{Key: "PPROF_ENABLED", FieldPath: "Pprof.Enabled", Default: "false", Prefix: "PPROF_", HasDefault: true},
+	{Key: "SLOW_CONSUMER_PENDING_THRESHOLD", FieldPath: "SlowConsumer.PendingThreshold", Default: "1000", Prefix: "SLOW_CONSUMER_", HasDefault: true},
+	{Key: "SLOW_CONSUMER_LAG_THRESHOLD", FieldPath: "SlowConsumer.LagThreshold", Default: "1000", Prefix: "SLOW_CONSUMER_", HasDefault: true},
+	{Key: "SLOW_CONSUMER_ACK_PENDING_RATIO", FieldPath: "SlowConsumer.AckPendingRatio", Default: "0.9", Prefix: "SLOW_CONSUMER_", HasDefault: true},
+	{Key: "PAGINATION_MAX_LIMIT", FieldPath: "Pagination.MaxLimit", Default: "500", Prefix: "PAGINATION_", HasDefault: true},
+	{Key: "PAGINATION_DEFAULT_LIMIT", FieldPath: "Pagination.DefaultLimit", Default: "100", Prefix: "PAGINATION_", HasDefault: true},
+	{Key: "OPENAPI_PATH", FieldPath: "OpenAPIPath", Default: "api/openapi.yaml", HasDefault: true},
+	{Key: "ENCRYPTION_KEY", FieldPath: "EncryptionKey", Required: true, Sensitive: true},
+	{Key: "STATIC_DIR", FieldPath: "StaticDir"},
+	{Key: "ADMIN_USERNAME", FieldPath: "AdminUsername", Default: "admin", HasDefault: true},
+	{Key: "ADMIN_PASSWORD", FieldPath: "AdminPassword", Required: true, Sensitive: true},
+	{Key: "PUBLIC_BASE_URL", FieldPath: "PublicBaseURL", Default: "http://localhost:8080", HasDefault: true},
+	{Key: "DEFAULT_CLUSTER_NAME", FieldPath: "DefaultClusterName", Default: "default", HasDefault: true},
+	{Key: "CORS_ALLOWED_ORIGINS", FieldPath: "CORSAllowedOrigins"},
+	{Key: "TRUSTED_PROXIES", FieldPath: "TrustedProxies"},
+	{Key: "BEHAVIOR_FINGERPRINT_KV_BUCKET", FieldPath: "BehaviorFingerprintKVBucket", Default: "nats_consol_fingerprints", HasDefault: true},
+	{Key: "REQUEST_TIMEOUT", FieldPath: "RequestTimeout", Default: "10s", HasDefault: true},
+	{Key: "HEALTH_CHECK_TIMEOUT", FieldPath: "HealthCheckTimeout", Default: "2s", HasDefault: true},
+	{Key: "JETSTREAM_VIEW_CACHE_TTL", FieldPath: "JetStreamViewCacheTTL", Default: "3s", HasDefault: true},
+	{Key: "MAX_MONITORING_BODY_BYTES", FieldPath: "MaxMonitoringBodyBytes", Default: "8388608", HasDefault: true},
+	{Key: "AUDIT_DEFAULT_LIMIT", FieldPath: "AuditDefaultLimit", Default: "50", HasDefault: true},
+	{Key: "METRICS_AUTH_ENABLED", FieldPath: "MetricsAuthEnabled", Default: "false", HasDefault: true},
+}
+
+func AuditConfig(snap *env.EnvSnapshot) env.AuditReport {
+	return env.Audit(snap, configAuditSchema, env.AuditOptions{})
+}
+
+func AuditConfigWithOptions(snap *env.EnvSnapshot, opts env.AuditOptions) env.AuditReport {
+	return env.Audit(snap, configAuditSchema, opts)
+}
+
+func AuditConfigFromEnviron() env.AuditReport {
+	return AuditConfig(env.Snapshot())
+}
+
 func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	var errs []env.FieldError
 	{
 		key := "HTTP_ADDR"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			cfg.HTTP.Addr = ":8080"
+		if !ok || env.IsEmpty(raw) {
+			v := ":8080"
+			cfg.HTTP.Addr = v
 		} else {
 			cfg.HTTP.Addr = raw
 		}
@@ -66,7 +163,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "HTTP_WRITE_TIMEOUT"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("30s")
 			if err != nil {
 				env.AppendParse(&errs, "HTTP.WriteTimeout", key, "30s", err)
@@ -85,7 +182,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "HTTP_READ_TIMEOUT"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("10s")
 			if err != nil {
 				env.AppendParse(&errs, "HTTP.ReadTimeout", key, "10s", err)
@@ -104,7 +201,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "HTTP_IDLE_TIMEOUT"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("60s")
 			if err != nil {
 				env.AppendParse(&errs, "HTTP.IdleTimeout", key, "60s", err)
@@ -123,7 +220,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "MAX_REQUEST_BODY_SIZE"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseInt64("1048576")
 			if err != nil {
 				env.AppendParse(&errs, "HTTP.MaxRequestBodySize", key, "1048576", err)
@@ -140,9 +237,28 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		}
 	}
 	{
+		key := "HTTP_RESPONSE_COMPRESSION"
+		raw, ok := snap.Lookup(key)
+		if !ok || env.IsEmpty(raw) {
+			v, err := env.ParseBool("true")
+			if err != nil {
+				env.AppendParse(&errs, "HTTP.ResponseCompression", key, "true", err)
+			} else {
+				cfg.HTTP.ResponseCompression = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "HTTP.ResponseCompression", key, raw, err)
+			} else {
+				cfg.HTTP.ResponseCompression = v
+			}
+		}
+	}
+	{
 		key := "DATABASE_URL"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			env.AppendRequired(&errs, "DB.URL", key)
 		} else {
 			cfg.DB.URL = raw
@@ -151,7 +267,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "DB_MAX_CONN_LIFETIME"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("1h")
 			if err != nil {
 				env.AppendParse(&errs, "DB.MaxConnLifetime", key, "1h", err)
@@ -170,7 +286,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "DB_HEALTH_CHECK_PERIOD"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("1m")
 			if err != nil {
 				env.AppendParse(&errs, "DB.HealthCheckPeriod", key, "1m", err)
@@ -189,7 +305,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "DB_MAX_CONN_IDLE_TIME"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("30m")
 			if err != nil {
 				env.AppendParse(&errs, "DB.MaxConnIdleTime", key, "30m", err)
@@ -208,7 +324,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "DB_MAX_CONNS"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseInt("25")
 			if err != nil {
 				env.AppendParse(&errs, "DB.MaxConns", key, "25", err)
@@ -227,7 +343,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "DB_MIN_CONNS"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseInt("2")
 			if err != nil {
 				env.AppendParse(&errs, "DB.MinConns", key, "2", err)
@@ -246,7 +362,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "NATS_URL"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.NATS.URL = raw
 		}
@@ -254,7 +370,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "NATS_CREDS_FILE"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.NATS.CredsFile = raw
 		}
@@ -262,7 +378,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "NATS_TOKEN"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.NATS.Token = raw
 		}
@@ -270,7 +386,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "NATS_ACCOUNT_SEED"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.NATS.AccountSeed = raw
 		}
@@ -278,7 +394,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "NATS_MONITORING_URL"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.NATS.MonitoringURL = raw
 		}
@@ -286,7 +402,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "NATS_TLS_CA_FILE"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.NATS.TlsCAFile = raw
 		}
@@ -294,7 +410,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "NATS_TLS_CERT_FILE"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.NATS.TlsCertFile = raw
 		}
@@ -302,7 +418,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "NATS_TLS_KEY_FILE"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.NATS.TlsKeyFile = raw
 		}
@@ -310,7 +426,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "NATS_TLS_SERVER_NAME"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.NATS.TlsServerName = raw
 		}
@@ -318,7 +434,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "NATS_CLIENT_CACHE_TTL"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("5m")
 			if err != nil {
 				env.AppendParse(&errs, "NATS.ClientCacheTTL", key, "5m", err)
@@ -337,7 +453,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "NATS_TLS_INSECURE_SKIP_VERIFY"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseBool("false")
 			if err != nil {
 				env.AppendParse(&errs, "NATS.TlsInsecureSkipVerify", key, "false", err)
@@ -356,8 +472,9 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "AI_GEMINI_API_BASE"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			cfg.AI.GeminiAPIBase = "https://generativelanguage.googleapis.com/v1beta"
+		if !ok || env.IsEmpty(raw) {
+			v := "https://generativelanguage.googleapis.com/v1beta"
+			cfg.AI.GeminiAPIBase = v
 		} else {
 			cfg.AI.GeminiAPIBase = raw
 		}
@@ -365,8 +482,9 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "AI_MODEL"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			cfg.AI.Model = "gemini-2.5-flash"
+		if !ok || env.IsEmpty(raw) {
+			v := "gemini-2.5-flash"
+			cfg.AI.Model = v
 		} else {
 			cfg.AI.Model = raw
 		}
@@ -374,7 +492,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "AI_API_KEY"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.AI.APIKey = raw
 		}
@@ -382,7 +500,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "AI_CONTEXT_CACHE_TTL"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("45s")
 			if err != nil {
 				env.AppendParse(&errs, "AI.ContextCacheTTL", key, "45s", err)
@@ -401,7 +519,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "AI_REQUEST_TIMEOUT"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("60s")
 			if err != nil {
 				env.AppendParse(&errs, "AI.RequestTimeout", key, "60s", err)
@@ -420,7 +538,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "AI_MAX_TOKENS"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseInt("4096")
 			if err != nil {
 				env.AppendParse(&errs, "AI.MaxTokens", key, "4096", err)
@@ -439,7 +557,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "AI_ENABLED"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseBool("false")
 			if err != nil {
 				env.AppendParse(&errs, "AI.Enabled", key, "false", err)
@@ -458,7 +576,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "SMTP_FROM"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.SMTP.From = raw
 		}
@@ -466,7 +584,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "SMTP_PASSWORD"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.SMTP.Password = raw
 		}
@@ -474,7 +592,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "SMTP_USERNAME"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.SMTP.Username = raw
 		}
@@ -482,7 +600,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "SMTP_HOST"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.SMTP.Host = raw
 		}
@@ -490,7 +608,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "SMTP_PORT"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseInt("587")
 			if err != nil {
 				env.AppendParse(&errs, "SMTP.Port", key, "587", err)
@@ -509,7 +627,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "SMTP_ENABLED"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseBool("false")
 			if err != nil {
 				env.AppendParse(&errs, "SMTP.Enabled", key, "false", err)
@@ -528,7 +646,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "SMTP_TLS"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseBool("true")
 			if err != nil {
 				env.AppendParse(&errs, "SMTP.TLS", key, "true", err)
@@ -547,7 +665,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "SESSION_PRIVATE_KEY"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			env.AppendRequired(&errs, "Auth.SessionPrivateKey", key)
 		} else {
 			cfg.Auth.SessionPrivateKey = raw
@@ -556,7 +674,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "SESSION_PUBLIC_KEY"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			env.AppendRequired(&errs, "Auth.SessionPublicKey", key)
 		} else {
 			cfg.Auth.SessionPublicKey = raw
@@ -565,7 +683,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "SESSION_TTL"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("15m")
 			if err != nil {
 				env.AppendParse(&errs, "Auth.SessionTTL", key, "15m", err)
@@ -584,7 +702,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "REFRESH_TOKEN_TTL"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("168h")
 			if err != nil {
 				env.AppendParse(&errs, "Auth.RefreshTokenTTL", key, "168h", err)
@@ -603,7 +721,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "AUTH_RATE_LIMIT_WINDOW"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("1m")
 			if err != nil {
 				env.AppendParse(&errs, "Auth.RateLimitWindow", key, "1m", err)
@@ -622,7 +740,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "AUTH_RATE_LIMIT"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseInt("10")
 			if err != nil {
 				env.AppendParse(&errs, "Auth.RateLimit", key, "10", err)
@@ -641,7 +759,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "LIVE_WS_IDLE_TIMEOUT"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("5m")
 			if err != nil {
 				env.AppendParse(&errs, "LiveWS.IdleTimeout", key, "5m", err)
@@ -660,7 +778,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "LIVE_WS_RATE_LIMIT"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("100ms")
 			if err != nil {
 				env.AppendParse(&errs, "LiveWS.RateLimit", key, "100ms", err)
@@ -679,7 +797,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "LIVE_WS_MAX_MESSAGES"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseInt("1000")
 			if err != nil {
 				env.AppendParse(&errs, "LiveWS.MaxMessages", key, "1000", err)
@@ -698,7 +816,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "LIVE_WS_PAYLOAD_TRUNCATE_BYTES"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseInt("4096")
 			if err != nil {
 				env.AppendParse(&errs, "LiveWS.PayloadTruncateBytes", key, "4096", err)
@@ -717,7 +835,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "METRICS_SNAPSHOT_INTERVAL"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("60s")
 			if err != nil {
 				env.AppendParse(&errs, "MetricsSnapshot.Interval", key, "60s", err)
@@ -736,7 +854,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "METRICS_SNAPSHOT_RETENTION"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("168h")
 			if err != nil {
 				env.AppendParse(&errs, "MetricsSnapshot.Retention", key, "168h", err)
@@ -755,7 +873,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "METRICS_SNAPSHOT_BOTTLENECK_RETENTION"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("672h")
 			if err != nil {
 				env.AppendParse(&errs, "MetricsSnapshot.BottleneckRetention", key, "672h", err)
@@ -774,7 +892,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "METRICS_SNAPSHOT_CLEANUP_INTERVAL"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("1h")
 			if err != nil {
 				env.AppendParse(&errs, "MetricsSnapshot.CleanupInterval", key, "1h", err)
@@ -793,7 +911,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "METRICS_SNAPSHOT_ENABLED"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseBool("true")
 			if err != nil {
 				env.AppendParse(&errs, "MetricsSnapshot.Enabled", key, "true", err)
@@ -812,7 +930,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "PPROF_CPU_MAX_SECONDS"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseInt("120")
 			if err != nil {
 				env.AppendParse(&errs, "Pprof.CPUMaxSeconds", key, "120", err)
@@ -831,7 +949,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "PPROF_AUTH_ENABLED"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseBool("true")
 			if err != nil {
 				env.AppendParse(&errs, "Pprof.AuthEnabled", key, "true", err)
@@ -850,7 +968,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "PPROF_ENABLED"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseBool("false")
 			if err != nil {
 				env.AppendParse(&errs, "Pprof.Enabled", key, "false", err)
@@ -869,7 +987,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "SLOW_CONSUMER_PENDING_THRESHOLD"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseUint64("1000")
 			if err != nil {
 				env.AppendParse(&errs, "SlowConsumer.PendingThreshold", key, "1000", err)
@@ -888,7 +1006,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "SLOW_CONSUMER_LAG_THRESHOLD"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseUint64("1000")
 			if err != nil {
 				env.AppendParse(&errs, "SlowConsumer.LagThreshold", key, "1000", err)
@@ -907,7 +1025,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "SLOW_CONSUMER_ACK_PENDING_RATIO"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseFloat64("0.9")
 			if err != nil {
 				env.AppendParse(&errs, "SlowConsumer.AckPendingRatio", key, "0.9", err)
@@ -926,7 +1044,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "PAGINATION_MAX_LIMIT"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseInt("500")
 			if err != nil {
 				env.AppendParse(&errs, "Pagination.MaxLimit", key, "500", err)
@@ -945,7 +1063,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "PAGINATION_DEFAULT_LIMIT"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseInt("100")
 			if err != nil {
 				env.AppendParse(&errs, "Pagination.DefaultLimit", key, "100", err)
@@ -964,8 +1082,9 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "OPENAPI_PATH"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			cfg.OpenAPIPath = "api/openapi.yaml"
+		if !ok || env.IsEmpty(raw) {
+			v := "api/openapi.yaml"
+			cfg.OpenAPIPath = v
 		} else {
 			cfg.OpenAPIPath = raw
 		}
@@ -973,7 +1092,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "ENCRYPTION_KEY"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			env.AppendRequired(&errs, "EncryptionKey", key)
 		} else {
 			cfg.EncryptionKey = raw
@@ -982,7 +1101,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "STATIC_DIR"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.StaticDir = raw
 		}
@@ -990,8 +1109,9 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "ADMIN_USERNAME"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			cfg.AdminUsername = "admin"
+		if !ok || env.IsEmpty(raw) {
+			v := "admin"
+			cfg.AdminUsername = v
 		} else {
 			cfg.AdminUsername = raw
 		}
@@ -999,7 +1119,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "ADMIN_PASSWORD"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			env.AppendRequired(&errs, "AdminPassword", key)
 		} else {
 			cfg.AdminPassword = raw
@@ -1008,8 +1128,9 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "PUBLIC_BASE_URL"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			cfg.PublicBaseURL = "http://localhost:8080"
+		if !ok || env.IsEmpty(raw) {
+			v := "http://localhost:8080"
+			cfg.PublicBaseURL = v
 		} else {
 			cfg.PublicBaseURL = raw
 		}
@@ -1017,8 +1138,9 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "DEFAULT_CLUSTER_NAME"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			cfg.DefaultClusterName = "default"
+		if !ok || env.IsEmpty(raw) {
+			v := "default"
+			cfg.DefaultClusterName = v
 		} else {
 			cfg.DefaultClusterName = raw
 		}
@@ -1026,7 +1148,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "CORS_ALLOWED_ORIGINS"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.CORSAllowedOrigins = raw
 		}
@@ -1034,7 +1156,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "TRUSTED_PROXIES"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 		} else {
 			cfg.TrustedProxies = raw
 		}
@@ -1042,8 +1164,9 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "BEHAVIOR_FINGERPRINT_KV_BUCKET"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
-			cfg.BehaviorFingerprintKVBucket = "nats_consol_fingerprints"
+		if !ok || env.IsEmpty(raw) {
+			v := "nats_consol_fingerprints"
+			cfg.BehaviorFingerprintKVBucket = v
 		} else {
 			cfg.BehaviorFingerprintKVBucket = raw
 		}
@@ -1051,7 +1174,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "REQUEST_TIMEOUT"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("10s")
 			if err != nil {
 				env.AppendParse(&errs, "RequestTimeout", key, "10s", err)
@@ -1070,7 +1193,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "HEALTH_CHECK_TIMEOUT"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("2s")
 			if err != nil {
 				env.AppendParse(&errs, "HealthCheckTimeout", key, "2s", err)
@@ -1089,7 +1212,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "JETSTREAM_VIEW_CACHE_TTL"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseDuration("3s")
 			if err != nil {
 				env.AppendParse(&errs, "JetStreamViewCacheTTL", key, "3s", err)
@@ -1108,7 +1231,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "MAX_MONITORING_BODY_BYTES"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseInt64("8388608")
 			if err != nil {
 				env.AppendParse(&errs, "MaxMonitoringBodyBytes", key, "8388608", err)
@@ -1127,7 +1250,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "AUDIT_DEFAULT_LIMIT"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseInt("50")
 			if err != nil {
 				env.AppendParse(&errs, "AuditDefaultLimit", key, "50", err)
@@ -1146,7 +1269,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	{
 		key := "METRICS_AUTH_ENABLED"
 		raw, ok := snap.Lookup(key)
-		if !ok || raw == "" {
+		if !ok || env.IsEmpty(raw) {
 			v, err := env.ParseBool("false")
 			if err != nil {
 				env.AppendParse(&errs, "MetricsAuthEnabled", key, "false", err)

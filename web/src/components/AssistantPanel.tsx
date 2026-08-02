@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useLocation } from "react-router";
+import { useLocation, useParams } from "react-router";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
 import {
@@ -28,18 +28,20 @@ import {
 import AssistantMessageBody from "./AssistantMessageBody";
 
 const STARTERS = [
-  "Summarize this cluster's JetStream usage",
-  "Which streams have the most messages?",
-  "Explain consumer lag on the current stream",
-  "What retention policy should I use here?",
+  "Diagnose this cluster's JetStream health",
+  "Which streams are closest to storage or retention limits?",
+  "Walk me through fixing consumer lag on the current stream",
+  "Give a runbook for a safe purge on the current stream",
 ];
 
 type DragMode = "move" | "resize";
 
 export default function AssistantPanel() {
   const { user } = useAuth();
-  const { clusterId } = useCluster();
+  const { clusterId: contextClusterId } = useCluster();
+  const { clusterId: routeClusterId } = useParams();
   const location = useLocation();
+  const clusterId = routeClusterId ?? contextClusterId;
   const [open, setOpen] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
@@ -58,6 +60,13 @@ export default function AssistantPanel() {
     startY: number;
     origin: AssistantPanelLayout;
   } | null>(null);
+
+  useEffect(() => {
+    setMessages([]);
+    setError(null);
+    setInput("");
+    lastRequestRef.current = null;
+  }, [clusterId]);
 
   useEffect(() => {
     if (!user) {
@@ -343,7 +352,7 @@ AI_MODEL=gemini-2.5-flash`}</pre>
               <div className="assistant-panel__messages">
                 {messages.length === 0 && (
                   <div className="assistant-panel__empty">
-                    <p>Ask about streams, consumers, lag, retention, or this cluster's health.</p>
+                    <p>Ask for diagnostics, runbooks, retention advice, or console navigation — JetStream context only.</p>
                     <div className="assistant-starters">
                       {STARTERS.map((text) => (
                         <button
@@ -385,7 +394,7 @@ AI_MODEL=gemini-2.5-flash`}</pre>
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={onInputKeyDown}
-                  placeholder="Ask about your JetStream cluster…"
+                  placeholder="Ask for a diagnosis or runbook…"
                   rows={2}
                   disabled={loading || !clusterId}
                 />

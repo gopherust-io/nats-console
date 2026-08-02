@@ -29,7 +29,7 @@ func TestProtectedRoutesRequireAuth(t *testing.T) {
 	for _, path := range paths {
 		resp, err := srv.UnauthClient.Get(path)
 		require.NoError(t, err)
-			require.Equal(t, http.StatusUnauthorized, resp.StatusCode, "%s", path)
+		require.Equal(t, http.StatusUnauthorized, resp.StatusCode, "%s", path)
 	}
 }
 
@@ -44,7 +44,7 @@ func TestPublicRoutesAccessibleWithoutAuth(t *testing.T) {
 	for _, path := range paths {
 		resp, err := srv.UnauthClient.Get(path)
 		require.NoError(t, err)
-			require.Equal(t, http.StatusOK, resp.StatusCode, "%s", path)
+		require.Equal(t, http.StatusOK, resp.StatusCode, "%s", path)
 	}
 }
 
@@ -55,7 +55,7 @@ func TestBasicAuthGrantsAccess(t *testing.T) {
 	resp, err := srv.Client.Get("http://nats-consol.local/api/v1/clusters")
 	require.NoError(t, err)
 	body := resp.Body
-	require.Equal(t, http.StatusOK, resp.StatusCode, "status body = %s", string(body))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "status body = %s", commonstrings.BytesToString(body))
 	testutil.AssertNoKeys(t, body, "token", "password_hash")
 }
 
@@ -78,11 +78,11 @@ func TestViewerCannotMutateStreams(t *testing.T) {
 
 	resp, err := srv.Client.Do(&testutil.Request{
 		Method: http.MethodPost,
-		URL:    srv.BaseURL(clusterID)+"/streams",
+		URL:    srv.BaseURL(clusterID) + "/streams",
 		Body:   strings.NewReader(`{"name":"BLOCKED","subjects":["x.>"]}`),
 		Header: http.Header{
 			"Authorization": {basicAuth("viewer-user", "viewer-pass")},
-			"Content-Type": {"application/json"},
+			"Content-Type":  {"application/json"},
 		},
 	})
 	require.NoError(t, err)
@@ -182,11 +182,11 @@ func TestOperatorCannotManageUsers(t *testing.T) {
 
 	resp, err := srv.Client.Do(&testutil.Request{
 		Method: http.MethodPut,
-		URL:    "http://nats-consol.local/api/v1/users/"+viewer.ID+"/roles",
+		URL:    "http://nats-consol.local/api/v1/users/" + viewer.ID + "/roles",
 		Body:   strings.NewReader(`{"roles":["admin"]}`),
 		Header: http.Header{
 			"Authorization": {basicAuth("operator-user", "op-pass")},
-			"Content-Type": {"application/json"},
+			"Content-Type":  {"application/json"},
 		},
 	})
 	require.NoError(t, err)

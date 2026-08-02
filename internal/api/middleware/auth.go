@@ -32,18 +32,53 @@ func (mw *MwHandler) VerifyAuth(next fasthttp.RequestHandler) fasthttp.RequestHa
 			return
 		}
 
-		loaded, err := mw.authService.LoadUserForSession(httpctx.FromRequest(ctx), user)
+		c := httpctx.FromRequest(ctx)
+		var (
+			loaded store.User
+			err    error
+		)
+		if requiresFreshAuthz(path, commonstrings.BytesToString(ctx.Method())) {
+			loaded, err = mw.authService.LoadUserFresh(c, user.ID)
+		} else {
+			loaded, err = mw.authService.LoadUserForSession(c, user)
+		}
 		if err != nil {
 			httpstatus.WriteUnauthorized(ctx)
 			return
 		}
 		user = loaded
 
-		c := httpctx.FromRequest(ctx)
 		c = auth.ContextWithUser(c, user)
 		ctx.SetUserValue(ctxKey, c)
 		next(ctx)
 	}
+}
+
+// requiresFreshAuthz forces a DB reload of grants/roles for credential and
+// access-management paths so multi-replica cache lag cannot authorize revoked rights.
+func requiresFreshAuthz(path, method string) bool {
+	if strings.Contains(path, "/creds") ||
+		strings.Contains(path, "/assign") ||
+		(strings.Contains(path, "/nats-users/") && strings.HasSuffix(path, "/rotate")) ||
+		strings.Contains(path, "/mint-jwt") ||
+		strings.Contains(path, "/access/") ||
+		strings.HasSuffix(path, "/access") ||
+		strings.Contains(path, "/grants") {
+		return true
+	}
+	mutating := method != fasthttp.MethodGet && method != fasthttp.MethodHead && method != fasthttp.MethodOptions
+	if mutating {
+		if strings.HasPrefix(path, "/api/v1/users") || strings.HasPrefix(path, "/api/v1/people") {
+			return true
+		}
+		// NATS account control-plane mutations after revoke must not use stale grants.
+		if strings.Contains(path, "/nats-users") ||
+			strings.Contains(path, "/signing-groups") ||
+			strings.Contains(path, "/sharing") {
+			return true
+		}
+	}
+	return false
 }
 
 func (mw *MwHandler) requestFingerprint(ctx *fasthttp.RequestCtx) string {
@@ -146,19 +181,7 @@ func (mw *MwHandler) VerifyRBAC(next fasthttp.RequestHandler) fasthttp.RequestHa
 		}
 
 		if clusterID := clusterIDFromPath(path); !commonstrings.IsEmpty(clusterID) {
-			if !auth.CanAccessCluster(user, clusterID) {
-				httpstatus.WriteForbidden(ctx)
-				return
-			}
-			// Mutations always require system-level cluster access; CanManageJetStream
-			// and CanWriteCluster below never grant more than the check above already
-			// requires, so narrowing CanAccessCluster here cannot regress a working flow.
-			if isJetStreamResourcePath(path) {
-				if !auth.CanManageJetStream(user, clusterID) {
-					httpstatus.WriteForbidden(ctx)
-					return
-				}
-			} else if !auth.CanWriteCluster(user, clusterID) {
+			if !canMutateClusterPath(user, clusterID, path) {
 				httpstatus.WriteForbidden(ctx)
 				return
 			}

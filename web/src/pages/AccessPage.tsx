@@ -1,9 +1,10 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 import Alert from "../components/ui/Alert";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { api, clusterPath, UserRecord } from "../lib/api";
+import { useAuth } from "../lib/auth";
 
 type AccessGrant = {
   id: string;
@@ -23,6 +24,7 @@ export default function AccessPage({ scope }: Props) {
   const { t } = useTranslation();
   const { askConfirm, confirmDialog } = useConfirmDialog();
   const { clusterId, accountName } = useParams();
+  const { canManageSystemAccess, canManageAccountAccess } = useAuth();
   const [grants, setGrants] = useState<AccessGrant[]>([]);
   const [people, setPeople] = useState<UserRecord[]>([]);
   const [error, setError] = useState("");
@@ -45,6 +47,12 @@ export default function AccessPage({ scope }: Props) {
     [scope, t],
   );
   const account = accountName || t("common.default");
+  const canMutateAccess = Boolean(
+    clusterId &&
+      (scope === "system"
+        ? canManageSystemAccess(clusterId)
+        : canManageAccountAccess(clusterId, account)),
+  );
 
   const accessPath = useCallback(() => {
     if (!clusterId) return "";
@@ -52,22 +60,33 @@ export default function AccessPage({ scope }: Props) {
     return clusterPath(clusterId, `/accounts/${encodeURIComponent(account)}/access`);
   }, [clusterId, scope, account]);
 
+  const loadGenRef = useRef(0);
+
   const load = useCallback(async () => {
     if (!clusterId) return;
+    const gen = ++loadGenRef.current;
     setError("");
     try {
       const [grantRes, peopleRes] = await Promise.all([
         api<AccessGrant[]>(accessPath()),
         api<UserRecord[]>("/api/v1/people").catch(() => ({ data: [] as UserRecord[] })),
       ]);
+      if (gen !== loadGenRef.current) return;
       setGrants(grantRes.data ?? []);
       setPeople(peopleRes.data ?? []);
     } catch (err) {
+      if (gen !== loadGenRef.current) return;
       setError(err instanceof Error ? err.message : t("access.loadFailed"));
     }
   }, [clusterId, accessPath, t]);
 
   useEffect(() => {
+    loadGenRef.current += 1;
+    setGrants([]);
+    setPeople([]);
+    setError("");
+    setForm({ userId: "", role: "observer" });
+    setManualUserId(false);
     void load();
   }, [load]);
 
@@ -147,6 +166,7 @@ export default function AccessPage({ scope }: Props) {
 
       {error && <Alert variant="error">{error}</Alert>}
 
+      {canMutateAccess && (
       <form className="nc-settings-section" onSubmit={onAdd}>
         <h4>{t("access.addUser")}</h4>
         <div className="nc-form-row">
@@ -209,6 +229,7 @@ export default function AccessPage({ scope }: Props) {
           </button>
         </div>
       </form>
+      )}
 
       <div className="nc-settings-section">
         <h4>{t("access.grantsTitle")}</h4>
@@ -218,13 +239,13 @@ export default function AccessPage({ scope }: Props) {
               <tr>
                 <th>{t("access.person")}</th>
                 <th>{t("access.role")}</th>
-                <th />
+                {canMutateAccess && <th />}
               </tr>
             </thead>
             <tbody>
               {grants.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="text-muted">
+                  <td colSpan={canMutateAccess ? 3 : 2} className="text-muted">
                     {t("access.empty")}
                   </td>
                 </tr>
@@ -236,32 +257,38 @@ export default function AccessPage({ scope }: Props) {
                     {grant.email && <div className="text-muted text-sm">{grant.email}</div>}
                   </td>
                   <td>
-                    <select
-                      value={grant.role}
-                      disabled={saving}
-                      onChange={(e) => void onUpdateRole(grant, e.target.value)}
-                      aria-label={t("access.roleFor", { name: grant.username ?? grant.userId })}
-                    >
-                      {roles.map((r) => (
-                        <option key={r.value} value={r.value}>
-                          {r.label}
-                        </option>
-                      ))}
-                      {!roles.some((r) => r.value === grant.role) && (
-                        <option value={grant.role}>{roleLabel(grant.role)}</option>
-                      )}
-                    </select>
+                    {canMutateAccess ? (
+                      <select
+                        value={grant.role}
+                        disabled={saving}
+                        onChange={(e) => void onUpdateRole(grant, e.target.value)}
+                        aria-label={t("access.roleFor", { name: grant.username ?? grant.userId })}
+                      >
+                        {roles.map((r) => (
+                          <option key={r.value} value={r.value}>
+                            {r.label}
+                          </option>
+                        ))}
+                        {!roles.some((r) => r.value === grant.role) && (
+                          <option value={grant.role}>{roleLabel(grant.role)}</option>
+                        )}
+                      </select>
+                    ) : (
+                      roleLabel(grant.role)
+                    )}
                   </td>
-                  <td>
-                    <button
-                      className="btn secondary btn--small"
-                      type="button"
-                      disabled={saving}
-                      onClick={() => void onRevoke(grant)}
-                    >
-                      {t("common.revoke")}
-                    </button>
-                  </td>
+                  {canMutateAccess && (
+                    <td>
+                      <button
+                        className="btn secondary btn--small"
+                        type="button"
+                        disabled={saving}
+                        onClick={() => void onRevoke(grant)}
+                      >
+                        {t("common.revoke")}
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

@@ -191,4 +191,84 @@ describe("api", () => {
 
     await expect(api("/api/v1/x")).rejects.toBeInstanceOf(UnauthorizedError);
   });
+
+  it("compresses large JSON request bodies with brotli when available", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const body = JSON.stringify({ value: "x".repeat(40 * 1024) });
+    await api("/api/v1/x", { method: "POST", body });
+
+    expect(fetchMock).toHaveBeenCalled();
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    const headers = new Headers(init.headers);
+    expect(headers.get("Content-Encoding")).toBe("br");
+    expect(headers.get("Content-Type")).toBe("application/json");
+    expect(init.body).toBeInstanceOf(ArrayBuffer);
+  });
+
+  it("falls back to gzip when brotli CompressionStream is unavailable", async () => {
+    const RealCompressionStream = CompressionStream;
+    vi.stubGlobal(
+      "CompressionStream",
+      class {
+        constructor(format: string) {
+          if (format === "brotli") {
+            throw new TypeError("unsupported");
+          }
+          return new RealCompressionStream(format as CompressionFormat);
+        }
+      },
+    );
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const body = JSON.stringify({ value: "x".repeat(40 * 1024) });
+    await api("/api/v1/x", { method: "POST", body });
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(new Headers(init.headers).get("Content-Encoding")).toBe("gzip");
+  });
+
+  it("does not compress small JSON request bodies", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const body = JSON.stringify({ value: "x".repeat(16 * 1024) });
+    await api("/api/v1/x", { method: "POST", body });
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    const headers = new Headers(init.headers);
+    expect(headers.get("Content-Encoding")).toBeNull();
+    expect(init.body).toBe(body);
+  });
+
+  it("does not compress when compressed body is not smaller", async () => {
+    vi.stubGlobal(
+      "CompressionStream",
+      class {
+        readable: ReadableStream<Uint8Array>;
+        writable: WritableStream<Uint8Array>;
+        constructor() {
+          // Expand every chunk so compression never wins.
+          const transform = new TransformStream<Uint8Array, Uint8Array>({
+            transform(chunk, controller) {
+              controller.enqueue(new Uint8Array([...chunk, ...chunk]));
+            },
+          });
+          this.readable = transform.readable;
+          this.writable = transform.writable;
+        }
+      },
+    );
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const body = JSON.stringify({ value: "x".repeat(40 * 1024) });
+    await api("/api/v1/x", { method: "POST", body });
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(new Headers(init.headers).get("Content-Encoding")).toBeNull();
+    expect(init.body).toBe(body);
+  });
 });

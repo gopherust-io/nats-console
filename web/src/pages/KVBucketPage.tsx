@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
@@ -24,6 +24,7 @@ export default function KVBucketPage() {
   const { clusterId: contextClusterId } = useCluster();
   const clusterId = routeCluster ?? contextClusterId;
   const { canManageJetStream } = useAuth();
+  const canManageJS = canManageJetStream(clusterId);
   const qc = useQueryClient();
   const navigate = useNavigate();
   const jsBase = clusterId ? jetStreamUIBase(clusterId, accountName) : "";
@@ -36,6 +37,15 @@ export default function KVBucketPage() {
   const [putError, setPutError] = useState("");
   const [putting, setPutting] = useState(false);
   const limit = DEFAULT_PAGE_SIZE;
+
+  useEffect(() => {
+    setShowPut(false);
+    setNewKey("");
+    setNewValue("");
+    setPutError("");
+    setEditOpen(false);
+    setPanelError("");
+  }, [clusterId, bucket]);
 
   const bucketQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, `kv-bucket:${bucket}`),
@@ -130,7 +140,7 @@ export default function KVBucketPage() {
             <p className="text-muted">{bucketQuery.data.description}</p>
           ) : null}
         </div>
-        {canManageJetStream && (
+        {canManageJS && (
           <div className="actions">
             <button
               type="button"

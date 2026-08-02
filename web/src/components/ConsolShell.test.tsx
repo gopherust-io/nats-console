@@ -154,19 +154,9 @@ describe("ConsolShell", () => {
     expect(screen.queryByRole("link", { name: "All streams" })).not.toBeInTheDocument();
   });
 
-  it("shows the AI assistant only inside Docs", async () => {
-    const { unmount } = render(
-      <TestProviders initialEntries={["/systems"]}>
-        <ShellRoutes>
-          <ConsolShell />
-        </ShellRoutes>
-      </TestProviders>,
-    );
-    expect(screen.queryByTestId("assistant-panel")).not.toBeInTheDocument();
-    unmount();
-
+  it("shows the AI assistant console-wide when authenticated", async () => {
     render(
-      <TestProviders initialEntries={["/docs"]}>
+      <TestProviders initialEntries={["/systems"]}>
         <ShellRoutes>
           <ConsolShell />
         </ShellRoutes>

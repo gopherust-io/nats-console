@@ -30,6 +30,7 @@ export default function EventCatalogPage() {
   const { clusterId, cluster } = useCluster();
   const { accountName } = useAccount();
   const { canManageJetStream } = useAuth();
+  const canManageJS = canManageJetStream(clusterId);
   const qc = useQueryClient();
 
   const [searchParams] = useSearchParams();
@@ -67,6 +68,11 @@ export default function EventCatalogPage() {
   }, [selectedSubject, entries, filtered]);
 
   useEffect(() => {
+    setSelectedSubject(null);
+    setFormError("");
+  }, [clusterId]);
+
+  useEffect(() => {
     if (!selected) {
       setOwner("");
       setDescription("");
@@ -86,9 +92,9 @@ export default function EventCatalogPage() {
     setSuccessorSubject(selected.successorSubject ?? "");
     setDeprecationNote(selected.deprecationNote ?? "");
     setFormError("");
-    // Sync form only when the selected event changes — avoid clobbering edits on poll refresh.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: subject identity only
-  }, [selected?.subject]);
+    // Reseed when subject or cluster changes; skip poll-only refreshes of the same entry.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: identity only
+  }, [selected?.subject, clusterId]);
 
   useEffect(() => {
     if (selected && !filtered.some((e) => e.subject === selected.subject) && filtered[0]) {
@@ -254,7 +260,7 @@ export default function EventCatalogPage() {
                   id="catalog-owner"
                   value={owner}
                   onChange={(e) => setOwner(e.target.value)}
-                  disabled={!canManageJetStream}
+                  disabled={!canManageJS}
                   placeholder={t("catalog.ownerPlaceholder")}
                 />
               </div>
@@ -265,7 +271,7 @@ export default function EventCatalogPage() {
                   rows={3}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  disabled={!canManageJetStream}
+                  disabled={!canManageJS}
                   placeholder={t("catalog.descriptionPlaceholder")}
                 />
               </div>
@@ -277,7 +283,7 @@ export default function EventCatalogPage() {
                   rows={12}
                   value={schemaText}
                   onChange={(e) => setSchemaText(e.target.value)}
-                  disabled={!canManageJetStream}
+                  disabled={!canManageJS}
                   placeholder='{"type":"object","properties":{...}}'
                   spellCheck={false}
                 />
@@ -290,7 +296,7 @@ export default function EventCatalogPage() {
                   rows={8}
                   value={exampleText}
                   onChange={(e) => setExampleText(e.target.value)}
-                  disabled={!canManageJetStream}
+                  disabled={!canManageJS}
                   placeholder='{"id":"ord_1"}'
                   spellCheck={false}
                 />
@@ -302,7 +308,7 @@ export default function EventCatalogPage() {
                     type="checkbox"
                     checked={deprecated}
                     onChange={(e) => setDeprecated(e.target.checked)}
-                    disabled={!canManageJetStream}
+                    disabled={!canManageJS}
                   />{" "}
                   {t("catalog.deprecated")}
                 </label>
@@ -315,7 +321,7 @@ export default function EventCatalogPage() {
                       id="catalog-successor"
                       value={successorSubject}
                       onChange={(e) => setSuccessorSubject(e.target.value)}
-                      disabled={!canManageJetStream}
+                      disabled={!canManageJS}
                       placeholder="orders.created"
                     />
                   </div>
@@ -326,14 +332,14 @@ export default function EventCatalogPage() {
                       rows={2}
                       value={deprecationNote}
                       onChange={(e) => setDeprecationNote(e.target.value)}
-                      disabled={!canManageJetStream}
+                      disabled={!canManageJS}
                       placeholder={t("catalog.deprecationNotePlaceholder")}
                     />
                   </div>
                 </>
               )}
 
-              {canManageJetStream && (
+              {canManageJS && (
                 <div className="nc-form-actions">
                   <button
                     type="button"

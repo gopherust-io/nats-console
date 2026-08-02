@@ -1,3 +1,9 @@
+name: nats-consol
+
+include:
+  - path: docker/nats/cluster/docker-compose.yml
+  - path: examples/fleet/docker-compose.yml
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -75,6 +81,20 @@ services:
         condition: service_healthy
       nats:
         condition: service_started
+
+  web-dev:
+    profiles: ["web"]
+    image: ${NODE_IMAGE:-node:22-alpine}
+    working_dir: /web
+    volumes:
+      - ./web:/web
+    ports:
+      - "8080:8080"
+    environment:
+      VITE_API_PROXY_TARGET: http://console:8080
+    command: ["sh", "-lc", "npm install && npm run dev -- --host 0.0.0.0"]
+    depends_on:
+      - console
 
   mailpit:
     profiles: ["mail"]

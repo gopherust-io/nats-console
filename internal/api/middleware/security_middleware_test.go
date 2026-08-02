@@ -52,7 +52,7 @@ func TestCSRFRequiredForSessionMutations(t *testing.T) {
 	ctx.Request.Header.SetCookie(auth.SessionCookie, "session-token")
 	h(ctx)
 	require.Equal(t, fasthttp.StatusForbidden, ctx.Response.StatusCode())
-	assert.Contains(t, string(ctx.Response.Body()), `"code":"csrf_invalid"`)
+	assert.Contains(t, commonstrings.BytesToString(ctx.Response.Body()), `"code":"csrf_invalid"`)
 
 	ctx = &fasthttp.RequestCtx{}
 	ctx.Request.Header.SetMethod(fasthttp.MethodPost)
@@ -89,10 +89,10 @@ func TestCSRFRequiredForSessionMutations(t *testing.T) {
 func TestAuthenticateAcceptsBearerRS256(t *testing.T) {
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
-	privPEM := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}))
+	privPEM := commonstrings.BytesToString(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}))
 	pubBytes, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
 	require.NoError(t, err)
-	pubPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes}))
+	pubPEM := commonstrings.BytesToString(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes}))
 
 	svc, err := auth.NewService(config.Config{
 		Auth: config.AuthConfig{
@@ -155,10 +155,18 @@ func TestAuthRateLimitResponseBody(t *testing.T) {
 	blocked.SetRemoteAddr(&net.TCPAddr{IP: net.ParseIP("10.0.0.9"), Port: 1235})
 	h(blocked)
 	require.Equal(t, fasthttp.StatusTooManyRequests, blocked.Response.StatusCode())
-	assert.Equal(t, "60", string(blocked.Response.Header.Peek("Retry-After")))
-	assert.Contains(t, string(blocked.Response.Body()), `"code":"rate_limit"`)
-	assert.Contains(t, string(blocked.Response.Body()), `"retryable":true`)
-	assert.Contains(t, string(blocked.Response.Body()), `"retryAfterSeconds":60`)
+	assert.Equal(t, "60", commonstrings.BytesToString(blocked.Response.Header.Peek("Retry-After")))
+	assert.Contains(t, commonstrings.BytesToString(blocked.Response.Body()), `"code":"rate_limit"`)
+	assert.Contains(t, commonstrings.BytesToString(blocked.Response.Body()), `"retryable":true`)
+	assert.Contains(t, commonstrings.BytesToString(blocked.Response.Body()), `"retryAfterSeconds":60`)
+}
+
+func TestIsAuthRateLimitedPath(t *testing.T) {
+	assert.True(t, isAuthRateLimitedPath("/api/v1/auth/login"))
+	assert.True(t, isAuthRateLimitedPath("/api/v1/auth/invite/accept"))
+	assert.True(t, isAuthRateLimitedPath("/api/v1/auth/invite/abc123"))
+	assert.False(t, isAuthRateLimitedPath("/api/v1/auth/me"))
+	assert.False(t, isAuthRateLimitedPath("/api/v1/clusters"))
 }
 
 func TestCORSRejectsUnknownOrigin(t *testing.T) {

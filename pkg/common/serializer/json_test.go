@@ -104,7 +104,7 @@ func TestMarshalNilSliceAsEmptyArray(t *testing.T) {
 		Items []string `json:"items"`
 	}{Items: nil})
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"items":[]}`, string(raw))
+	assert.JSONEq(t, `{"items":[]}`, commonstrings.BytesToString(raw))
 }
 
 func TestMarshalOmitemptyNilMapStillOmitted(t *testing.T) {
@@ -113,7 +113,7 @@ func TestMarshalOmitemptyNilMapStillOmitted(t *testing.T) {
 		Name    string            `json:"name"`
 	}{Name: "x"})
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"name":"x"}`, string(raw))
+	assert.JSONEq(t, `{"name":"x"}`, commonstrings.BytesToString(raw))
 }
 
 func TestMarshalRequestReplySnapshotOptionals(t *testing.T) {

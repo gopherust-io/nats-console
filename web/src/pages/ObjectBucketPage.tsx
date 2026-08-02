@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
@@ -27,6 +27,7 @@ export default function ObjectBucketPage() {
   const { clusterId: contextClusterId } = useCluster();
   const clusterId = routeCluster ?? contextClusterId;
   const { canManageJetStream } = useAuth();
+  const canManageJS = canManageJetStream(clusterId);
   const qc = useQueryClient();
   const navigate = useNavigate();
   const jsBase = clusterId ? jetStreamUIBase(clusterId, accountName) : "";
@@ -41,6 +42,18 @@ export default function ObjectBucketPage() {
   const [objectData, setObjectData] = useState("");
   const [uploading, setUploading] = useState(false);
   const limit = DEFAULT_PAGE_SIZE;
+
+  const loadObjectGenRef = useRef(0);
+
+  useEffect(() => {
+    loadObjectGenRef.current += 1;
+    setSelected(null);
+    setShowFull(false);
+    setShowUpload(false);
+    setObjectName("");
+    setObjectData("");
+    setActionError("");
+  }, [clusterId, bucket]);
 
   const bucketQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, `object-bucket:${bucket}`),
@@ -102,16 +115,19 @@ export default function ObjectBucketPage() {
 
   async function loadObject(name: string) {
     if (!clusterId) return;
+    const gen = ++loadObjectGenRef.current;
     try {
       const info = (
         await api<ObjectInfo>(
           clusterPath(clusterId, `/objects/buckets/${encodeURIComponent(bucket)}/objects/${encodeURIComponent(name)}`),
         )
       ).data;
+      if (gen !== loadObjectGenRef.current) return;
       setSelected(info);
       setShowFull(false);
       setActionError("");
     } catch (err) {
+      if (gen !== loadObjectGenRef.current) return;
       setActionError(err instanceof Error ? err.message : t("objects.loadFailed"));
     }
   }
@@ -141,7 +157,7 @@ export default function ObjectBucketPage() {
   }
 
   function onDeleteObject(name: string) {
-    if (!clusterId || !canManageJetStream) return;
+    if (!clusterId || !canManageJS) return;
     askConfirm({
       title: t("objects.confirmDeleteObjectTitle"),
       description: t("objects.confirmDeleteObject", { name }),
@@ -178,7 +194,7 @@ export default function ObjectBucketPage() {
         subtitle={bucketQuery.data?.description || "Browse objects in this bucket and inspect payloads."}
         actions={
           <div className="actions">
-            {canManageJetStream && (
+            {canManageJS && (
               <>
                 <button
                   type="button"
@@ -289,7 +305,7 @@ export default function ObjectBucketPage() {
                     <button className="btn secondary btn--small" type="button" onClick={() => loadObject(name)}>
                       {t("common.view")}
                     </button>
-                    {canManageJetStream && (
+                    {canManageJS && (
                       <button
                         className="btn danger btn--small"
                         type="button"

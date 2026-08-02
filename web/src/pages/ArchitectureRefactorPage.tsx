@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router";
@@ -32,6 +32,7 @@ export default function ArchitectureRefactorPage() {
   const [forceSample, setForceSample] = useState(false);
   const [aiReply, setAiReply] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
+  const askGenRef = useRef(0);
 
   const planQuery = useQuery({
     queryKey: [
@@ -59,19 +60,24 @@ export default function ArchitectureRefactorPage() {
   const aiEnabled = Boolean(assistantConfigQuery.data?.aiEnabled) && Boolean(clusterId) && !sample;
 
   useEffect(() => {
+    askGenRef.current += 1;
     setAiReply(null);
+    setAsking(false);
   }, [clusterId, seed.kind, seed.stream, seed.subject, forceSample]);
 
   const handleAsk = useCallback(async () => {
     if (!clusterId || asking || sample) return;
+    const gen = ++askGenRef.current;
     setAsking(true);
     try {
       const result = await askArchitectureRefactor(clusterId, undefined, { fresh: true, ...seed });
+      if (gen !== askGenRef.current) return;
       setAiReply(result.reply);
     } catch {
+      if (gen !== askGenRef.current) return;
       setAiReply(null);
     } finally {
-      setAsking(false);
+      if (gen === askGenRef.current) setAsking(false);
     }
   }, [asking, clusterId, sample, seed]);
 

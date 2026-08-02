@@ -171,6 +171,78 @@ func TestCanAccessAccount(t *testing.T) {
 	assert.False(t, CanAccessAccount(natsUserGrant, clusterID, accountB))
 }
 
+func TestCanAccessAccountColonDelimiter(t *testing.T) {
+	t.Parallel()
+	clusterID := "550e8400-e29b-41d4-a716-446655440000"
+
+	// Account grant for APP:payments must NOT authorize account APP.
+	accountGrant := store.User{
+		Grants: []store.AccessGrant{{
+			ResourceType: store.ResourceAccount,
+			ResourceKey:  clusterID + ":APP:payments",
+			Role:         store.GrantObserver,
+		}},
+	}
+	assert.False(t, CanAccessAccount(accountGrant, clusterID, "APP"))
+	assert.True(t, CanAccessAccount(accountGrant, clusterID, "APP:payments"))
+
+	// NATS-user grant under account APP:payments must not authorize account APP.
+	legacyNATSUserGrant := store.User{
+		Grants: []store.AccessGrant{{
+			ResourceType: store.ResourceNATSUser,
+			ResourceKey:  clusterID + ":APP:payments:user-1",
+			Role:         store.GrantObserver,
+		}},
+	}
+	assert.False(t, CanAccessAccount(legacyNATSUserGrant, clusterID, "APP"))
+	assert.True(t, CanAccessAccount(legacyNATSUserGrant, clusterID, "APP:payments"))
+
+	// Grant for exact APP user DOES authorize APP account.
+	appUserGrant := store.User{
+		Grants: []store.AccessGrant{{
+			ResourceType: store.ResourceNATSUser,
+			ResourceKey:  clusterID + ":APP:user-1",
+			Role:         store.GrantObserver,
+		}},
+	}
+	assert.True(t, CanAccessAccount(appUserGrant, clusterID, "APP"))
+}
+
+func TestCanManageSystemAccessAndMintAdmin(t *testing.T) {
+	t.Parallel()
+	clusterID := "550e8400-e29b-41d4-a716-446655440000"
+
+	manageUsersOnly := store.User{
+		Roles: []string{store.RoleViewer},
+		AccessRules: &store.AccessRules{
+			ManageUsers: true,
+			ClusterIDs:  []string{clusterID},
+		},
+	}
+	assert.True(t, CanManageSystemAccess(manageUsersOnly, clusterID))
+	assert.False(t, CanMintAdminGrant(manageUsersOnly, store.ResourceSystem, clusterID))
+	assert.False(t, CanMintAdminGrant(manageUsersOnly, store.ResourceAccount, clusterID+":Default"))
+
+	manageUsersNoCluster := store.User{
+		Roles: []string{store.RoleViewer},
+		AccessRules: &store.AccessRules{
+			ManageUsers: true,
+		},
+	}
+	assert.False(t, CanManageSystemAccess(manageUsersNoCluster, clusterID))
+
+	systemAdmin := store.User{
+		Roles: []string{store.RoleViewer},
+		Grants: []store.AccessGrant{{
+			ResourceType: store.ResourceSystem,
+			ResourceKey:  clusterID,
+			Role:         store.GrantAdmin,
+		}},
+	}
+	assert.True(t, CanManageSystemAccess(systemAdmin, clusterID))
+	assert.True(t, CanMintAdminGrant(systemAdmin, store.ResourceSystem, clusterID))
+}
+
 func TestCanDownloadCredsExactKeys(t *testing.T) {
 	t.Parallel()
 	clusterID := "550e8400-e29b-41d4-a716-446655440000"

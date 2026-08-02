@@ -27,12 +27,80 @@ var monitoringHTTPClient = &http.Client{
 	Timeout: replicasMonitorTimeout,
 	Transport: &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialMonitoringContext,
 		MaxIdleConns:          32,
 		MaxIdleConnsPerHost:   8,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   5 * time.Second,
 		ExpectContinueTimeout: time.Second,
 	},
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return errors.New("monitoring redirect: stopped after 5 redirects")
+		}
+		if req.URL == nil {
+			return errors.New("monitoring redirect: empty url")
+		}
+		if err := validateMonitoringURL(req.URL.String()); err != nil {
+			return err
+		}
+		return validateMonitoringHostResolved(req.Context(), req.URL.Hostname())
+	},
+}
+
+func dialMonitoringContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("monitoring dns: %w", err)
+	}
+	var dialer net.Dialer
+	var lastErr error
+	for _, a := range ips {
+		if isBlockedMonitoringIP(a.IP) {
+			lastErr = errors.New("monitoring url host not allowed")
+			continue
+		}
+		conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(a.IP.String(), port))
+		if dialErr == nil {
+			return conn, nil
+		}
+		lastErr = dialErr
+	}
+	if lastErr == nil {
+		lastErr = errors.New("monitoring url host not allowed")
+	}
+	return nil, lastErr
+}
+
+func isBlockedMonitoringIP(ip net.IP) bool {
+	return ip == nil || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
+
+func validateMonitoringHostResolved(ctx context.Context, host string) error {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return errors.New("monitoring redirect: host not allowed")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if isBlockedMonitoringIP(ip) {
+			return errors.New("monitoring redirect: host not allowed")
+		}
+		return nil
+	}
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return fmt.Errorf("monitoring dns: %w", err)
+	}
+	for _, a := range addrs {
+		if isBlockedMonitoringIP(a.IP) {
+			return errors.New("monitoring redirect: host not allowed")
+		}
+	}
+	return nil
 }
 
 // monitoringCandidates builds failover HTTP bases from the primary monitoring URL

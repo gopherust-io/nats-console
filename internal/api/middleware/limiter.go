@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,10 +13,17 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/ipset"
 )
 
+func isAuthRateLimitedPath(path string) bool {
+	if path == pathPrefixAuthLogin || path == pathPrefixAuthAcceptInvite {
+		return true
+	}
+	return strings.HasPrefix(path, pathPrefixAuthInvite)
+}
+
 func (mw *MwHandler) VerifyAuthRateLimit(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
 		path := requestPath(ctx)
-		if path != pathPrefixAuthLogin {
+		if !isAuthRateLimitedPath(path) {
 			next(ctx)
 			return
 		}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import ArchitectureScorePanel from "../components/ArchitectureScorePanel";
@@ -21,6 +21,7 @@ export default function ArchitectureScorePage() {
   const [forceSample, setForceSample] = useState(false);
   const [aiReply, setAiReply] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
+  const askGenRef = useRef(0);
 
   const scoreQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "architecture-score"),
@@ -42,19 +43,24 @@ export default function ArchitectureScorePage() {
   const aiEnabled = Boolean(assistantConfigQuery.data?.aiEnabled) && Boolean(clusterId) && !sample;
 
   useEffect(() => {
+    askGenRef.current += 1;
     setAiReply(null);
+    setAsking(false);
   }, [clusterId, forceSample]);
 
   const handleAsk = useCallback(async () => {
     if (!clusterId || asking || sample) return;
+    const gen = ++askGenRef.current;
     setAsking(true);
     try {
       const result = await askArchitectureScore(clusterId, undefined, { fresh: true });
+      if (gen !== askGenRef.current) return;
       setAiReply(result.reply);
     } catch {
+      if (gen !== askGenRef.current) return;
       setAiReply(null);
     } finally {
-      setAsking(false);
+      if (gen === askGenRef.current) setAsking(false);
     }
   }, [asking, clusterId, sample]);
 

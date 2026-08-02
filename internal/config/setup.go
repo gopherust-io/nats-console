@@ -12,6 +12,8 @@ func Load() (Config, error) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return Config{}, err
 	}
+	// LoadDotEnv mutates process env; v0.6+ LoadConfig reads Snapshot without Reload.
+	env.Reload()
 
 	cfg, err := LoadConfig()
 	if err != nil {

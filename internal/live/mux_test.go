@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -170,8 +171,8 @@ func TestFanoutDeliversSharedFrameToAllViewers(t *testing.T) {
 	for i := range n {
 		viewers[i] = newMuxViewer(func(frame []byte) bool {
 			delivers.Add(1)
-			assert.Contains(t, string(frame), `"type":"message"`)
-			assert.Contains(t, string(frame), "orders.created")
+			assert.Contains(t, commonstrings.BytesToString(frame), `"type":"message"`)
+			assert.Contains(t, commonstrings.BytesToString(frame), "orders.created")
 			return true
 		}, new(atomic.Bool), new(atomic.Bool), 0)
 		unsub, err := m.attachWithSubscriber(key, viewers[i], func(ss *sharedSub) (*nats.Subscription, error) {
@@ -186,7 +187,7 @@ func TestFanoutDeliversSharedFrameToAllViewers(t *testing.T) {
 	m.mu.Unlock()
 	require.NotNil(t, ss)
 
-	ss.fanout(&nats.Msg{Subject: "orders.created", Data: []byte(`{"ok":true}`)})
+	ss.fanout(&nats.Msg{Subject: "orders.created", Data: commonstrings.StringToBytes(`{"ok":true}`)})
 	deadline := time.Now().Add(time.Second)
 	for delivers.Load() < int32(n) && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
