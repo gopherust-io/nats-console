@@ -10,7 +10,7 @@ require (
 	github.com/google/pprof v0.0.0-20260709232956-b9395ee17fa0
 	github.com/google/uuid v1.6.0
 	github.com/gopherust-io/env v0.6.0
-	github.com/gopherust-io/nats v0.5.0
+	github.com/gopherust-io/nats v0.6.0
 	github.com/gopherust-io/tel v0.4.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/nats-io/jwt/v2 v2.8.2
