@@ -8,7 +8,7 @@ import (
 	"github.com/valyala/fasthttp"
 
 	"github.com/gopherust-io/nats-consol/internal/auth"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/domain"
 )
 
 func TestRequiresFreshAuthz(t *testing.T) {
@@ -30,6 +30,7 @@ func TestIsPublicPath(t *testing.T) {
 	public := []string{
 		"/api/health",
 		"/api/openapi.yaml",
+		"/api/v1/schemas",
 		"/api/v1/auth/config",
 		"/api/v1/auth/login",
 		"/api/v1/auth/logout",
@@ -101,6 +102,7 @@ func TestIsAccountScopedClusterPath(t *testing.T) {
 	scoped := []string{
 		"/api/v1/clusters/" + id,
 		"/api/v1/clusters/" + id + "/connection",
+		"/api/v1/clusters/" + id + "/connection/events",
 		"/api/v1/clusters/" + id + "/access",
 		"/api/v1/clusters/" + id + "/accounts/Default/access",
 		"/api/v1/clusters/" + id + "/nats-users",
@@ -136,18 +138,18 @@ func TestClusterIDFromPathMixedCase(t *testing.T) {
 	assert.Equal(t, lower, clusterIDFromPath("/api/v1/clusters/"+upper+"/streams"))
 	assert.Equal(t, lower, clusterIDFromPath("/api/v1/clusters/"+lower+"/streams"))
 
-	outsider := store.User{Roles: []string{store.RoleViewer}}
+	outsider := domain.User{Roles: []string{domain.RoleViewer}}
 	assert.False(t, canReadClusterPath(outsider, clusterIDFromPath("/api/v1/clusters/"+upper+"/streams"), "/api/v1/clusters/"+upper+"/streams"))
 }
 
 func TestCanReadClusterPath(t *testing.T) {
 	clusterID := "550e8400-e29b-41d4-a716-446655440000"
-	accountUser := store.User{
-		Roles: []string{store.RoleViewer},
-		Grants: []store.AccessGrant{{
-			ResourceType: store.ResourceAccount,
+	accountUser := domain.User{
+		Roles: []string{domain.RoleViewer},
+		Grants: []domain.AccessGrant{{
+			ResourceType: domain.ResourceAccount,
 			ResourceKey:  clusterID + ":Default",
-			Role:         store.GrantAdmin,
+			Role:         domain.GrantAdmin,
 		}},
 	}
 
@@ -159,12 +161,12 @@ func TestCanReadClusterPath(t *testing.T) {
 	assert.False(t, canReadClusterPath(accountUser, clusterID, "/api/v1/clusters/"+clusterID+"/topology"))
 	assert.False(t, canReadClusterPath(accountUser, clusterID, "/api/v1/clusters/"+clusterID+"/monitoring/varz"))
 
-	systemUser := store.User{
-		Roles: []string{store.RoleViewer},
-		Grants: []store.AccessGrant{{
-			ResourceType: store.ResourceSystem,
+	systemUser := domain.User{
+		Roles: []string{domain.RoleViewer},
+		Grants: []domain.AccessGrant{{
+			ResourceType: domain.ResourceSystem,
 			ResourceKey:  clusterID,
-			Role:         store.GrantAdmin,
+			Role:         domain.GrantAdmin,
 		}},
 	}
 	assert.True(t, canReadClusterPath(systemUser, clusterID, "/api/v1/clusters/"+clusterID+"/streams"))
@@ -173,12 +175,12 @@ func TestCanReadClusterPath(t *testing.T) {
 
 func TestCanMutateClusterPathAccountAdminWithoutClusterWrite(t *testing.T) {
 	clusterID := "550e8400-e29b-41d4-a716-446655440000"
-	accountAdmin := store.User{
-		Roles: []string{store.RoleViewer},
-		Grants: []store.AccessGrant{{
-			ResourceType: store.ResourceAccount,
+	accountAdmin := domain.User{
+		Roles: []string{domain.RoleViewer},
+		Grants: []domain.AccessGrant{{
+			ResourceType: domain.ResourceAccount,
 			ResourceKey:  clusterID + ":Default",
-			Role:         store.GrantAdmin,
+			Role:         domain.GrantAdmin,
 		}},
 	}
 

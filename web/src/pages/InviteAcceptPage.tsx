@@ -44,7 +44,11 @@ export default function InviteAcceptPage() {
   }, [token]);
 
   const loadInvite = useCallback(() => {
-    if (!token) return;
+    if (!token) {
+      setLoading(false);
+      setLoadError(new Error(t("auth.invalidInvite")));
+      return;
+    }
     const gen = ++loadGenRef.current;
     setLoading(true);
     setLoadError(null);
@@ -62,7 +66,7 @@ export default function InviteAcceptPage() {
       .finally(() => {
         if (gen === loadGenRef.current) setLoading(false);
       });
-  }, [token]);
+  }, [token, t]);
 
   useEffect(() => {
     loadInvite();

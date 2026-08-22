@@ -74,8 +74,7 @@ func WrapError(err error) *Error {
 	if err == nil {
 		return nil
 	}
-	var aerr *Error
-	if errors.As(err, &aerr) {
+	if aerr, ok := errors.AsType[*Error](err); ok {
 		return aerr
 	}
 

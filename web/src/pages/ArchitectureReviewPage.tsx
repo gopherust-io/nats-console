@@ -13,8 +13,7 @@ import {
 import { demoArchitectureScore, fetchArchitectureScore } from "../lib/architectureScore";
 import { fetchAssistantConfig } from "../lib/assistant";
 import { useCluster } from "../lib/cluster";
-import { MONITORING_POLL_MS } from "../lib/constants";
-import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
+import { clusterQueryKey } from "../lib/query";
 
 export default function ArchitectureReviewPage() {
   const { t } = useTranslation();
@@ -32,14 +31,15 @@ export default function ArchitectureReviewPage() {
 
   const reviewQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "architecture-review"),
-    queryFn: () => fetchArchitectureReview(clusterId!, { fresh: true }),
+    queryFn: () => fetchArchitectureReview(clusterId!),
     enabled: Boolean(clusterId) && !forceSample,
-    refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
+    staleTime: 5 * 60_000,
+    refetchInterval: false,
   });
 
   const scoreQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "architecture-score"),
-    queryFn: () => fetchArchitectureScore(clusterId!, { fresh: true }),
+    queryFn: () => fetchArchitectureScore(clusterId!),
     enabled: Boolean(clusterId) && !forceSample,
     staleTime: 60_000,
   });
@@ -52,7 +52,7 @@ export default function ArchitectureReviewPage() {
 
   const demo = useMemo(() => demoArchitectureReview(), []);
   const demoScore = useMemo(() => demoArchitectureScore(), []);
-  const useDemo = forceSample || !clusterId || reviewQuery.isError;
+  const useDemo = forceSample || !clusterId;
   const snapshot: ArchitectureReviewSnapshot = useDemo
     ? demo
     : (reviewQuery.data ?? demo);
@@ -108,7 +108,7 @@ export default function ArchitectureReviewPage() {
       {clusterId && reviewQuery.isLoading && !forceSample && !reviewQuery.data && (
         <div className="skeleton skeleton--panel" />
       )}
-      {(forceSample || !reviewQuery.isLoading || reviewQuery.data || !clusterId) && (
+      {(forceSample || (!reviewQuery.isError && (!reviewQuery.isLoading || reviewQuery.data)) || !clusterId) && (
         <ArchitectureReviewPanel
           snapshot={snapshot}
           reply={aiReply}

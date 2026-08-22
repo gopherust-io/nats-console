@@ -46,7 +46,7 @@ export default function HiddenBottlenecksPage() {
   });
 
   const demo = useMemo(() => demoHiddenBottlenecks(), []);
-  const useDemo = forceSample || !clusterId || bottlenecksQuery.isError;
+  const useDemo = forceSample || !clusterId;
   const snapshot: HiddenBottleneckSnapshot = useDemo
     ? demo
     : (bottlenecksQuery.data ?? demo);
@@ -93,6 +93,7 @@ export default function HiddenBottlenecksPage() {
           onRetry={() => void bottlenecksQuery.refetch()}
         />
       )}
+      {(forceSample || !bottlenecksQuery.isError || !clusterId) && (
       <HiddenBottlenecksPanel
         snapshot={snapshot}
         reply={aiReply}
@@ -102,6 +103,7 @@ export default function HiddenBottlenecksPage() {
         sample={sample}
         filterConsumer={filterConsumer ?? undefined}
       />
+      )}
     </>
   );
 }

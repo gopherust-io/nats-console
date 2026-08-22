@@ -34,7 +34,7 @@ export default function ChaosStoryPage() {
 
   const seedQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "chaos-story-seed"),
-    queryFn: () => fetchChaosStorySeed(clusterId!, { fresh: true }),
+    queryFn: () => fetchChaosStorySeed(clusterId!),
     enabled: Boolean(clusterId) && !forceSample,
     refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS * 5),
   });

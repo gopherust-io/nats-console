@@ -26,7 +26,6 @@ for (const vp of VIEWPORTS) {
     test("loads systems shell without horizontal overflow", async ({ page }) => {
       await mockShell(page);
       await page.goto("/systems");
-      await expect(page.getByRole("button", { name: /Switch to Console/i })).toBeVisible();
       await expect(page.getByRole("button", { name: "Notifications" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Open user menu" })).toBeVisible();
       await assertNoHorizontalOverflow(page);
@@ -37,33 +36,26 @@ for (const vp of VIEWPORTS) {
           return { left: r.left, right: r.right, top: r.top };
         }),
       );
-      expect(boxes.length).toBeGreaterThanOrEqual(3);
+      expect(boxes.length).toBeGreaterThanOrEqual(2);
       for (const box of boxes) {
         expect(box.left).toBeGreaterThanOrEqual(0);
         expect(box.right).toBeLessThanOrEqual(vp.width + 1);
       }
     });
 
-    test("theme toggle persists across reload", async ({ page }) => {
+    test("stays on dark theme after reload", async ({ page }) => {
       await mockShell(page);
       await page.goto("/systems");
-      const toggle = page.getByRole("button", { name: /Switch to Console/i });
-      await expect(toggle).toBeVisible();
-
-      const before = await page.evaluate(() => document.documentElement.getAttribute("data-theme"));
-      await toggle.click();
       await expect
         .poll(async () => page.evaluate(() => document.documentElement.getAttribute("data-theme")))
-        .not.toBe(before);
-      const after = await page.evaluate(() => document.documentElement.getAttribute("data-theme"));
-      expect(["control", "control-light"]).toContain(after);
+        .toBe("control");
 
       await mockShell(page);
       await page.reload();
-      await expect(page.getByRole("button", { name: /Switch to Console/i })).toBeVisible();
       await expect
         .poll(async () => page.evaluate(() => document.documentElement.getAttribute("data-theme")))
-        .toBe(after);
+        .toBe("control");
+      expect(await page.evaluate(() => localStorage.getItem("nats-consol-theme"))).toBe("control");
     });
   });
 }

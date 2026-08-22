@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/repo"
 	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/nats-consol/tests/testutil"
 )
@@ -63,7 +63,7 @@ func TestStoreEventCatalogCRUD(t *testing.T) {
 
 	require.NoError(t, st.DeleteEventCatalogEntry(ctx, clusterID, "orders.created"))
 	_, err = st.GetEventCatalogEntry(ctx, clusterID, "orders.created")
-	require.ErrorIs(t, err, store.ErrEventCatalogEntryNotFound)
+	require.ErrorIs(t, err, repo.ErrEventCatalogEntryNotFound)
 
 	_, err = st.UpsertEventCatalogEntry(ctx, clusterID, "orders.>", "", domain.EventCatalogUpsert{Owner: "x"})
 	require.Error(t, err)

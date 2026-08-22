@@ -536,6 +536,42 @@
   animation: pulse-dot 1.2s ease-in-out infinite;
 }
 
+/* Soft traveling highlight along card top edges */
+@keyframes card-top-shimmer {
+  0% {
+    background-position: 140% 0;
+    opacity: 0.35;
+  }
+  50% {
+    background-position: 50% 0;
+    opacity: 0.75;
+  }
+  100% {
+    background-position: -40% 0;
+    opacity: 0.35;
+  }
+}
+
+.card::before,
+.stat-card::before,
+.panel::before,
+.nc-system-card::before,
+.nc-create-card::before,
+.nc-usage-card::before,
+.replicas-card::before,
+.replicas-panel::before,
+.raft-election::before,
+.raft-node::before,
+.arch-review::before,
+.nc-menu__panel::before,
+.nc-menu__header::before,
+.nc-menu__item::before {
+  background-size: 220% 100%;
+  background-repeat: no-repeat;
+  box-shadow: 0 0 10px 1px rgba(255, 255, 255, 0.035);
+  animation: card-top-shimmer 7.5s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -160,10 +160,11 @@ func startPaymentProcessor(ctx context.Context, shared libnats.Client) error {
 	}
 
 	kv, err := client.KV().CreateOrUpdate(ctx, libnats.KeyValueConfig{
-		Bucket:  kvIdempotencyBucket,
-		TTL:     10 * time.Minute,
-		History: 1,
-		Storage: libnats.MemoryStorage,
+		Bucket:   kvIdempotencyBucket,
+		TTL:      10 * time.Minute,
+		History:  1,
+		Storage:  libnats.FileStorage,
+		Replicas: streamReplicas(),
 	})
 	if err != nil {
 		return fmt.Errorf("idempotency kv: %w", err)

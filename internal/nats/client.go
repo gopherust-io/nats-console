@@ -14,13 +14,12 @@ import (
 
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/domain"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/repo"
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
-// Client wraps gopherust-io/nats with console-specific helpers (monitoring URL, domain mapping).
 type Client struct {
-	inner      libnats.Client
+	natsCl     libnats.Client
 	seqCache   *seqExistsCache
 	monitoring string
 }
@@ -38,105 +37,112 @@ func Connect(ctx context.Context, cfg config.Config, hooks ConnectionHooks) (*Cl
 	return dial(ctx, cfg, cfg.NATS.URL, cfg.NATS.CredsFile, cfg.NATS.Token, cfg.NATS.MonitoringURL, hooks)
 }
 
-func ConnectCluster(ctx context.Context, cfg config.Config, cluster store.Cluster, hooks ConnectionHooks) (*Client, error) {
+func ConnectCluster(ctx context.Context, cfg config.Config, cluster repo.Cluster, hooks ConnectionHooks) (*Client, error) {
 	return dial(ctx, cfg, cluster.NATSURL, cluster.CredsFilePath, cluster.Token, cluster.MonitoringURL, hooks)
 }
 
 func dial(
 	ctx context.Context,
 	appCfg config.Config,
-	address, credsFile, token, monitoringURL string,
+	address, credsFile,
+	token, monitoringURL string,
 	hooks ConnectionHooks,
 ) (*Client, error) {
 	cfg := libnats.DefaultConfig()
 	cfg.Conn.Address = address
-	cfg.Conn.ClientName = "nats-consol"
+	cfg.Conn.ClientName = appCfg.ProjectName
 	cfg.Conn.CredentialsFile = credsFile
 	cfg.Conn.Secret = token
 	if appCfg.RequestTimeout > 0 {
 		cfg.Conn.ConnectTimeout = appCfg.RequestTimeout
 	}
-	cfg.Conn.MaxReconnect = -1
-	cfg.Conn.ReconnectWait = 2 * time.Second
-	cfg.Conn.AllowReconnect = true
-	cfg.Conn.InitialRetryAttempts = 0 // single attempt; Manager retries via cache/dial
+	cfg.Conn.MaxReconnect = appCfg.NATS.MaxReconnect
+	cfg.Conn.ReconnectWait = appCfg.NATS.ReconnectWait
+	cfg.Conn.AllowReconnect = appCfg.NATS.AllowReconnect
+	// Multi-URL cluster seeds: randomize initial peer (balance), reconnect to survivors
+	cfg.Conn.DontRandomize = appCfg.NATS.DontRandomize
+	// single attempt by default, manager retries via cache/dial
+	cfg.Conn.InitialRetryAttempts = appCfg.NATS.InitialRetryAttempts
 	cfg.Conn.OnDisconnect = hooks.OnDisconnect
 	cfg.Conn.OnReconnect = hooks.OnReconnect
 	cfg.Conn.OnClosed = hooks.OnClosed
-	cfg.Metrics.AllowMetrics = true
-	cfg.Metrics.AllowTracing = true
+	cfg.Metrics.AllowMetrics = appCfg.NATS.AllowMetrics
+	cfg.Metrics.AllowTracing = appCfg.NATS.AllowTracing
 
-	tlsCfg, err := loadNATSTLS(appCfg)
+	tlsCfg, err := func() (libnats.ConnectionTLS, error) {
+		out := libnats.ConnectionTLS{
+			ServerName:         appCfg.NATS.TlsServerName,
+			InsecureSkipVerify: appCfg.NATS.TlsInsecureSkipVerify,
+		}
+		hasMaterial := !commonstrings.IsEmpty(appCfg.NATS.TlsCAFile) ||
+			!commonstrings.IsEmpty(appCfg.NATS.TlsCertFile) ||
+			!commonstrings.IsEmpty(appCfg.NATS.TlsKeyFile) ||
+			!commonstrings.IsEmpty(appCfg.NATS.TlsServerName) ||
+			appCfg.NATS.TlsInsecureSkipVerify
+
+		if !hasMaterial {
+			return out, nil
+		}
+		if (commonstrings.IsEmpty(appCfg.NATS.TlsCertFile)) != (commonstrings.IsEmpty(appCfg.NATS.TlsKeyFile)) {
+			return out, errors.New("NATS_TLS_CERT_FILE and NATS_TLS_KEY_FILE must be set together")
+		}
+		if !commonstrings.IsEmpty(appCfg.NATS.TlsCAFile) {
+			ca, err := os.ReadFile(appCfg.NATS.TlsCAFile)
+			if err != nil {
+				return out, fmt.Errorf("read NATS_TLS_CA_FILE: %w", err)
+			}
+			out.CA = ca
+		}
+		if !commonstrings.IsEmpty(appCfg.NATS.TlsCertFile) {
+			cert, err := os.ReadFile(appCfg.NATS.TlsCertFile)
+			if err != nil {
+				return out, fmt.Errorf("read NATS_TLS_CERT_FILE: %w", err)
+			}
+			key, err := os.ReadFile(appCfg.NATS.TlsKeyFile)
+			if err != nil {
+				return out, fmt.Errorf("read NATS_TLS_KEY_FILE: %w", err)
+			}
+			out.Cert = cert
+			out.Key = key
+		}
+		return out, nil
+	}()
 	if err != nil {
 		return nil, err
 	}
-	cfg.Conn.TLS = tlsCfg
 
-	inner, err := libnats.NewClient(ctx, &cfg)
+	cfg.Conn.TLS = tlsCfg
+	natsCl, err := libnats.NewClient(ctx, &cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect to nats: %w", err)
 	}
 
 	return &Client{
-		inner:      inner,
+		natsCl:     natsCl,
 		monitoring: monitoringURL,
 	}, nil
 }
 
-func loadNATSTLS(cfg config.Config) (libnats.ConnectionTLS, error) {
-	out := libnats.ConnectionTLS{
-		ServerName:         cfg.NATS.TlsServerName,
-		InsecureSkipVerify: cfg.NATS.TlsInsecureSkipVerify,
+func (c *Client) Close() error {
+	if c == nil || c.natsCl == nil {
+		return nil
 	}
-	hasMaterial := !commonstrings.IsEmpty(cfg.NATS.TlsCAFile) || !commonstrings.IsEmpty(cfg.NATS.TlsCertFile) || !commonstrings.IsEmpty(cfg.NATS.TlsKeyFile) || !commonstrings.IsEmpty(cfg.NATS.TlsServerName) || cfg.NATS.TlsInsecureSkipVerify
-	if !hasMaterial {
-		return out, nil
-	}
-	if (commonstrings.IsEmpty(cfg.NATS.TlsCertFile)) != (commonstrings.IsEmpty(cfg.NATS.TlsKeyFile)) {
-		return out, errors.New("NATS_TLS_CERT_FILE and NATS_TLS_KEY_FILE must be set together")
-	}
-	if !commonstrings.IsEmpty(cfg.NATS.TlsCAFile) {
-		ca, err := os.ReadFile(cfg.NATS.TlsCAFile)
-		if err != nil {
-			return out, fmt.Errorf("read NATS_TLS_CA_FILE: %w", err)
-		}
-		out.CA = ca
-	}
-	if !commonstrings.IsEmpty(cfg.NATS.TlsCertFile) {
-		cert, err := os.ReadFile(cfg.NATS.TlsCertFile)
-		if err != nil {
-			return out, fmt.Errorf("read NATS_TLS_CERT_FILE: %w", err)
-		}
-		key, err := os.ReadFile(cfg.NATS.TlsKeyFile)
-		if err != nil {
-			return out, fmt.Errorf("read NATS_TLS_KEY_FILE: %w", err)
-		}
-		out.Cert = cert
-		out.Key = key
-	}
-	return out, nil
-}
-
-func (c *Client) Close() {
-	if c == nil || c.inner == nil {
-		return
-	}
-	_ = c.inner.Connector().Shutdown()
+	return c.natsCl.Connector().Shutdown()
 }
 
 func (c *Client) IsAlive() bool {
-	if c == nil || c.inner == nil {
+	if c == nil || c.natsCl == nil {
 		return false
 	}
-	conn := c.inner.Connector().Conn()
+	conn := c.natsCl.Connector().Conn()
 	return conn != nil && conn.IsConnected() && !conn.IsClosed()
 }
 
 func (c *Client) ServerName() string {
-	if c == nil || c.inner == nil {
+	if c == nil || c.natsCl == nil {
 		return ""
 	}
-	conn := c.inner.Connector().Conn()
+	conn := c.natsCl.Connector().Conn()
 	if conn == nil || !conn.IsConnected() {
 		return ""
 	}
@@ -144,71 +150,71 @@ func (c *Client) ServerName() string {
 }
 
 func (c *Client) JetStream() nats.JetStreamContext {
-	return c.inner.Connector().JetStream()
+	return c.natsCl.Connector().JetStream()
 }
 
 func (c *Client) Conn() *nats.Conn {
-	return c.inner.Connector().Conn()
+	return c.natsCl.Connector().Conn()
 }
 
 func (c *Client) Lib() libnats.Client {
-	return c.inner
+	return c.natsCl
 }
 
 func (c *Client) AccountInfo(ctx context.Context) (*nats.AccountInfo, error) {
-	return c.inner.Connector().AccountInfo(ctx)
+	return c.natsCl.Connector().AccountInfo(ctx)
 }
 
 func (c *Client) StreamNames(ctx context.Context) ([]string, error) {
-	return libnats.StreamNames(ctx, c.inner.Streams())
+	return libnats.StreamNames(ctx, c.natsCl.Streams())
 }
 
 func (c *Client) ListStreams(ctx context.Context, offset, limit int) ([]*nats.StreamInfo, int, error) {
-	return c.inner.Streams().ListStreamsPage(ctx, offset, limit)
+	return c.natsCl.Streams().ListStreamsPage(ctx, offset, limit)
 }
 
 func (c *Client) StreamInfo(ctx context.Context, name string) (*nats.StreamInfo, error) {
-	return c.inner.Streams().StreamInfo(ctx, name)
+	return c.natsCl.Streams().StreamInfo(ctx, name)
 }
 
 func (c *Client) AddStream(ctx context.Context, cfg *nats.StreamConfig) (*nats.StreamInfo, error) {
-	return c.inner.Streams().AddStream(ctx, cfg)
+	return c.natsCl.Streams().AddStream(ctx, cfg)
 }
 
 func (c *Client) UpdateStream(ctx context.Context, cfg *nats.StreamConfig) (*nats.StreamInfo, error) {
-	return c.inner.Streams().UpdateStream(ctx, cfg)
+	return c.natsCl.Streams().UpdateStream(ctx, cfg)
 }
 
 func (c *Client) DeleteStream(ctx context.Context, name string) error {
-	return c.inner.Streams().DeleteStream(ctx, name)
+	return c.natsCl.Streams().DeleteStream(ctx, name)
 }
 
 func (c *Client) PurgeStream(ctx context.Context, name string) error {
-	return c.inner.Streams().PurgeStream(ctx, name)
+	return c.natsCl.Streams().PurgeStream(ctx, name)
 }
 
 func (c *Client) ConsumerNames(ctx context.Context, stream string) ([]string, error) {
-	return c.inner.Consumers().ConsumerNames(ctx, stream)
+	return c.natsCl.Consumers().ConsumerNames(ctx, stream)
 }
 
 func (c *Client) ListConsumers(ctx context.Context, stream string, offset, limit int) ([]*nats.ConsumerInfo, int, error) {
-	return c.inner.Consumers().ListConsumersPage(ctx, stream, offset, limit)
+	return c.natsCl.Consumers().ListConsumersPage(ctx, stream, offset, limit)
 }
 
 func (c *Client) ConsumerInfo(ctx context.Context, stream, consumer string) (*nats.ConsumerInfo, error) {
-	return c.inner.Consumers().ConsumerInfo(ctx, stream, consumer)
+	return c.natsCl.Consumers().ConsumerInfo(ctx, stream, consumer)
 }
 
 func (c *Client) AddConsumer(ctx context.Context, stream string, cfg *nats.ConsumerConfig) (*nats.ConsumerInfo, error) {
-	return c.inner.Consumers().AddConsumer(ctx, stream, cfg)
+	return c.natsCl.Consumers().AddConsumer(ctx, stream, cfg)
 }
 
 func (c *Client) UpdateConsumer(ctx context.Context, stream string, cfg *nats.ConsumerConfig) (*nats.ConsumerInfo, error) {
-	return c.inner.Consumers().UpdateConsumer(ctx, stream, cfg)
+	return c.natsCl.Consumers().UpdateConsumer(ctx, stream, cfg)
 }
 
 func (c *Client) DeleteConsumer(ctx context.Context, stream, consumer string) error {
-	return c.inner.Consumers().DeleteConsumer(ctx, stream, consumer)
+	return c.natsCl.Consumers().DeleteConsumer(ctx, stream, consumer)
 }
 
 func (c *Client) ReplayConsumer(ctx context.Context, stream, consumer string, req domain.ReplayConsumerRequest) (domain.ReplayConsumerResult, error) {
@@ -216,100 +222,93 @@ func (c *Client) ReplayConsumer(ctx context.Context, stream, consumer string, re
 		return domain.ReplayConsumerResult{}, err
 	}
 
-	opts, err := replayOptsFromRequest(req)
+	opts, err := func() ([]libnats.ReplayOpt, error) {
+		opts := make([]libnats.ReplayOpt, 0, 8)
+
+		oneMsg := req.NormalizedFrom() == domain.ReplayFromSeq &&
+			req.Seq > 0 &&
+			req.UntilSeq == req.Seq &&
+			req.Limit == 1
+
+		if oneMsg {
+			opts = append(opts, libnats.OneMessage(req.Seq))
+		} else {
+			switch req.NormalizedFrom() {
+			case domain.ReplayFromSeq:
+				opts = append(opts, libnats.FromSeq(req.Seq))
+			case domain.ReplayFromTime:
+				t, err := req.ParseTime()
+				if err != nil {
+					return nil, fmt.Errorf("time: %w", err)
+				}
+				opts = append(opts, libnats.FromTime(t))
+			case domain.ReplayFromBeginning:
+				opts = append(opts, libnats.FromBeginning())
+			case domain.ReplayFromNew:
+				opts = append(opts, libnats.FromNew())
+			}
+
+			if req.UntilSeq > 0 {
+				opts = append(opts, libnats.UntilSeq(req.UntilSeq))
+			}
+			if !commonstrings.IsEmpty(strings.TrimSpace(req.UntilTime)) {
+				t, err := req.ParseUntilTime()
+				if err != nil {
+					return nil, fmt.Errorf("untilTime: %w", err)
+				}
+				opts = append(opts, libnats.UntilTime(t))
+			}
+			if req.Limit > 0 {
+				opts = append(opts, libnats.Limit(req.Limit))
+			}
+		}
+
+		if strings.EqualFold(strings.TrimSpace(req.ReplayPolicy), domain.ReplayPolicyOriginal) {
+			opts = append(opts, libnats.WithReplayPolicy(libnats.ReplayOriginal))
+		}
+		if filter := strings.TrimSpace(req.FilterSubject); !commonstrings.IsEmpty(filter) {
+			opts = append(opts, libnats.WithFilterSubject(filter))
+		}
+		if durable := strings.TrimSpace(req.Durable); !commonstrings.IsEmpty(durable) && req.NormalizedMode() == domain.ReplayModeSidecar {
+			opts = append(opts, libnats.WithReplayDurable(durable))
+		}
+
+		return opts, nil
+	}()
 	if err != nil {
 		return domain.ReplayConsumerResult{}, err
 	}
 
 	mode := req.NormalizedMode()
-	var libRes libnats.ReplayConsumerResult
+	res := libnats.ReplayConsumerResult{}
+
 	switch mode {
 	case domain.ReplayModeSidecar:
-		libRes, err = c.inner.Replay().CreateReplayConsumer(ctx, stream, consumer, opts...)
+		res, err = c.natsCl.Replay().CreateReplayConsumer(ctx, stream, consumer, opts...)
 	default:
-		libRes, err = c.inner.Replay().ResetConsumer(ctx, stream, consumer, opts...)
+		res, err = c.natsCl.Replay().ResetConsumer(ctx, stream, consumer, opts...)
 	}
 	if err != nil {
 		return domain.ReplayConsumerResult{}, err
 	}
 
-	return mapReplayResult(libRes, mode), nil
-}
-
-func mapReplayResult(libRes libnats.ReplayConsumerResult, mode string) domain.ReplayConsumerResult {
 	out := domain.ReplayConsumerResult{
-		Durable:  libRes.Durable,
+		Durable:  res.Durable,
 		Mode:     mode,
-		StartSeq: libRes.StartSeq,
-		UntilSeq: libRes.UntilSeq,
-		Limit:    libRes.Limit,
+		StartSeq: res.StartSeq,
+		UntilSeq: res.UntilSeq,
+		Limit:    res.Limit,
 	}
-	if libRes.StartTime != nil {
-		s := libRes.StartTime.UTC().Format(time.RFC3339Nano)
+	if res.StartTime != nil {
+		s := res.StartTime.UTC().Format(time.RFC3339Nano)
 		out.StartTime = &s
 	}
-	if libRes.UntilTime != nil {
-		s := libRes.UntilTime.UTC().Format(time.RFC3339Nano)
+	if res.UntilTime != nil {
+		s := res.UntilTime.UTC().Format(time.RFC3339Nano)
 		out.UntilTime = &s
 	}
 
-	return out
-}
-
-func replayOptsFromRequest(req domain.ReplayConsumerRequest) ([]libnats.ReplayOpt, error) {
-	opts := make([]libnats.ReplayOpt, 0, 8)
-
-	oneMsg := req.NormalizedFrom() == domain.ReplayFromSeq &&
-		req.Seq > 0 &&
-		req.UntilSeq == req.Seq &&
-		req.Limit == 1
-
-	if oneMsg {
-		opts = append(opts, libnats.OneMessage(req.Seq))
-	} else {
-		switch req.NormalizedFrom() {
-		case domain.ReplayFromSeq:
-			opts = append(opts, libnats.FromSeq(req.Seq))
-		case domain.ReplayFromTime:
-			t, err := req.ParseTime()
-			if err != nil {
-				return nil, fmt.Errorf("time: %w", err)
-			}
-			opts = append(opts, libnats.FromTime(t))
-		case domain.ReplayFromBeginning:
-			opts = append(opts, libnats.FromBeginning())
-		case domain.ReplayFromNew:
-			opts = append(opts, libnats.FromNew())
-		}
-
-		if req.UntilSeq > 0 {
-			opts = append(opts, libnats.UntilSeq(req.UntilSeq))
-		}
-		if !commonstrings.IsEmpty(strings.TrimSpace(req.UntilTime)) {
-			t, err := req.ParseUntilTime()
-			if err != nil {
-				return nil, fmt.Errorf("untilTime: %w", err)
-			}
-			opts = append(opts, libnats.UntilTime(t))
-		}
-		if req.Limit > 0 {
-			opts = append(opts, libnats.Limit(req.Limit))
-		}
-	}
-
-	if strings.EqualFold(strings.TrimSpace(req.ReplayPolicy), domain.ReplayPolicyOriginal) {
-		opts = append(opts, libnats.WithReplayPolicy(libnats.ReplayOriginal))
-	}
-
-	if filter := strings.TrimSpace(req.FilterSubject); !commonstrings.IsEmpty(filter) {
-		opts = append(opts, libnats.WithFilterSubject(filter))
-	}
-
-	if durable := strings.TrimSpace(req.Durable); !commonstrings.IsEmpty(durable) && req.NormalizedMode() == domain.ReplayModeSidecar {
-		opts = append(opts, libnats.WithReplayDurable(durable))
-	}
-
-	return opts, nil
+	return out, nil
 }
 
 func (c *Client) GetMessageRange(ctx context.Context, stream string, startSeq, endSeq uint64, limit int) (*domain.MessageRangeResult, error) {
@@ -317,12 +316,11 @@ func (c *Client) GetMessageRange(ctx context.Context, stream string, startSeq, e
 	if limit > 0 {
 		opts = append(opts, libnats.WithMaxMessages(limit))
 	}
-	msgs, truncated, err := c.inner.Replay().GetMsgRange(ctx, stream, startSeq, endSeq, opts...)
+	messages, truncated, err := c.natsCl.Replay().GetMsgRange(ctx, stream, startSeq, endSeq, opts...)
 	if err != nil {
 		return nil, err
 	}
-
-	return storedRangeToDomain(msgs, truncated), nil
+	return storedRangeToDomain(messages, truncated), nil
 }
 
 func (c *Client) GetMessageRangeByTime(ctx context.Context, stream string, start, end time.Time, limit int) (*domain.MessageRangeResult, error) {
@@ -330,12 +328,11 @@ func (c *Client) GetMessageRangeByTime(ctx context.Context, stream string, start
 	if limit > 0 {
 		opts = append(opts, libnats.WithMaxMessages(limit))
 	}
-	msgs, truncated, err := c.inner.Replay().GetMsgRangeByTime(ctx, stream, start, end, opts...)
+	messages, truncated, err := c.natsCl.Replay().GetMsgRangeByTime(ctx, stream, start, end, opts...)
 	if err != nil {
 		return nil, err
 	}
-
-	return storedRangeToDomain(msgs, truncated), nil
+	return storedRangeToDomain(messages, truncated), nil
 }
 
 func storedRangeToDomain(msgs []*libnats.StoredMessage, truncated bool) *domain.MessageRangeResult {
@@ -354,31 +351,35 @@ func storedRangeToDomain(msgs []*libnats.StoredMessage, truncated bool) *domain.
 }
 
 func (c *Client) GetMessage(ctx context.Context, stream string, seq uint64) (*nats.RawStreamMsg, error) {
-	return c.inner.Streams().GetMsg(ctx, stream, seq)
+	return c.natsCl.Streams().GetMsg(ctx, stream, seq)
 }
 
 func (c *Client) GetMessageNav(ctx context.Context, stream string, seq uint64, direction string) (*domain.MessageResult, error) {
-	info, err := c.inner.Streams().StreamInfo(ctx, stream)
+	info, err := c.natsCl.Streams().StreamInfo(ctx, stream)
 	if err != nil {
 		return nil, err
 	}
 
+	const (
+		next = "next"
+		prev = "prev"
+	)
 	var msg *nats.RawStreamMsg
 	switch direction {
-	case "next":
-		msg, err = c.inner.Streams().GetNextMsgAfter(ctx, stream, seq)
+	case next:
+		msg, err = c.natsCl.Streams().GetNextMsgAfter(ctx, stream, seq)
 		if err != nil {
 			return nil, err
 		}
-	case "prev":
+	case prev:
 		if seq <= info.State.FirstSeq {
 			return nil, nats.ErrMsgNotFound
 		}
-		prev, ok := c.findPrevSeq(ctx, stream, seq, info.State.FirstSeq)
+		prevSeq, ok := c.findPrevSeq(ctx, stream, seq, info.State.FirstSeq)
 		if !ok {
 			return nil, nats.ErrMsgNotFound
 		}
-		msg, err = c.inner.Streams().GetMsg(ctx, stream, prev)
+		msg, err = c.natsCl.Streams().GetMsg(ctx, stream, prevSeq)
 		if err != nil {
 			return nil, err
 		}
@@ -386,7 +387,7 @@ func (c *Client) GetMessageNav(ctx context.Context, stream string, seq uint64, d
 		if !commonstrings.IsEmpty(direction) {
 			return nil, fmt.Errorf("invalid direction %q", direction)
 		}
-		msg, err = c.inner.Streams().GetMsg(ctx, stream, seq)
+		msg, err = c.natsCl.Streams().GetMsg(ctx, stream, seq)
 		if err != nil {
 			return nil, err
 		}
@@ -395,13 +396,13 @@ func (c *Client) GetMessageNav(ctx context.Context, stream string, seq uint64, d
 	result := &domain.MessageResult{
 		Message: domain.StreamMessageFromRaw(msg),
 	}
-	target := msg.Sequence
-	c.ensureSeqCache().mark(stream, target, true)
-	if prev, ok := c.findPrevSeq(ctx, stream, target, info.State.FirstSeq); ok {
-		result.Navigation.PrevSeq = &prev
+
+	c.ensureSeqCache().mark(stream, msg.Sequence, true)
+	if prevSeq, ok := c.findPrevSeq(ctx, stream, msg.Sequence, info.State.FirstSeq); ok {
+		result.Navigation.PrevSeq = &prevSeq
 	}
-	if next, ok := c.findNextSeq(ctx, stream, target, info.State.LastSeq); ok {
-		result.Navigation.NextSeq = &next
+	if nextSeq, ok := c.findNextSeq(ctx, stream, msg.Sequence, info.State.LastSeq); ok {
+		result.Navigation.NextSeq = &nextSeq
 	}
 	return result, nil
 }
@@ -414,7 +415,7 @@ func (c *Client) ensureSeqCache() *seqExistsCache {
 }
 
 // findPrevSeq locates the nearest existing sequence below seq using binary search
-// over the gap range (O(log gap) probes) with a per-client existence cache.
+// over the gap range (O(log gap) probes) with a per-client existence cache
 func (c *Client) findPrevSeq(ctx context.Context, stream string, seq, firstSeq uint64) (uint64, bool) {
 	if seq <= firstSeq {
 		return 0, false
@@ -428,7 +429,7 @@ func (c *Client) findPrevSeq(ctx context.Context, stream string, seq, firstSeq u
 		exists, known := cache.known(stream, mid)
 		var err error
 		if !known {
-			_, err = c.inner.Streams().GetMsg(ctx, stream, mid)
+			_, err = c.natsCl.Streams().GetMsg(ctx, stream, mid)
 			if err == nil {
 				exists = true
 				cache.mark(stream, mid, true)
@@ -457,7 +458,7 @@ func (c *Client) findNextSeq(ctx context.Context, stream string, seq, lastSeq ui
 	if seq >= lastSeq {
 		return 0, false
 	}
-	msg, err := c.inner.Streams().GetNextMsgAfter(ctx, stream, seq)
+	msg, err := c.natsCl.Streams().GetNextMsgAfter(ctx, stream, seq)
 	if err != nil {
 		return 0, false
 	}
@@ -465,7 +466,7 @@ func (c *Client) findNextSeq(ctx context.Context, stream string, seq, lastSeq ui
 }
 
 func (c *Client) PublishStreamMessage(ctx context.Context, stream string, in domain.PublishMessageRequest) (domain.PublishMessageResult, error) {
-	info, err := c.inner.Streams().StreamInfo(ctx, stream)
+	info, err := c.natsCl.Streams().StreamInfo(ctx, stream)
 	if err != nil {
 		return domain.PublishMessageResult{}, err
 	}
@@ -480,7 +481,7 @@ func (c *Client) PublishStreamMessage(ctx context.Context, stream string, in dom
 		return domain.PublishMessageResult{}, err
 	}
 
-	ack, err := c.inner.PublishRaw(ctx, subject, data, in.Headers)
+	ack, err := c.natsCl.PublishRaw(ctx, subject, data, in.Headers)
 	if err != nil {
 		return domain.PublishMessageResult{}, err
 	}
@@ -493,7 +494,7 @@ func (c *Client) PublishStreamMessage(ctx context.Context, stream string, in dom
 }
 
 func (c *Client) Monitoring(ctx context.Context, path string) ([]byte, error) {
-	return c.inner.Monitoring().Fetch(ctx, c.monitoring, path)
+	return c.natsCl.Monitoring().Fetch(ctx, c.monitoring, path)
 }
 
 func (c *Client) ProbeRequest(

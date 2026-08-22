@@ -6,6 +6,7 @@ import IncidentReconstructionPanel from "../components/IncidentReconstructionPan
 import EmptyState from "../components/ui/EmptyState";
 import PageHeader from "../components/ui/PageHeader";
 import QueryErrorState from "../components/ui/QueryErrorState";
+import VirtualTable from "../components/VirtualTable";
 import {
   api,
   AuditEntry,
@@ -274,89 +275,80 @@ export default function AuditPage() {
 
       {!auditQuery.isLoading && entries.length > 0 && (
         <div className="table-wrap audit-table">
-          <div className="audit-table__header" role="row">
-            <div className="audit-table__cell audit-table__cell--time" role="columnheader">
-              {t("audit.time")}
-            </div>
-            <div className="audit-table__cell" role="columnheader">
-              {t("audit.actor")}
-            </div>
-            <div className="audit-table__cell audit-table__cell--action" role="columnheader">
-              {t("audit.action")}
-            </div>
-            <div className="audit-table__cell audit-table__cell--cluster" role="columnheader">
-              {t("audit.cluster")}
-            </div>
-            <div className="audit-table__cell audit-table__cell--resource" role="columnheader">
-              {t("audit.resource")}
-            </div>
-            <div className="audit-table__cell audit-table__cell--ip" role="columnheader">
-              {t("audit.ip")}
-            </div>
-            <div className="audit-table__cell audit-table__cell--details" role="columnheader">
-              {t("audit.details")}
-            </div>
-          </div>
-
-          <div className="audit-table__body">
-            {entries.map((entry) => {
+          <VirtualTable
+            columns={[
+              { id: "time", header: t("audit.time"), width: "minmax(140px, 1.1fr)" },
+              { id: "actor", header: t("audit.actor"), width: "minmax(100px, 1fr)" },
+              { id: "action", header: t("audit.action"), width: "minmax(120px, 1fr)" },
+              { id: "cluster", header: t("audit.cluster"), width: "minmax(100px, 0.9fr)" },
+              { id: "resource", header: t("audit.resource"), width: "minmax(140px, 1.2fr)" },
+              { id: "ip", header: t("audit.ip"), width: "minmax(90px, 0.8fr)" },
+              { id: "details", header: t("audit.details"), width: "100px" },
+            ]}
+            items={entries}
+            rowHeight={52}
+            detailHeight={220}
+            maxHeight={640}
+            empty={t("audit.emptyTitle")}
+            getKey={(entry) => entry.id}
+            isDetailOpen={(entry) => expandedEntryId === entry.id}
+            getRowClassName={(entry) =>
+              expandedEntryId === entry.id ? "audit-entry audit-entry--expanded" : "audit-entry"
+            }
+            renderCell={(entry, columnId) => {
               const isExpanded = expandedEntryId === entry.id;
-              return (
-                <article key={entry.id} className={`audit-entry${isExpanded ? " audit-entry--expanded" : ""}`}>
-                  <div className="audit-entry__row" role="row">
-                    <div className="audit-table__cell audit-table__cell--time" role="cell">
-                      <time dateTime={entry.timestamp}>{new Date(entry.timestamp).toLocaleString()}</time>
-                    </div>
-                    <div className="audit-table__cell" role="cell">
-                      {entry.actor || emDash}
-                    </div>
-                    <div className="audit-table__cell audit-table__cell--action" role="cell">
-                      <span className="audit-action">{entry.action}</span>
-                    </div>
-                    <div className="audit-table__cell audit-table__cell--cluster" role="cell">
-                      {entry.clusterId ? (
-                        <span className="mono virtual-table__truncate" title={entry.clusterId}>
-                          {formatClusterId(entry.clusterId, emDash)}
-                        </span>
-                      ) : (
-                        emDash
-                      )}
-                    </div>
-                    <div className="audit-table__cell audit-table__cell--resource" role="cell">
-                      <span className="virtual-table__truncate" title={formatResource(entry, emDash)}>
-                        {formatResource(entry, emDash)}
-                      </span>
-                    </div>
-                    <div className="audit-table__cell audit-table__cell--ip" role="cell">
-                      <span className="mono">{entry.ip || emDash}</span>
-                    </div>
-                    <div className="audit-table__cell audit-table__cell--details" role="cell">
-                      <button
-                        className="btn btn--ghost btn--small"
-                        type="button"
-                        aria-expanded={isExpanded}
-                        onClick={() => toggleDetails(entry.id)}
-                      >
-                        {isExpanded ? t("audit.hide") : t("audit.show")}
-                      </button>
-                    </div>
+              switch (columnId) {
+                case "time":
+                  return <time dateTime={entry.timestamp}>{new Date(entry.timestamp).toLocaleString()}</time>;
+                case "actor":
+                  return entry.actor || emDash;
+                case "action":
+                  return <span className="audit-action">{entry.action}</span>;
+                case "cluster":
+                  return entry.clusterId ? (
+                    <span className="mono virtual-table__truncate" title={entry.clusterId}>
+                      {formatClusterId(entry.clusterId, emDash)}
+                    </span>
+                  ) : (
+                    emDash
+                  );
+                case "resource":
+                  return (
+                    <span className="virtual-table__truncate" title={formatResource(entry, emDash)}>
+                      {formatResource(entry, emDash)}
+                    </span>
+                  );
+                case "ip":
+                  return <span className="mono">{entry.ip || emDash}</span>;
+                case "details":
+                  return (
+                    <button
+                      className="btn btn--ghost btn--small"
+                      type="button"
+                      aria-expanded={isExpanded}
+                      onClick={() => toggleDetails(entry.id)}
+                    >
+                      {isExpanded ? t("audit.hide") : t("audit.show")}
+                    </button>
+                  );
+                default:
+                  return null;
+              }
+            }}
+            renderDetail={(entry) =>
+              expandedEntryId === entry.id ? (
+                <div className="audit-entry__details">
+                  <div className="audit-entry__details-head">
+                    <span className="audit-entry__details-label">{t("audit.requestDetails")}</span>
+                    {entry.requestId && (
+                      <span className="audit-entry__request-id mono">req {entry.requestId}</span>
+                    )}
                   </div>
-
-                  {isExpanded && (
-                    <div className="audit-entry__details">
-                      <div className="audit-entry__details-head">
-                        <span className="audit-entry__details-label">{t("audit.requestDetails")}</span>
-                        {entry.requestId && (
-                          <span className="audit-entry__request-id mono">req {entry.requestId}</span>
-                        )}
-                      </div>
-                      <pre className="audit-entry__json mono">{JSON.stringify(entry.details, null, 2)}</pre>
-                    </div>
-                  )}
-                </article>
-              );
-            })}
-          </div>
+                  <pre className="audit-entry__json mono">{JSON.stringify(entry.details, null, 2)}</pre>
+                </div>
+              ) : null
+            }
+          />
         </div>
       )}
     </div>

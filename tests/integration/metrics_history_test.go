@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
-	"github.com/gopherust-io/nats-consol/internal/domain"
-	"github.com/gopherust-io/nats-consol/internal/store"
-	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
-	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/repo"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
+	"github.com/gopherust-io/nats-consol/tests/testutil"
 )
 
 func TestMetricsHistoryQuery(t *testing.T) {
@@ -24,7 +25,7 @@ func TestMetricsHistoryQuery(t *testing.T) {
 	ctx := t.Context()
 
 	now := time.Now().UTC().Truncate(time.Second)
-	samples := []store.MetricSampleRow{
+	samples := []repo.MetricSampleRow{
 		{Metric: domain.MetricJetStreamStorageBytes, Value: 1024},
 		{Metric: domain.MetricJetStreamMemoryBytes, Value: 512},
 		{Metric: domain.MetricJSZMessages, Value: 10},
@@ -75,7 +76,7 @@ func TestMetricsHistoryRetentionCleanup(t *testing.T) {
 	clusterID := stack.DefaultClusterID(t)
 
 	old := time.Now().UTC().Add(-10 * 24 * time.Hour)
-	require.NoError(t, stack.Store.InsertMetricSamples(ctx, clusterID, old, []store.MetricSampleRow{
+	require.NoError(t, stack.Store.InsertMetricSamples(ctx, clusterID, old, []repo.MetricSampleRow{
 		{Metric: domain.MetricJetStreamStreams, Value: 1},
 	}))
 

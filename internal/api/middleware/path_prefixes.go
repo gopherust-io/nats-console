@@ -25,6 +25,7 @@ const (
 
 	pathPrefixHealth  = "/api/health"
 	pathPrefixOpenAPI = "/api/openapi.yaml"
+	pathPrefixSchemas = "/api/v1/schemas"
 )
 
 func requestPath(ctx *fasthttp.RequestCtx) string {
@@ -49,6 +50,7 @@ func isPublicPath(path string) bool {
 	switch path {
 	case pathPrefixHealth,
 		pathPrefixOpenAPI,
+		pathPrefixSchemas,
 		pathPrefixAuthConfig,
 		pathPrefixAuthLogin,
 		pathPrefixAuthLogout,

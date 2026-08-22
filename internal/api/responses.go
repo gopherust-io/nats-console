@@ -3,10 +3,56 @@ package api
 import (
 	"time"
 
-	"github.com/gopherust-io/nats-consol/internal/auth"
+	"github.com/gopherust-io/nats-consol/internal/api/apikit"
+	"github.com/gopherust-io/nats-consol/internal/app"
 	"github.com/gopherust-io/nats-consol/internal/domain"
-	"github.com/gopherust-io/nats-consol/internal/store"
 )
+
+// LoginRequest is the body for POST /api/v1/auth/login.
+//
+// goalign:ignore
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password" format:"password"`
+}
+
+// HealthEnvelope wraps HealthStatus in the standard API envelope (for swag).
+//
+// goalign:ignore
+type HealthEnvelope struct {
+	Data app.HealthStatus `json:"data"`
+}
+
+// AuthConfigEnvelope wraps AuthConfigResponse (for swag).
+//
+// goalign:ignore
+type AuthConfigEnvelope struct {
+	Data AuthConfigResponse `json:"data"`
+}
+
+// UserEnvelope wraps UserResponse (for swag).
+//
+// goalign:ignore
+type UserEnvelope struct {
+	Data UserResponse `json:"data"`
+}
+
+// ErrorBody is the API error payload (mirrored for swag; see httpstatus.ErrorBody).
+//
+// goalign:ignore
+type ErrorBody struct {
+	Message           string `json:"message"`
+	Code              string `json:"code"`
+	RetryAfterSeconds int    `json:"retryAfterSeconds,omitempty"`
+	Retryable         bool   `json:"retryable,omitempty"`
+}
+
+// ErrorEnvelope wraps ErrorBody (for swag).
+//
+// goalign:ignore
+type ErrorEnvelope struct {
+	Error *ErrorBody `json:"error"`
+}
 
 // goalign:ignore
 type AuthConfigResponse struct {
@@ -27,8 +73,8 @@ type UserResponse struct {
 	IsRoot      bool                 `json:"isRoot"`
 }
 
-func toUserResponse(user store.User) UserResponse {
-	return userResponseFromDomain(auth.StoreUserToDomain(user))
+func toUserResponse(user domain.User) UserResponse {
+	return userResponseFromDomain(user)
 }
 
 func userResponseFromDomain(user domain.User) UserResponse {
@@ -36,9 +82,9 @@ func userResponseFromDomain(user domain.User) UserResponse {
 		ID:       user.ID,
 		Username: user.Username,
 		Email:    user.Email,
-		Roles:    nonNilSlice(user.Roles),
+		Roles:    apikit.NonNilSlice(user.Roles),
 		IsRoot:   user.IsRoot,
-		Grants:   nonNilSlice(user.Grants),
+		Grants:   apikit.NonNilSlice(user.Grants),
 	}
 	if user.AccessRules != nil {
 		resp.AccessRules = &domain.AccessRules{

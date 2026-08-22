@@ -16,7 +16,7 @@ import (
 
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/domain"
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
@@ -48,10 +48,10 @@ func TestSessionRoundTrip(t *testing.T) {
 	svc, err := auth.NewService(testSessionConfig(t, nil), nil)
 	require.NoError(t, err)
 
-	user := store.User{
+	user := domain.User{
 		ID:       "user-1",
 		Username: "alice",
-		Roles:    []string{store.RoleAdmin},
+		Roles:    []string{domain.RoleAdmin},
 	}
 	token, err := svc.CreateSession(context.Background(), user, testFingerprint)
 	require.NoError(t, err)
@@ -66,7 +66,7 @@ func TestParseSessionRejectsFingerprintMismatch(t *testing.T) {
 	svc, err := auth.NewService(testSessionConfig(t, nil), nil)
 	require.NoError(t, err)
 
-	token, err := svc.CreateSession(context.Background(), store.User{ID: "u1", Username: "alice"}, testFingerprint)
+	token, err := svc.CreateSession(context.Background(), domain.User{ID: "u1", Username: "alice"}, testFingerprint)
 	require.NoError(t, err)
 
 	_, err = svc.ParseSession(context.Background(), token, "other-fingerprint")
@@ -90,9 +90,7 @@ func TestParseSessionRejectsHS256(t *testing.T) {
 		UserID:      "user-1",
 		Username:    "alice",
 		Fingerprint: testFingerprint,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-		},
+		ExpiresAt:   jwt.NewNumericDate(time.Now().Add(time.Hour)),
 	})
 	signed, err := hsToken.SignedString(commonstrings.StringToBytes("not-an-rsa-key-but-hmac-secret!!"))
 	require.NoError(t, err)
@@ -107,7 +105,7 @@ func TestParseSessionRejectsWrongPublicKey(t *testing.T) {
 	svcB, err := auth.NewService(testSessionConfig(t, nil), nil)
 	require.NoError(t, err)
 
-	token, err := svcA.CreateSession(context.Background(), store.User{ID: "u1", Username: "alice"}, testFingerprint)
+	token, err := svcA.CreateSession(context.Background(), domain.User{ID: "u1", Username: "alice"}, testFingerprint)
 	require.NoError(t, err)
 	_, err = svcB.ParseSession(context.Background(), token, testFingerprint)
 	require.ErrorIs(t, err, auth.ErrUnauthorized)
@@ -117,9 +115,9 @@ func TestCreateSessionRejectsEmptyUserID(t *testing.T) {
 	svc, err := auth.NewService(testSessionConfig(t, nil), nil)
 	require.NoError(t, err)
 
-	_, err = svc.CreateSession(context.Background(), store.User{
+	_, err = svc.CreateSession(context.Background(), domain.User{
 		Username: "admin",
-		Roles:    []string{store.RoleAdmin},
+		Roles:    []string{domain.RoleAdmin},
 		IsRoot:   true,
 	}, testFingerprint)
 	require.ErrorIs(t, err, auth.ErrUnauthorized)

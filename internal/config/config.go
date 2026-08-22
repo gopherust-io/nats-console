@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -13,21 +14,21 @@ import (
 
 // goalign:ignore // env-backed; trailing bool padding is unavoidable
 type HTTPConfig struct {
-	Addr                string        `default:":8080"   env:"HTTP_ADDR"`
-	WriteTimeout        time.Duration `default:"30s"     env:"HTTP_WRITE_TIMEOUT"`
-	ReadTimeout         time.Duration `default:"10s"     env:"HTTP_READ_TIMEOUT"`
-	IdleTimeout         time.Duration `default:"60s"     env:"HTTP_IDLE_TIMEOUT"`
-	MaxRequestBodySize  int64         `default:"1048576" env:"MAX_REQUEST_BODY_SIZE"`
-	ResponseCompression bool          `default:"true"    env:"HTTP_RESPONSE_COMPRESSION"`
+	Addr                string        `env:"HTTP_ADDR"                 default:":8080"`
+	WriteTimeout        time.Duration `env:"HTTP_WRITE_TIMEOUT"        default:"30s"`
+	ReadTimeout         time.Duration `env:"HTTP_READ_TIMEOUT"         default:"10s"`
+	IdleTimeout         time.Duration `env:"HTTP_IDLE_TIMEOUT"         default:"60s"`
+	MaxRequestBodySize  int           `env:"MAX_REQUEST_BODY_SIZE"     default:"1048576"`
+	ResponseCompression bool          `env:"HTTP_RESPONSE_COMPRESSION" default:"true"`
 }
 
 type DBConfig struct {
-	URL               string        `env:"DATABASE_URL" required:"true"`
-	MaxConnLifetime   time.Duration `default:"1h"       env:"DB_MAX_CONN_LIFETIME"`
-	HealthCheckPeriod time.Duration `default:"1m"       env:"DB_HEALTH_CHECK_PERIOD"`
-	MaxConnIdleTime   time.Duration `default:"30m"      env:"DB_MAX_CONN_IDLE_TIME"`
-	MaxConns          int           `default:"25"       env:"DB_MAX_CONNS"`
-	MinConns          int           `default:"2"        env:"DB_MIN_CONNS"`
+	URL               string        `env:"DATABASE_URL"           required:"true"`
+	MaxConnLifetime   time.Duration `env:"DB_MAX_CONN_LIFETIME"   default:"1h"`
+	HealthCheckPeriod time.Duration `env:"DB_HEALTH_CHECK_PERIOD" default:"1m"`
+	MaxConnIdleTime   time.Duration `env:"DB_MAX_CONN_IDLE_TIME"  default:"30m"`
+	MaxConns          int           `env:"DB_MAX_CONNS"           default:"25"`
+	MinConns          int           `env:"DB_MIN_CONNS"           default:"2"`
 }
 
 // goalign:ignore // env-backed; trailing bool padding is unavoidable
@@ -35,85 +36,93 @@ type NATSConfig struct {
 	URL                   string        `env:"URL"`
 	CredsFile             string        `env:"CREDS_FILE"`
 	Token                 string        `env:"TOKEN"`
-	AccountSeed           string        `env:"ACCOUNT_SEED"    sensitive:"true"`
+	AccountSeed           string        `env:"ACCOUNT_SEED"             sensitive:"true"`
 	MonitoringURL         string        `env:"MONITORING_URL"`
 	TlsCAFile             string        `env:"TLS_CA_FILE"`
 	TlsCertFile           string        `env:"TLS_CERT_FILE"`
 	TlsKeyFile            string        `env:"TLS_KEY_FILE"`
 	TlsServerName         string        `env:"TLS_SERVER_NAME"`
-	ClientCacheTTL        time.Duration `default:"5m"          env:"CLIENT_CACHE_TTL"`
-	TlsInsecureSkipVerify bool          `default:"false"       env:"TLS_INSECURE_SKIP_VERIFY"`
+	ClientCacheTTL        time.Duration `env:"CLIENT_CACHE_TTL"         default:"5m"`
+	InitialRetryAttempts  int           `env:"INITIAL_RETRY_ATTEMPTS"   default:"0"`
+	MaxReconnect          int           `env:"MAX_RECONNECT"            default:"-1"`
+	ReconnectWait         time.Duration `env:"RECONNECT_WAIT"           default:"2s"`
+	AllowReconnect        bool          `env:"ALLOW_RECONNECT"          default:"true"`
+	TlsInsecureSkipVerify bool          `env:"TLS_INSECURE_SKIP_VERIFY" default:"false"`
+	DontRandomize         bool          `env:"DONT_RANDOMIZE"           default:"false"`
+	AllowMetrics          bool          `env:"ALLOW_METRICS"            default:"true"`
+	AllowTracing          bool          `env:"ALLOW_TRACING"            default:"true"`
 }
 
 // goalign:ignore // env-backed; trailing bool padding is unavoidable
 type AIConfig struct {
-	GeminiAPIBase   string        `default:"https://generativelanguage.googleapis.com/v1beta" env:"GEMINI_API_BASE"`
-	Model           string        `default:"gemini-2.5-flash"                                 env:"MODEL"`
-	APIKey          string        `env:"API_KEY"                                              sensitive:"true"`
-	ContextCacheTTL time.Duration `default:"45s"                                              env:"CONTEXT_CACHE_TTL"`
-	RequestTimeout  time.Duration `default:"60s"                                              env:"REQUEST_TIMEOUT"`
-	MaxTokens       int           `default:"4096"                                             env:"MAX_TOKENS"`
-	Enabled         bool          `default:"false"                                            env:"ENABLED"`
+	GeminiAPIBase   string        `env:"GEMINI_API_BASE"   default:"https://generativelanguage.googleapis.com/v1beta"`
+	Model           string        `env:"MODEL"             default:"gemini-2.5-flash"`
+	APIKey          string        `env:"API_KEY"           sensitive:"true"`
+	ContextCacheTTL time.Duration `env:"CONTEXT_CACHE_TTL" default:"45s"`
+	RequestTimeout  time.Duration `env:"REQUEST_TIMEOUT"   default:"60s"`
+	MaxTokens       int           `env:"MAX_TOKENS"        default:"4096"`
+	Enabled         bool          `env:"ENABLED"           default:"false"`
 }
 
 // goalign:ignore // env-backed; trailing bool padding is unavoidable
 type SMTPConfig struct {
-	From     string `env:"FROM"`
-	Password string `env:"PASSWORD"  sensitive:"true"`
-	Username string `env:"USERNAME"`
-	Host     string `env:"HOST"`
-	Port     int    `default:"587"   env:"PORT"`
-	Enabled  bool   `default:"false" env:"ENABLED"`
-	TLS      bool   `default:"true"  env:"TLS"`
+	From     string        `env:"FROM"`
+	Password string        `env:"PASSWORD" sensitive:"true"`
+	Username string        `env:"USERNAME"`
+	Host     string        `env:"HOST"     required:"true"`
+	Port     int           `env:"PORT"     required:"true"`
+	Timeout  time.Duration `env:"TIMEOUT"  default:"15s"`
+	Enabled  bool          `env:"ENABLED"  default:"false"`
+	TLS      bool          `env:"TLS"      default:"true"`
 }
 
 type AuthConfig struct {
-	SessionPrivateKey string        `env:"SESSION_PRIVATE_KEY" required:"true"              sensitive:"true"`
-	SessionPublicKey  string        `env:"SESSION_PUBLIC_KEY"  required:"true"`
-	SessionTTL        time.Duration `default:"15m"             env:"SESSION_TTL"`
-	RefreshTokenTTL   time.Duration `default:"168h"            env:"REFRESH_TOKEN_TTL"`
-	RateLimitWindow   time.Duration `default:"1m"              env:"AUTH_RATE_LIMIT_WINDOW"`
-	RateLimit         int           `default:"10"              env:"AUTH_RATE_LIMIT"`
+	SessionPrivateKey string        `env:"SESSION_PRIVATE_KEY"    required:"true" sensitive:"true"`
+	SessionPublicKey  string        `env:"SESSION_PUBLIC_KEY"     required:"true"`
+	SessionTTL        time.Duration `env:"SESSION_TTL"            default:"15m"`
+	RefreshTokenTTL   time.Duration `env:"REFRESH_TOKEN_TTL"      default:"168h"`
+	RateLimitWindow   time.Duration `env:"AUTH_RATE_LIMIT_WINDOW" default:"1m"`
+	RateLimit         int           `env:"AUTH_RATE_LIMIT"        default:"10"`
 }
 
 type LiveWSConfig struct {
-	IdleTimeout          time.Duration `default:"5m"    env:"IDLE_TIMEOUT"`
-	RateLimit            time.Duration `default:"100ms" env:"RATE_LIMIT"`
-	MaxMessages          int           `default:"1000"  env:"MAX_MESSAGES"`
-	PayloadTruncateBytes int           `default:"4096"  env:"PAYLOAD_TRUNCATE_BYTES"`
+	IdleTimeout          time.Duration `env:"IDLE_TIMEOUT"           default:"5m"`
+	RateLimit            time.Duration `env:"RATE_LIMIT"             default:"100ms"`
+	MaxMessages          int           `env:"MAX_MESSAGES"           default:"1000"`
+	PayloadTruncateBytes int           `env:"PAYLOAD_TRUNCATE_BYTES" default:"4096"`
 }
 
 // goalign:ignore // env-backed; trailing bool padding is unavoidable
 type MetricsSnapshotConfig struct {
-	Interval            time.Duration `default:"60s"  env:"INTERVAL"`
-	Retention           time.Duration `default:"168h" env:"RETENTION"`
-	BottleneckRetention time.Duration `default:"672h" env:"BOTTLENECK_RETENTION"`
-	CleanupInterval     time.Duration `default:"1h"   env:"CLEANUP_INTERVAL"`
-	Enabled             bool          `default:"true" env:"ENABLED"`
+	Interval            time.Duration `env:"INTERVAL"             default:"60s"`
+	Retention           time.Duration `env:"RETENTION"            default:"168h"`
+	BottleneckRetention time.Duration `env:"BOTTLENECK_RETENTION" default:"672h"`
+	CleanupInterval     time.Duration `env:"CLEANUP_INTERVAL"     default:"1h"`
 }
 
 // goalign:ignore // env-backed; trailing bool padding is unavoidable
 type PprofConfig struct {
-	CPUMaxSeconds int  `default:"120"   env:"CPU_MAX_SECONDS"`
-	AuthEnabled   bool `default:"true"  env:"AUTH_ENABLED"`
-	Enabled       bool `default:"false" env:"ENABLED"`
+	CPUMaxSeconds int  `env:"CPU_MAX_SECONDS" default:"120"`
+	AuthEnabled   bool `env:"AUTH_ENABLED"    default:"true"`
+	Enabled       bool `env:"ENABLED"         default:"false"`
 }
 
 type SlowConsumerConfig struct {
-	PendingThreshold uint64  `default:"1000" env:"PENDING_THRESHOLD"`
-	LagThreshold     uint64  `default:"1000" env:"LAG_THRESHOLD"`
-	AckPendingRatio  float64 `default:"0.9"  env:"ACK_PENDING_RATIO"`
+	PendingThreshold uint64  `env:"PENDING_THRESHOLD" default:"1000"`
+	LagThreshold     uint64  `env:"LAG_THRESHOLD"     default:"1000"`
+	AckPendingRatio  float64 `env:"ACK_PENDING_RATIO" default:"0.9"`
 }
 
 type PaginationConfig struct {
-	MaxLimit     int `default:"500" env:"MAX_LIMIT"`
-	DefaultLimit int `default:"100" env:"DEFAULT_LIMIT"`
+	MaxLimit     int `env:"MAX_LIMIT"     default:"500"`
+	DefaultLimit int `env:"DEFAULT_LIMIT" default:"100"`
 }
 
 // goalign:ignore // env-backed aggregate; nested groups prefer readability over packing
 //
 //nolint:govet // fieldalignment: env-backed config struct is intentionally grouped
 type Config struct {
+	ProjectName     string `env:"PROJECT_NAME" required:"true"`
 	HTTP            HTTPConfig
 	DB              DBConfig
 	NATS            NATSConfig `prefix:"NATS_"`
@@ -126,22 +135,23 @@ type Config struct {
 	SlowConsumer    SlowConsumerConfig    `prefix:"SLOW_CONSUMER_"`
 	Pagination      PaginationConfig      `prefix:"PAGINATION_"`
 
-	OpenAPIPath                 string        `default:"api/openapi.yaml"         env:"OPENAPI_PATH"`
-	EncryptionKey               string        `env:"ENCRYPTION_KEY"               required:"true"                      sensitive:"true"`
+	EncryptionKey               string        `env:"ENCRYPTION_KEY"                  required:"true" sensitive:"true"`
 	StaticDir                   string        `env:"STATIC_DIR"`
-	AdminUsername               string        `default:"admin"                    env:"ADMIN_USERNAME"`
-	AdminPassword               string        `env:"ADMIN_PASSWORD"               required:"true"                      sensitive:"true"`
-	PublicBaseURL               string        `default:"http://localhost:8080"    env:"PUBLIC_BASE_URL"`
-	DefaultClusterName          string        `default:"default"                  env:"DEFAULT_CLUSTER_NAME"`
+	AdminUsername               string        `env:"ADMIN_USERNAME"                  default:"admin"`
+	AdminPassword               string        `env:"ADMIN_PASSWORD"                  required:"true" sensitive:"true"`
+	PublicBaseURL               string        `env:"PUBLIC_BASE_URL"                 default:"http://localhost:8080"`
+	DefaultClusterName          string        `env:"DEFAULT_CLUSTER_NAME"            default:"default"`
 	CORSAllowedOrigins          string        `env:"CORS_ALLOWED_ORIGINS"`
 	TrustedProxies              string        `env:"TRUSTED_PROXIES"`
-	BehaviorFingerprintKVBucket string        `default:"nats_consol_fingerprints" env:"BEHAVIOR_FINGERPRINT_KV_BUCKET"`
-	RequestTimeout              time.Duration `default:"10s"                      env:"REQUEST_TIMEOUT"`
-	HealthCheckTimeout          time.Duration `default:"2s"                       env:"HEALTH_CHECK_TIMEOUT"`
-	JetStreamViewCacheTTL       time.Duration `default:"3s"                       env:"JETSTREAM_VIEW_CACHE_TTL"`
-	MaxMonitoringBodyBytes      int64         `default:"8388608"                  env:"MAX_MONITORING_BODY_BYTES"`
-	AuditDefaultLimit           int           `default:"50"                       env:"AUDIT_DEFAULT_LIMIT"`
-	MetricsAuthEnabled          bool          `default:"false"                    env:"METRICS_AUTH_ENABLED"`
+	BehaviorFingerprintKVBucket string        `env:"BEHAVIOR_FINGERPRINT_KV_BUCKET"  default:"nats_consol_fingerprints"`
+	RequestTimeout              time.Duration `env:"REQUEST_TIMEOUT"                 default:"10s"`
+	LookBackDuration            time.Duration `env:"LOOKBACK_DURATION"`
+	HealthCheckTimeout          time.Duration `env:"HEALTH_CHECK_TIMEOUT"            default:"2s"`
+	JetStreamViewCacheTTL       time.Duration `env:"JETSTREAM_VIEW_CACHE_TTL"        default:"3s"`
+	InviteTTL                   time.Duration `env:"INVITE_TTL"                      default:"24h"`
+	MaxMonitoringBodyBytes      int64         `env:"MAX_MONITORING_BODY_BYTES"       default:"8388608"`
+	AuditDefaultLimit           int           `env:"AUDIT_DEFAULT_LIMIT"             default:"50"`
+	MetricsAuthEnabled          bool          `env:"METRICS_AUTH_ENABLED"            default:"false"`
 }
 
 func (c Config) TrustedProxyList() []string {
@@ -202,6 +212,11 @@ func (c Config) TLSEnabled() bool {
 	return strings.HasPrefix(strings.ToLower(c.PublicBaseURL), "https://")
 }
 
+// IsProduction reports whether ENV=production (independent of PUBLIC_BASE_URL scheme).
+func IsProduction() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("ENV")), "production")
+}
+
 func (c Config) Validate() error {
 	var errs []string
 
@@ -235,8 +250,8 @@ func (c Config) validateSMTP() []string {
 
 func (c Config) validateSecurity() []string {
 	var errs []string
-	// Match prior deploy behavior: only force a non-default admin password behind HTTPS.
-	if c.TLSEnabled() && c.AdminPassword == "admin" {
+	// Production or HTTPS public URL: refuse the default admin password.
+	if (c.TLSEnabled() || IsProduction()) && c.AdminPassword == "admin" {
 		errs = append(errs, "ADMIN_PASSWORD must be changed from the default")
 	}
 	if c.Pprof.Enabled && !c.Pprof.AuthEnabled {

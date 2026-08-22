@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/gopherust-io/nats-consol/internal/httpctx/httpstatus"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/repo"
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/nats-consol/tests/testutil"
 )
@@ -57,10 +57,10 @@ func TestExpiredInviteReturnsGone(t *testing.T) {
 	stack := testutil.SetupStack(t)
 	ctx := context.Background()
 
-	pending, err := stack.Store.CreateUser(ctx, store.UserCreate{
+	pending, err := stack.Store.CreateUser(ctx, repo.UserCreate{
 		Username: "expired-invitee",
 		Email:    "expired-invite@example.com",
-		Roles:    []string{store.RoleViewer},
+		Roles:    []string{repo.RoleViewer},
 	})
 	require.NoError(t, err)
 

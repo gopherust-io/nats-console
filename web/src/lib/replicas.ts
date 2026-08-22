@@ -15,7 +15,16 @@ export type ReplicaPeer = {
   connections?: number;
   cpu?: number;
   mem?: number;
+  lag?: number;
 };
+
+export type PeerMetricScope = "routeLink" | "varzHealth";
+
+/** True when a dash is expected for this source, not a failed scrape. */
+export function isExpectedMetricNa(peer: ReplicaPeer, scope: PeerMetricScope): boolean {
+  if (scope === "routeLink") return peer.role === "monitored";
+  return peer.role === "route" || peer.role === "meta";
+}
 
 export type ReplicasSnapshot = {
   capturedAt?: string;
@@ -30,19 +39,27 @@ export type ReplicasSnapshot = {
 
 /**
  * Prefer newer capturedAt when both sides are stamped.
- * SSE payloads omit capturedAt — accept them over prior data, but do not let a
- * stamped REST scrape clobber a live untimestamped SSE snapshot.
+ * Otherwise accept the incoming frame: live untimestamped SSE must be able to
+ * recover after a stamped all-offline REST poll (and the reverse when SSE is down).
  */
 export function isReplicasSnapshotNewer(
   incoming: ReplicasSnapshot,
   previous: ReplicasSnapshot | undefined,
 ): boolean {
   if (!previous) return true;
-  if (!incoming.capturedAt && previous.capturedAt) return true;
-  if (incoming.capturedAt && !previous.capturedAt) return false;
-  if (!incoming.capturedAt && !previous.capturedAt) return true;
-  const next = Date.parse(incoming.capturedAt!);
-  const prev = Date.parse(previous.capturedAt!);
-  if (Number.isNaN(next) || Number.isNaN(prev)) return true;
-  return next >= prev;
+
+  const nextTs = incoming.capturedAt ? Date.parse(incoming.capturedAt) : Number.NaN;
+  const prevTs = previous.capturedAt ? Date.parse(previous.capturedAt) : Number.NaN;
+  if (!Number.isNaN(nextTs) && !Number.isNaN(prevTs)) return nextTs >= prevTs;
+  return true;
+}
+
+/** Stable RAFT role from monitoring — not election theater. */
+export function monitoringRaftRole(
+  peer: ReplicaPeer,
+  jetstreamLeader?: string,
+): "leader" | "follower" | null {
+  if (!peer.online) return null;
+  if (peer.leader || (jetstreamLeader && peer.name === jetstreamLeader)) return "leader";
+  return "follower";
 }

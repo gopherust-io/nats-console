@@ -4,13 +4,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestSessionCacheGetSetInvalidate(t *testing.T) {
 	cache := newSessionCache(time.Minute)
-	user := store.User{ID: "u1", Username: "alice", Roles: []string{"admin"}}
+	user := domain.User{ID: "u1", Username: "alice", Roles: []string{"admin"}}
 
 	cache.Set("tok", "fp1", user)
 	got, ok := cache.Get("tok", "fp1")
@@ -27,7 +27,7 @@ func TestSessionCacheGetSetInvalidate(t *testing.T) {
 
 func TestSessionCacheExpires(t *testing.T) {
 	cache := newSessionCache(time.Millisecond)
-	user := store.User{ID: "u1", Username: "alice"}
+	user := domain.User{ID: "u1", Username: "alice"}
 	cache.Set("tok", "fp1", user)
 	time.Sleep(2 * time.Millisecond)
 	_, ok := cache.Get("tok", "fp1")

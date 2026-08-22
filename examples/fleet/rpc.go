@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 
 	libnats "github.com/gopherust-io/nats"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 func startRPCResponder(
@@ -126,7 +127,7 @@ func startInventoryRPC(ctx context.Context, client libnats.Client) error {
 		5*time.Millisecond, 25*time.Millisecond,
 		func(req map[string]any) (map[string]any, error) {
 			sku, _ := req["sku"].(string)
-			if sku == "" {
+			if commonstrings.IsEmpty(sku) {
 				sku = "SKU-1"
 			}
 			return map[string]any{
@@ -142,7 +143,7 @@ func startPricingRPC(ctx context.Context, client libnats.Client) error {
 		8*time.Millisecond, 40*time.Millisecond,
 		func(req map[string]any) (map[string]any, error) {
 			sku, _ := req["sku"].(string)
-			if sku == "" {
+			if commonstrings.IsEmpty(sku) {
 				sku = "SKU-1"
 			}
 			return map[string]any{

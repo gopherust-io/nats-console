@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -26,14 +25,14 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
+	"github.com/gopherust-io/nats-consol/internal/repo"
 	"github.com/gopherust-io/nats-consol/internal/snapshot"
-	"github.com/gopherust-io/nats-consol/internal/store"
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 // Stack holds containers, store, and services for API integration tests.
 type Stack struct {
-	Store   *store.Store
+	Store   *repo.DB
 	Manager *natsclient.Manager
 	Cfg     config.Config
 }
@@ -47,20 +46,6 @@ func RequireDocker(t *testing.T) {
 	if _, err := testcontainers.NewDockerProvider(); err != nil {
 		t.Skipf("docker unavailable: %v", err)
 	}
-}
-
-// MigrationsDir returns the path to SQL migrations relative to the repo root.
-func MigrationsDir() string {
-	return migrationsDir()
-}
-
-func migrationsDir() string {
-	for _, dir := range []string{"migrations", filepath.Join("..", "..", "migrations")} {
-		if _, err := os.Stat(dir); err == nil {
-			return dir
-		}
-	}
-	return "migrations"
 }
 
 // StartPostgres spins up a PostgreSQL testcontainer and returns its connection string.
@@ -139,13 +124,13 @@ func StartNATS(t *testing.T, ctx context.Context) NATSEndpoints {
 }
 
 // OpenStore opens the store against pgURL and runs migrations.
-func OpenStore(t *testing.T, ctx context.Context, pgURL string) *store.Store {
+func OpenStore(t *testing.T, ctx context.Context, pgURL string) *repo.DB {
 	t.Helper()
-	st, err := store.Open(ctx, pgURL, migrationsDir(), nil, store.DefaultPoolConfig())
+	st, err := repo.Open(ctx, pgURL, nil, repo.DefaultPoolConfig())
 	if err != nil {
 		t.Fatalf("store open: %v", err)
 	}
-	t.Cleanup(st.Close)
+	t.Cleanup(st.Stop)
 	return st
 }
 
@@ -186,7 +171,8 @@ func SetupStack(t *testing.T) *Stack {
 	}
 
 	manager := natsclient.NewManager(st, cfg)
-	t.Cleanup(manager.Close)
+	go manager.StartSweeper(ctx)
+	t.Cleanup(manager.Stop)
 
 	if err := manager.BootstrapDefaultCluster(ctx); err != nil {
 		t.Fatalf("bootstrap: %v", err)
@@ -206,9 +192,9 @@ func (s *Stack) DefaultClusterID(t *testing.T) string {
 }
 
 // ClusterAccessRules returns access rules scoped to the default test cluster.
-func (s *Stack) ClusterAccessRules(t *testing.T) *store.AccessRules {
+func (s *Stack) ClusterAccessRules(t *testing.T) *repo.AccessRules {
 	t.Helper()
-	return &store.AccessRules{ClusterIDs: []string{s.DefaultClusterID(t)}}
+	return &repo.AccessRules{ClusterIDs: []string{s.DefaultClusterID(t)}}
 }
 
 // Services builds app services for the stack.
@@ -219,10 +205,8 @@ func (s *Stack) Services(t *testing.T) *app.Services {
 		t.Fatalf("auth service: %v", err)
 	}
 	gateway := natsadapter.NewGateway(s.Manager)
-	uow := pgadapter.WrapStore(s.Store)
-	svc := app.NewServices(uow, gateway, authSvc, nil, s.Cfg.HealthCheckTimeout)
-	svc.JetStream = gateway
-	return svc
+	db := pgadapter.WrapStore(s.Store)
+	return app.NewServices(db, gateway, authSvc, nil, s.Cfg.HealthCheckTimeout, s.Cfg.LookBackDuration)
 }
 
 // Server wraps an in-memory HTTP server backed by fasthttp.
@@ -254,11 +238,10 @@ func (s *Stack) NewServer(t *testing.T, mutate func(*config.Config)) *Server {
 	}
 
 	gateway := natsadapter.NewGateway(s.Manager)
-	uow := pgadapter.WrapStore(s.Store)
-	services := app.NewServices(uow, gateway, authSvc, nil, cfg.HealthCheckTimeout)
-	services.JetStream = gateway
+	db := pgadapter.WrapStore(s.Store)
+	services := app.NewServices(db, gateway, authSvc, nil, cfg.HealthCheckTimeout, cfg.LookBackDuration)
 
-	handler := api.NewRouter(services, audit.NewWriter(s.Store), snapshot.NewHub(), cfg).InitRouter()
+	handler := api.NewRouter(cfg, services, audit.NewWriter(s.Store), snapshot.NewHub()).Init()
 
 	ln := fasthttputil.NewInmemoryListener()
 	server := &fasthttp.Server{Handler: handler}

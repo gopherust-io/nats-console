@@ -53,7 +53,9 @@ export default function MessagePayloadViewer({
     };
   }, [expanded, data, headers, payloadProp, cacheHost]);
 
-  const preview = payloadProp ?? (data !== undefined ? compactPayloadPreview(data) : "");
+  const preview =
+    payloadProp ??
+    (data !== undefined ? compactPayloadPreview(data, undefined, cacheHost) : "");
   const formatted = payloadProp !== undefined ? payloadProp : (decoded?.text ?? preview);
   const truncated = expanded && !showFull && formatted.length > PREVIEW_LIMIT;
   const display = truncated ? `${formatted.slice(0, PREVIEW_LIMIT)}\n…` : formatted;

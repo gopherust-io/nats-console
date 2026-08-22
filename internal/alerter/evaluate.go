@@ -6,17 +6,34 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gopherust-io/tel"
+
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/mail"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/repo"
+	"github.com/gopherust-io/nats-consol/pkg/common/safe"
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
-	"github.com/gopherust-io/tel"
 )
 
 const recipientCacheTTL = 45 * time.Second
 
-// Options configures alert evaluation side effects (email).
+type Alert struct {
+	st               *repo.DB
+	recipientCacheMu sync.Mutex
+	recipientCache   map[string]recipientCacheEntry
+	clusterID        string
+}
+
+func New(st *repo.DB, clusterID string) *Alert {
+	return &Alert{
+		st:               st,
+		recipientCacheMu: sync.Mutex{},
+		recipientCache:   make(map[string]recipientCacheEntry),
+		clusterID:        clusterID,
+	}
+}
+
 type Options struct {
 	Mailer        mail.Sender
 	PublicBaseURL string
@@ -27,29 +44,32 @@ type recipientCacheEntry struct {
 	emails    []string
 }
 
-var (
-	recipientCacheMu sync.Mutex
-	recipientCache   = make(map[string]recipientCacheEntry)
-)
-
-// Evaluate compares the latest metric samples for a cluster against enabled alert rules.
-func Evaluate(ctx context.Context, st *store.Store, clusterID string, samples []domain.MetricSample, opts Options) {
-	if st == nil || commonstrings.IsEmpty(clusterID) || len(samples) == 0 {
+// Evaluate compares the latest metric samples for a cluster against enabled alert rules
+func (a *Alert) Evaluate(ctx context.Context, samples []domain.MetricSample, opts Options) {
+	if commonstrings.IsEmpty(a.clusterID) || len(samples) == 0 {
 		return
 	}
 
-	rules, err := st.ListAlertRules(ctx, clusterID, true)
+	rules, err := a.st.ListAlertRules(ctx, a.clusterID, true)
 	if err != nil {
-		tel.Warn().Err(err).Str("component", "alerter").Str("cluster_id", clusterID).Msg("list alert rules failed")
+		tel.Warn().
+			Err(err).
+			Str("component", "alerter").
+			Str("clusterID", a.clusterID).
+			Msg("list alert rules failed")
 		return
 	}
 	if len(rules) == 0 {
 		return
 	}
 
-	openRules, err := st.ListOpenAlertRuleIDs(ctx, clusterID)
+	openRules, err := a.st.ListOpenAlertRuleIDs(ctx, a.clusterID)
 	if err != nil {
-		tel.Warn().Err(err).Str("component", "alerter").Str("cluster_id", clusterID).Msg("list open alerts failed")
+		tel.Warn().
+			Err(err).
+			Str("component", "alerter").
+			Str("clusterID", a.clusterID).
+			Msg("list open alerts failed")
 		return
 	}
 
@@ -65,51 +85,77 @@ func Evaluate(ctx context.Context, st *store.Store, clusterID string, samples []
 			continue
 		}
 		if domain.ThresholdMet(rule.Comparator, value, rule.Threshold) {
-			alertID, newlyOpened, err := st.UpsertOpenAlert(ctx, rule, clusterID, value, now)
+			alertID, newlyOpened, err := a.st.UpsertOpenAlert(ctx, rule, a.clusterID, value, now)
 			if err != nil {
 				tel.Warn().Err(err).Str("component", "alerter").Str("rule_id", rule.ID).Msg("open alert failed")
 				continue
 			}
 			if newlyOpened {
-				notifyNewAlert(ctx, st, opts, alertID, rule, clusterID, value, now)
+				a.notifyNewAlert(ctx, opts, alertID, rule, value, now)
 			}
 			continue
 		}
 		if _, open := openRules[rule.ID]; !open {
 			continue
 		}
-		if err := st.CloseOpenAlert(ctx, rule.ID, clusterID, now); err != nil {
+		if err := a.st.CloseOpenAlert(ctx, rule.ID, a.clusterID, now); err != nil {
 			tel.Warn().Err(err).Str("component", "alerter").Str("rule_id", rule.ID).Msg("close alert failed")
 		}
 	}
 }
 
-func notifyNewAlert(ctx context.Context, st *store.Store, opts Options, alertID string, rule domain.AlertRule, clusterID string, value float64, at time.Time) {
+func (a *Alert) notifyNewAlert(
+	ctx context.Context,
+	opts Options,
+	alertID string,
+	rule domain.AlertRule,
+	value float64,
+	at time.Time) {
 	if opts.Mailer == nil {
 		return
 	}
-	claimed, err := st.ClaimAlertEmailNotify(ctx, alertID)
+	claimed, err := a.st.ClaimAlertEmailNotify(ctx, alertID)
 	if err != nil {
-		tel.Warn().Err(err).Str("component", "alerter").Str("alert_id", alertID).Msg("claim email notify failed")
+		tel.Warn().
+			Err(err).
+			Str("component", "alerter").
+			Str("alertID", alertID).
+			Msg("claim email notify failed")
 		return
 	}
 	if !claimed {
 		return
 	}
 
-	recipients, err := recipientEmails(ctx, st, clusterID)
+	recipients, err := a.recipientEmails(ctx, a.clusterID)
 	if err != nil {
-		tel.Warn().Err(err).Str("component", "alerter").Msg("list alert email recipients failed")
-		releaseAlertEmailClaim(ctx, st, alertID)
+		tel.Warn().
+			Err(err).
+			Str("component", "alerter").
+			Msg("list alert email recipients failed")
+
+		if err := a.st.ReleaseAlertEmailNotify(ctx, alertID); err != nil {
+			tel.Warn().
+				Err(err).
+				Str("component", "alerter").
+				Str("alertID", alertID).
+				Msg("release email notify claim failed")
+		}
 		return
 	}
 	if len(recipients) == 0 {
-		releaseAlertEmailClaim(ctx, st, alertID)
+		if err := a.st.ReleaseAlertEmailNotify(ctx, alertID); err != nil {
+			tel.Warn().
+				Err(err).
+				Str("component", "alerter").
+				Str("alertID", alertID).
+				Msg("release email notify claim failed")
+		}
 		return
 	}
 
 	clusterName := ""
-	if cluster, err := st.GetCluster(ctx, clusterID); err == nil {
+	if cluster, err := a.st.GetCluster(ctx, a.clusterID); err == nil {
 		clusterName = cluster.Name
 	}
 
@@ -117,50 +163,77 @@ func notifyNewAlert(ctx context.Context, st *store.Store, opts Options, alertID 
 	if commonstrings.IsEmpty(message) {
 		message = rule.Name
 	}
-	alert := domain.Alert{
-		ID:          alertID,
-		RuleID:      rule.ID,
-		ClusterID:   clusterID,
-		Status:      domain.AlertStatusOpen,
-		Severity:    rule.Severity,
-		Metric:      rule.Metric,
-		Message:     message,
-		FiringValue: value,
-		Threshold:   rule.Threshold,
-		FirstSeenAt: at,
-		LastSeenAt:  at,
-		RuleName:    rule.Name,
-	}
-	// Claim is released by the mail worker on send failure / queue drop.
-	enqueueAlertEmail(mailJob{
-		st:          st,
+
+	mailCh := make(chan mailJob, mailQueueSize)
+	stop := make(chan struct{})
+	wg := sync.WaitGroup{}
+
+	mailCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	wg.Go(func() {
+		for {
+			select {
+			case job, ok := <-mailCh:
+				if !ok {
+					return
+				}
+				safe.Run("alerter", func() {
+					a.sendAlertEmail(mailCtx, job)
+				})
+			case <-stop:
+				return
+			}
+		}
+	})
+
+	job := mailJob{
 		mailer:      opts.Mailer,
 		baseURL:     opts.PublicBaseURL,
 		alertID:     alertID,
-		clusterID:   clusterID,
+		clusterID:   a.clusterID,
 		clusterName: clusterName,
 		recipients:  recipients,
-		alert:       alert,
-	})
-}
+		alert: domain.Alert{
+			ID:          alertID,
+			RuleID:      rule.ID,
+			ClusterID:   a.clusterID,
+			Status:      domain.AlertStatusOpen,
+			Severity:    rule.Severity,
+			Metric:      rule.Metric,
+			Message:     message,
+			FiringValue: value,
+			Threshold:   rule.Threshold,
+			FirstSeenAt: at,
+			LastSeenAt:  at,
+			RuleName:    rule.Name,
+		},
+	}
 
-func releaseAlertEmailClaim(ctx context.Context, st *store.Store, alertID string) {
-	if err := st.ReleaseAlertEmailNotify(ctx, alertID); err != nil {
-		tel.Warn().Err(err).Str("component", "alerter").Str("alert_id", alertID).Msg("release email notify claim failed")
+	select {
+	case mailCh <- job:
+	default:
+		tel.Warn().
+			Str("component", "alerter").
+			Str("alertID", job.alertID).
+			Msg("alert email queue full; dropping notify")
+		if err := a.st.ReleaseAlertEmailNotify(context.Background(), job.alertID); err != nil {
+			tel.Warn().Err(err).Str("component", "alerter").Str("alertID", job.alertID).Msg("release email notify claim failed")
+		}
 	}
 }
 
-func recipientEmails(ctx context.Context, st *store.Store, clusterID string) ([]string, error) {
+func (a *Alert) recipientEmails(ctx context.Context, clusterID string) ([]string, error) {
 	now := time.Now()
-	recipientCacheMu.Lock()
-	if entry, ok := recipientCache[clusterID]; ok && now.Before(entry.expiresAt) {
+	a.recipientCacheMu.Lock()
+	if entry, ok := a.recipientCache[clusterID]; ok && now.Before(entry.expiresAt) {
 		emails := append([]string(nil), entry.emails...)
-		recipientCacheMu.Unlock()
+		a.recipientCacheMu.Unlock()
 		return emails, nil
 	}
-	recipientCacheMu.Unlock()
+	a.recipientCacheMu.Unlock()
 
-	users, err := st.ListUsers(ctx)
+	users, err := a.st.ListUsers(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +244,7 @@ func recipientEmails(ctx context.Context, st *store.Store, clusterID string) ([]
 		if mail.IsPlaceholderEmail(email) {
 			continue
 		}
-		if !auth.CanAccessCluster(user, clusterID) {
+		if !auth.CanAccessCluster(auth.StoreUserToDomain(user), clusterID) {
 			continue
 		}
 		key := strings.ToLower(email)
@@ -182,17 +255,16 @@ func recipientEmails(ctx context.Context, st *store.Store, clusterID string) ([]
 		out = append(out, email)
 	}
 
-	recipientCacheMu.Lock()
-	recipientCache[clusterID] = recipientCacheEntry{
+	a.recipientCacheMu.Lock()
+	a.recipientCache[clusterID] = recipientCacheEntry{
 		emails:    append([]string(nil), out...),
 		expiresAt: now.Add(recipientCacheTTL),
 	}
-	// Opportunistic purge of expired cluster entries.
-	for id, entry := range recipientCache {
+	for id, entry := range a.recipientCache {
 		if now.After(entry.expiresAt) {
-			delete(recipientCache, id)
+			delete(a.recipientCache, id)
 		}
 	}
-	recipientCacheMu.Unlock()
+	a.recipientCacheMu.Unlock()
 	return out, nil
 }

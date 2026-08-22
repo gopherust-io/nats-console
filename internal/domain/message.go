@@ -3,9 +3,10 @@ package domain
 import (
 	"time"
 
-	"github.com/gopherust-io/nats-consol/pkg/common/b64util"
 	libnats "github.com/gopherust-io/nats"
 	"github.com/nats-io/nats.go"
+
+	"github.com/gopherust-io/nats-consol/pkg/common/b64util"
 )
 
 type MessageResult struct {
@@ -62,7 +63,6 @@ func StreamMessageFromRaw(msg *nats.RawStreamMsg) StreamMessage {
 	return out
 }
 
-// StreamMessageFromStored maps a library StoredMessage into the console API shape.
 func StreamMessageFromStored(msg *libnats.StoredMessage) StreamMessage {
 	if msg == nil {
 		return StreamMessage{}

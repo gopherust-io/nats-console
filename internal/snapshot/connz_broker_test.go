@@ -113,7 +113,7 @@ func TestReplicasScrapeTimeout(t *testing.T) {
 
 	assert.Equal(t, snapshot.DefaultReplicasScrapeTimeout, snapshot.ReplicasScrapeTimeout(0))
 	assert.Equal(t, snapshot.DefaultReplicasScrapeTimeout, snapshot.ReplicasScrapeTimeout(1))
-	// 5 candidates: 2×5×3s + 6s = 36s
-	assert.Equal(t, 36*time.Second, snapshot.ReplicasScrapeTimeout(5))
-	assert.Equal(t, 54*time.Second, snapshot.ReplicasScrapeTimeout(8))
+	// 5 candidates: 2×5×1s + 3s = 13s → capped at maxReplicasScrapeTimeout (8s)
+	assert.Equal(t, 8*time.Second, snapshot.ReplicasScrapeTimeout(5))
+	assert.Equal(t, 8*time.Second, snapshot.ReplicasScrapeTimeout(8))
 }

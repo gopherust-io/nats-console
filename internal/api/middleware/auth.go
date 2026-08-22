@@ -6,10 +6,10 @@ import (
 	"github.com/valyala/fasthttp"
 
 	"github.com/gopherust-io/nats-consol/internal/auth"
+	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/httpctx/httpstatus"
 	"github.com/gopherust-io/nats-consol/internal/ipset"
-	"github.com/gopherust-io/nats-consol/internal/store"
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
@@ -34,7 +34,7 @@ func (mw *MwHandler) VerifyAuth(next fasthttp.RequestHandler) fasthttp.RequestHa
 
 		c := httpctx.FromRequest(ctx)
 		var (
-			loaded store.User
+			loaded domain.User
 			err    error
 		)
 		if requiresFreshAuthz(path, commonstrings.BytesToString(ctx.Method())) {
@@ -88,7 +88,7 @@ func (mw *MwHandler) requestFingerprint(ctx *fasthttp.RequestCtx) string {
 	return auth.DeviceFingerprint(ua, ip)
 }
 
-func (mw *MwHandler) Authenticate(ctx *fasthttp.RequestCtx) (store.User, bool) {
+func (mw *MwHandler) Authenticate(ctx *fasthttp.RequestCtx) (domain.User, bool) {
 	fph := mw.requestFingerprint(ctx)
 
 	if cookie := ctx.Request.Header.Cookie(auth.SessionCookie); len(cookie) > 0 {
@@ -103,7 +103,7 @@ func (mw *MwHandler) Authenticate(ctx *fasthttp.RequestCtx) (store.User, bool) {
 	if after, ok := strings.CutPrefix(authHeader, "Bearer "); ok {
 		token := strings.TrimSpace(after)
 		if commonstrings.IsEmpty(token) {
-			return store.User{}, false
+			return domain.User{}, false
 		}
 		user, err := mw.authService.ParseSession(httpctx.FromRequest(ctx), token, fph)
 		return user, err == nil
@@ -112,13 +112,13 @@ func (mw *MwHandler) Authenticate(ctx *fasthttp.RequestCtx) (store.User, bool) {
 	if strings.HasPrefix(authHeader, "Basic ") {
 		username, password, ok := auth.ParseBasicAuth(authHeader)
 		if !ok {
-			return store.User{}, false
+			return domain.User{}, false
 		}
 		user, err := mw.authService.AuthenticateBasic(httpctx.FromRequest(ctx), username, password)
 		return user, err == nil
 	}
 
-	return store.User{}, false
+	return domain.User{}, false
 }
 
 func (mw *MwHandler) VerifyRBAC(next fasthttp.RequestHandler) fasthttp.RequestHandler {

@@ -4,16 +4,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gopherust-io/nats-consol/internal/mail"
-	"github.com/gopherust-io/nats-consol/internal/store"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/gopherust-io/nats-consol/internal/mail"
+	"github.com/gopherust-io/nats-consol/internal/repo"
 )
 
 func TestRecipientFilterSkipsPlaceholdersAndDedupes(t *testing.T) {
 	t.Parallel()
-	users := []store.User{
+	users := []repo.User{
 		{Email: "admin@local", IsRoot: true},
-		{Email: "", Roles: []string{store.RoleAdmin}},
+		{Email: "", Roles: []string{repo.RoleAdmin}},
 		{Email: "ops@example.com", IsRoot: true},
 		{Email: "OPS@example.com", IsRoot: true},
 	}

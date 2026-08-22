@@ -1,6 +1,7 @@
 import { api, clusterPath, jetStreamUIBase, type ConsumerInfo, type StreamInfo } from "./api";
 import { consumerLag, isSlowConsumer } from "./consumerMetrics";
 import { TOPOLOGY_PAGE_SIZE } from "./constants";
+import { fetchAllStreams } from "./streams";
 
 export type TopologyNodeKind = "cluster" | "stream" | "subject" | "consumer";
 
@@ -69,8 +70,6 @@ export function withJetStreamHrefs(
 
   return walk(root);
 }
-
-type StreamListResponse = StreamInfo[];
 
 type ConsumerListResponse = ConsumerInfo[];
 
@@ -191,23 +190,8 @@ function createStreamTopologyNode(
   };
 }
 
-async function fetchAllStreams(clusterId: string): Promise<StreamInfo[]> {
-  const all: StreamInfo[] = [];
-  let offset = 0;
-
-  while (true) {
-    const page = await api<StreamListResponse>(
-      clusterPath(clusterId, `/streams?offset=${offset}&limit=${PAGE_SIZE}`),
-    );
-    const streams = page.data ?? [];
-    all.push(...streams);
-    if (offset + streams.length >= (page.meta?.total ?? 0) || streams.length === 0) {
-      break;
-    }
-    offset += streams.length;
-  }
-
-  return all;
+async function fetchAllStreamsForTopology(clusterId: string): Promise<StreamInfo[]> {
+  return fetchAllStreams(clusterId, PAGE_SIZE);
 }
 
 async function fetchAllConsumers(clusterId: string, streamName: string): Promise<ConsumerInfo[]> {
@@ -233,7 +217,7 @@ async function fetchAllConsumers(clusterId: string, streamName: string): Promise
 }
 
 async function buildTopologyFromAPI(clusterId: string, clusterName: string): Promise<TopologyNode> {
-  const streams = await fetchAllStreams(clusterId);
+  const streams = await fetchAllStreamsForTopology(clusterId);
   const consumerLists = await mapConcurrent(streams, CONSUMER_FETCH_CONCURRENCY, (stream) =>
     fetchAllConsumers(clusterId, stream.config.name),
   );

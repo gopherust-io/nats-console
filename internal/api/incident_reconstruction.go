@@ -5,6 +5,7 @@ import (
 
 	"github.com/valyala/fasthttp"
 
+	"github.com/gopherust-io/nats-consol/internal/api/apikit"
 	"github.com/gopherust-io/nats-consol/internal/app"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
@@ -22,10 +23,23 @@ func NewIncidentReconstructionHandler(incidents *app.IncidentService) *IncidentR
 	return &IncidentReconstructionHandler{incidents: incidents}
 }
 
-// CreateAnnotation handles POST /api/v1/clusters/{clusterId}/incident-annotations.
+// CreateAnnotation godoc
+//
+// @Summary Create Annotation
+// @Tags API
+// @Param clusterId path string true "clusterId"
+// @Produce json
+// @Success 201 {object} IncidentAnnotationEnvelope
+// @Failure 401 {object} ErrorEnvelope
+// @Failure 403 {object} ErrorEnvelope
+// @Failure 404 {object} ErrorEnvelope
+// @Security BasicAuth
+// @Security BearerAuth
+// @Security SessionCookie
+// @Router /api/v1/clusters/{clusterId}/incident-annotations [post]
 func (h *IncidentReconstructionHandler) CreateAnnotation(ctx *fasthttp.RequestCtx) {
-	clusterID := clusterID(ctx)
-	if err := validateUUID(clusterID); err != nil {
+	clusterID := apikit.ClusterID(ctx)
+	if err := apikit.ValidateUUID(clusterID); err != nil {
 		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
@@ -42,26 +56,41 @@ func (h *IncidentReconstructionHandler) CreateAnnotation(ctx *fasthttp.RequestCt
 
 	ann, err := h.incidents.CreateAnnotation(httpctx.FromRequest(ctx), clusterID, req)
 	if err != nil {
-		writeAPIError(ctx, err)
+		apikit.WriteAPIError(ctx, err)
 		return
 	}
 	httpstatus.WriteData(ctx, fasthttp.StatusCreated, ann)
 }
 
-// GetReconstruction handles GET .../consumers/{consumer}/incident-reconstruction.
+// GetReconstruction godoc
+//
+// @Summary Get Reconstruction
+// @Tags JetStream
+// @Param clusterId path string true "clusterId"
+// @Param name path string true "name"
+// @Param consumer path string true "consumer"
+// @Produce json
+// @Success 200 {object} IncidentReconstructionEnvelope
+// @Failure 401 {object} ErrorEnvelope
+// @Failure 403 {object} ErrorEnvelope
+// @Failure 404 {object} ErrorEnvelope
+// @Security BasicAuth
+// @Security BearerAuth
+// @Security SessionCookie
+// @Router /api/v1/clusters/{clusterId}/streams/{name}/consumers/{consumer}/incident-reconstruction [get]
 func (h *IncidentReconstructionHandler) GetReconstruction(ctx *fasthttp.RequestCtx) {
-	clusterID := clusterID(ctx)
+	clusterID := apikit.ClusterID(ctx)
 	stream := httpctx.RouteParam(ctx, "name")
 	consumer := httpctx.RouteParam(ctx, "consumer")
-	if err := validateUUID(clusterID); err != nil {
+	if err := apikit.ValidateUUID(clusterID); err != nil {
 		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if err := validateResourceName(stream); err != nil {
+	if err := apikit.ValidateResourceName(stream); err != nil {
 		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
-	if err := validateResourceName(consumer); err != nil {
+	if err := apikit.ValidateResourceName(consumer); err != nil {
 		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}

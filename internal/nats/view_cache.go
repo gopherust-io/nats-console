@@ -1,8 +1,6 @@
 package natsclient
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"sync"
 	"time"
@@ -11,12 +9,13 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/gopherust-io/nats-consol/internal/metrics"
+	"github.com/gopherust-io/nats-consol/pkg/common/fingerprint"
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 const defaultViewCacheTTL = 3 * time.Second
 
-// ViewCache coalesces and short-TTLs JetStream/monitoring read results per cluster.
+// ViewCache coalesces and short-TTLs JetStream/monitoring read results per cluster
 type ViewCache struct {
 	sf    singleflight.Group
 	items map[string]viewCacheEntry
@@ -30,7 +29,6 @@ type viewCacheEntry struct {
 	etag      string
 }
 
-// NewViewCache creates a view cache with the given TTL (defaults to 3s).
 func NewViewCache(ttl time.Duration) *ViewCache {
 	if ttl <= 0 {
 		ttl = defaultViewCacheTTL
@@ -41,7 +39,7 @@ func NewViewCache(ttl time.Duration) *ViewCache {
 	}
 }
 
-// GetOrLoad returns a cached value or runs load once under singleflight.
+// GetOrLoad returns a cached value or runs load once under singleflight
 func (c *ViewCache) GetOrLoad(key string, load func() (any, error)) (any, string, error) {
 	if c == nil {
 		v, err := load()
@@ -79,7 +77,7 @@ type cachedResult struct {
 	etag string
 }
 
-// InvalidateCluster drops all cached entries for a cluster ID prefix.
+// InvalidateCluster drops all cached entries for a cluster ID prefix
 func (c *ViewCache) InvalidateCluster(clusterID string) {
 	if c == nil || commonstrings.IsEmpty(clusterID) {
 		return
@@ -94,7 +92,7 @@ func (c *ViewCache) InvalidateCluster(clusterID string) {
 	}
 }
 
-// InvalidatePrefix drops entries whose key starts with prefix.
+// InvalidatePrefix drops entries whose key starts with prefix
 func (c *ViewCache) InvalidatePrefix(prefix string) {
 	if c == nil || commonstrings.IsEmpty(prefix) {
 		return
@@ -131,7 +129,6 @@ func (c *ViewCache) set(key string, payload any, etag string) {
 		etag:      etag,
 		expiresAt: time.Now().Add(c.ttl),
 	}
-	// Bound map growth under churn.
 	if len(c.items) > 2048 {
 		now := time.Now()
 		for k, e := range c.items {
@@ -146,23 +143,18 @@ func (c *ViewCache) set(key string, payload any, etag string) {
 func etagOf(v any) string {
 	switch t := v.(type) {
 	case []byte:
-		sum := sha256.Sum256(t)
-		return `"` + hex.EncodeToString(sum[:8]) + `"`
+		return fingerprint.ETag(t)
 	case string:
-		sum := sha256.Sum256(commonstrings.StringToBytes(t))
-		return `"` + hex.EncodeToString(sum[:8]) + `"`
+		return fingerprint.ETagString(t)
 	default:
 		raw, err := sonic.Marshal(v)
 		if err != nil {
-			sum := sha256.Sum256(fmt.Appendf(nil, "%T", v))
-			return `"` + hex.EncodeToString(sum[:8]) + `"`
+			return fingerprint.ETagString(fmt.Sprintf("%T", v))
 		}
-		sum := sha256.Sum256(raw)
-		return `"` + hex.EncodeToString(sum[:8]) + `"`
+		return fingerprint.ETag(raw)
 	}
 }
 
-// ViewCacheKey builds a cache key for a cluster-scoped read.
 func ViewCacheKey(clusterID, op string, parts ...string) string {
 	n := len(clusterID) + 1 + len(op)
 	for _, p := range parts {
@@ -176,5 +168,6 @@ func ViewCacheKey(clusterID, op string, parts ...string) string {
 		b = append(b, '|')
 		b = append(b, p...)
 	}
-	return commonstrings.BytesToString(b)
+	// string(b) copies; BytesToString would alias a non-escaping local buffer.
+	return string(b)
 }

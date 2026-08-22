@@ -4,22 +4,24 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/repo"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 
-	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/nats-io/nats.go"
 	"golang.org/x/sync/errgroup"
+
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
-func ExtractAccountMetrics(info *nats.AccountInfo) []store.MetricSampleRow {
+func ExtractAccountMetrics(info *nats.AccountInfo) []repo.MetricSampleRow {
 	if info == nil {
 		return nil
 	}
-	return []store.MetricSampleRow{
+	return []repo.MetricSampleRow{
 		{Metric: domain.MetricJetStreamStorageBytes, Value: float64(info.Store)},
 		{Metric: domain.MetricJetStreamMemoryBytes, Value: float64(info.Memory)},
 		{Metric: domain.MetricJetStreamStreams, Value: float64(info.Streams)},
@@ -27,7 +29,7 @@ func ExtractAccountMetrics(info *nats.AccountInfo) []store.MetricSampleRow {
 	}
 }
 
-func ExtractVarzMetrics(raw []byte) ([]store.MetricSampleRow, error) {
+func ExtractVarzMetrics(raw []byte) ([]repo.MetricSampleRow, error) {
 	var payload struct {
 		Connections int     `json:"connections"`
 		InMsgs      int64   `json:"in_msgs"`
@@ -40,7 +42,7 @@ func ExtractVarzMetrics(raw []byte) ([]store.MetricSampleRow, error) {
 	if err := serializer.Unmarshal(raw, &payload); err != nil {
 		return nil, err
 	}
-	out := []store.MetricSampleRow{
+	out := []repo.MetricSampleRow{
 		{Metric: domain.MetricServerConnections, Value: float64(payload.Connections)},
 		{Metric: domain.MetricServerInMsgsTotal, Value: float64(payload.InMsgs)},
 		{Metric: domain.MetricServerOutMsgsTotal, Value: float64(payload.OutMsgs)},
@@ -48,17 +50,15 @@ func ExtractVarzMetrics(raw []byte) ([]store.MetricSampleRow, error) {
 		{Metric: domain.MetricServerOutBytesTotal, Value: float64(payload.OutBytes)},
 	}
 	if payload.CPU > 0 {
-		out = append(out, store.MetricSampleRow{Metric: domain.MetricServerCPUPercent, Value: payload.CPU})
+		out = append(out, repo.MetricSampleRow{Metric: domain.MetricServerCPUPercent, Value: payload.CPU})
 	}
 	if payload.Mem > 0 {
-		out = append(out, store.MetricSampleRow{Metric: domain.MetricServerMemBytes, Value: float64(payload.Mem)})
+		out = append(out, repo.MetricSampleRow{Metric: domain.MetricServerMemBytes, Value: float64(payload.Mem)})
 	}
 	return out, nil
 }
 
-func ExtractJSZMetrics(raw []byte) ([]store.MetricSampleRow, error) {
-	// NATS /jsz exposes streams/consumers/messages at the top level; `total` is an int
-	// (account count), not a nested object.
+func ExtractJSZMetrics(raw []byte) ([]repo.MetricSampleRow, error) {
 	var payload struct {
 		Streams   int    `json:"streams"`
 		Consumers int    `json:"consumers"`
@@ -67,7 +67,7 @@ func ExtractJSZMetrics(raw []byte) ([]store.MetricSampleRow, error) {
 	if err := serializer.Unmarshal(raw, &payload); err != nil {
 		return nil, err
 	}
-	return []store.MetricSampleRow{
+	return []repo.MetricSampleRow{
 		{Metric: domain.MetricJSZStreams, Value: float64(payload.Streams)},
 		{Metric: domain.MetricJSZConsumers, Value: float64(payload.Consumers)},
 		{Metric: domain.MetricJSZMessages, Value: float64(payload.Messages)},
@@ -75,8 +75,8 @@ func ExtractJSZMetrics(raw []byte) ([]store.MetricSampleRow, error) {
 }
 
 // ExtractStreamRateMetrics derives per-stream counter samples from topology jsz
-// (streams=1&consumers=1). Values are treated as counters for rate charts.
-func ExtractStreamRateMetrics(raw []byte) ([]store.MetricSampleRow, error) {
+// (streams=1&consumers=1). Values are treated as counters for rate charts
+func ExtractStreamRateMetrics(raw []byte) ([]repo.MetricSampleRow, error) {
 	payload, err := parseTopologyJSZ(raw)
 	if err != nil {
 		return nil, err
@@ -85,8 +85,8 @@ func ExtractStreamRateMetrics(raw []byte) ([]store.MetricSampleRow, error) {
 }
 
 // ExtractConsumerHealthMetrics evaluates each consumer against slow-consumer
-// thresholds and emits cluster-level aggregate gauges.
-func ExtractConsumerHealthMetrics(raw []byte, thr domain.SlowConsumerThresholds) ([]store.MetricSampleRow, error) {
+// thresholds and emits cluster-level aggregate gauges
+func ExtractConsumerHealthMetrics(raw []byte, thr domain.SlowConsumerThresholds) ([]repo.MetricSampleRow, error) {
 	payload, err := parseTopologyJSZ(raw)
 	if err != nil {
 		return nil, err
@@ -94,7 +94,7 @@ func ExtractConsumerHealthMetrics(raw []byte, thr domain.SlowConsumerThresholds)
 	return consumerHealthSamplesFromTopology(payload, thr), nil
 }
 
-// ExtractEventArchitectureInputs builds stream/consumer inventory for architecture analysis.
+// ExtractEventArchitectureInputs builds stream/consumer inventory for architecture analysis
 func ExtractEventArchitectureInputs(raw []byte) ([]domain.EventArchitectureInput, error) {
 	payload, err := parseTopologyJSZ(raw)
 	if err != nil {
@@ -103,7 +103,7 @@ func ExtractEventArchitectureInputs(raw []byte) ([]domain.EventArchitectureInput
 	return architectureInputsFromTopology(payload), nil
 }
 
-// ExtractIncidentConsumerSamples builds per-consumer lag/redelivery/progress rows from topology JSZ.
+// ExtractIncidentConsumerSamples builds per-consumer lag/redelivery/progress rows from topology JSZ
 func ExtractIncidentConsumerSamples(raw []byte) ([]domain.IncidentConsumerSample, error) {
 	payload, err := parseTopologyJSZ(raw)
 	if err != nil {
@@ -187,7 +187,7 @@ func DiffRouteNodes(previous, current []string) (disconnected, reconnected []str
 func CollectClusterMetrics(client interface {
 	AccountInfo(ctx context.Context) (*nats.AccountInfo, error)
 	Monitoring(ctx context.Context, path string) ([]byte, error)
-}, ctx context.Context, thr domain.SlowConsumerThresholds) ([]store.MetricSampleRow, error) {
+}, ctx context.Context, thr domain.SlowConsumerThresholds) ([]repo.MetricSampleRow, error) {
 	result, err := CollectClusterSnapshot(client, ctx, thr)
 	if err != nil {
 		return nil, err
@@ -197,7 +197,7 @@ func CollectClusterMetrics(client interface {
 
 // ClusterSnapshotResult holds normalized metrics plus raw monitoring payloads.
 type ClusterSnapshotResult struct {
-	Samples            []store.MetricSampleRow
+	Samples            []repo.MetricSampleRow
 	ConsumerSamples    []domain.IncidentConsumerSample
 	ArchitectureInputs []domain.EventArchitectureInput
 	RouteNodes         []string
@@ -260,16 +260,16 @@ func parseTopologyJSZ(raw []byte) (*topologyJSZPayload, error) {
 }
 
 func samplesFromTopologyJSZ(payload *topologyJSZPayload, thr domain.SlowConsumerThresholds) (
-	samples []store.MetricSampleRow,
+	samples []repo.MetricSampleRow,
 	consumerSamples []domain.IncidentConsumerSample,
 ) {
 	if payload == nil {
 		return nil, nil
 	}
 	samples = append(samples,
-		store.MetricSampleRow{Metric: domain.MetricJSZStreams, Value: float64(payload.Streams)},
-		store.MetricSampleRow{Metric: domain.MetricJSZConsumers, Value: float64(payload.Consumers)},
-		store.MetricSampleRow{Metric: domain.MetricJSZMessages, Value: float64(payload.Messages)},
+		repo.MetricSampleRow{Metric: domain.MetricJSZStreams, Value: float64(payload.Streams)},
+		repo.MetricSampleRow{Metric: domain.MetricJSZConsumers, Value: float64(payload.Consumers)},
+		repo.MetricSampleRow{Metric: domain.MetricJSZMessages, Value: float64(payload.Messages)},
 	)
 	samples = append(samples, streamRateSamplesFromTopology(payload)...)
 	samples = append(samples, consumerHealthSamplesFromTopology(payload, thr)...)
@@ -277,8 +277,8 @@ func samplesFromTopologyJSZ(payload *topologyJSZPayload, thr domain.SlowConsumer
 	return samples, consumerSamples
 }
 
-func streamRateSamplesFromTopology(payload *topologyJSZPayload) []store.MetricSampleRow {
-	out := make([]store.MetricSampleRow, 0)
+func streamRateSamplesFromTopology(payload *topologyJSZPayload) []repo.MetricSampleRow {
+	out := make([]repo.MetricSampleRow, 0)
 	for _, acct := range payload.AccountDetails {
 		for _, stream := range acct.StreamDetail {
 			if commonstrings.IsEmpty(stream.Name) {
@@ -299,19 +299,19 @@ func streamRateSamplesFromTopology(payload *topologyJSZPayload) []store.MetricSa
 				}
 			}
 			out = append(out,
-				store.MetricSampleRow{
+				repo.MetricSampleRow{
 					Metric: domain.StreamMetric(stream.Name, domain.StreamMetricKindLastSeq),
 					Value:  float64(lastSeq),
 				},
-				store.MetricSampleRow{
+				repo.MetricSampleRow{
 					Metric: domain.StreamMetric(stream.Name, domain.StreamMetricKindBytes),
 					Value:  float64(bytes),
 				},
-				store.MetricSampleRow{
+				repo.MetricSampleRow{
 					Metric: domain.StreamMetric(stream.Name, domain.StreamMetricKindDeliveredSeq),
 					Value:  float64(deliveredSum),
 				},
-				store.MetricSampleRow{
+				repo.MetricSampleRow{
 					Metric: domain.StreamMetric(stream.Name, domain.StreamMetricKindAckFloorSeq),
 					Value:  float64(ackFloorSum),
 				},
@@ -321,7 +321,7 @@ func streamRateSamplesFromTopology(payload *topologyJSZPayload) []store.MetricSa
 	return out
 }
 
-func consumerHealthSamplesFromTopology(payload *topologyJSZPayload, thr domain.SlowConsumerThresholds) []store.MetricSampleRow {
+func consumerHealthSamplesFromTopology(payload *topologyJSZPayload, thr domain.SlowConsumerThresholds) []repo.MetricSampleRow {
 	thr = thr.WithDefaults()
 	var (
 		slowCount   float64
@@ -367,14 +367,14 @@ func consumerHealthSamplesFromTopology(payload *topologyJSZPayload, thr domain.S
 		}
 	}
 	if !sawConsumer {
-		return []store.MetricSampleRow{
+		return []repo.MetricSampleRow{
 			{Metric: domain.MetricJetStreamSlowConsumers, Value: 0},
 			{Metric: domain.MetricJetStreamConsumerMaxLag, Value: 0},
 			{Metric: domain.MetricJetStreamConsumerMaxPending, Value: 0},
 			{Metric: domain.MetricJetStreamConsumerMaxAckPending, Value: 0},
 		}
 	}
-	return []store.MetricSampleRow{
+	return []repo.MetricSampleRow{
 		{Metric: domain.MetricJetStreamSlowConsumers, Value: slowCount},
 		{Metric: domain.MetricJetStreamConsumerMaxLag, Value: maxLag},
 		{Metric: domain.MetricJetStreamConsumerMaxPending, Value: maxPending},
@@ -462,19 +462,15 @@ func slimJSZFromTopology(payload *topologyJSZPayload) []byte {
 	if payload == nil {
 		return nil
 	}
-	raw, err := serializer.Marshal(struct {
-		Streams   int    `json:"streams"`
-		Consumers int    `json:"consumers"`
-		Messages  uint64 `json:"messages"`
-	}{
-		Streams:   payload.Streams,
-		Consumers: payload.Consumers,
-		Messages:  payload.Messages,
-	})
-	if err != nil {
-		return nil
-	}
-	return raw
+	// Fixed shape: {"streams":N,"consumers":N,"messages":N} — avoid Sonic on every scrape tick.
+	buf := make([]byte, 0, 64)
+	buf = append(buf, `{"streams":`...)
+	buf = strconv.AppendInt(buf, int64(payload.Streams), 10)
+	buf = append(buf, `,"consumers":`...)
+	buf = strconv.AppendInt(buf, int64(payload.Consumers), 10)
+	buf = append(buf, `,"messages":`...)
+	buf = strconv.AppendUint(buf, payload.Messages, 10)
+	return append(buf, '}')
 }
 
 // CollectClusterSnapshot scrapes account + monitoring endpoints for metrics and hub reuse.

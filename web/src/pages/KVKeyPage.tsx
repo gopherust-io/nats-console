@@ -51,9 +51,17 @@ export default function KVKeyPage() {
       ]);
       if (gen !== loadGenRef.current) return;
       const entryData = entryRes.data;
+      if (!entryData) {
+        setEntry(null);
+        setHistory(historyRes.data ?? []);
+        setEditValue("");
+        setMissing(true);
+        setError(t("errors.not_found"));
+        return;
+      }
       setEntry(entryData);
       setHistory(historyRes.data ?? []);
-      setEditValue(decodeBase64(entryData.value));
+      setEditValue(decodeBase64(entryData.value ?? ""));
       setMissing(false);
     } catch (err) {
       if (gen !== loadGenRef.current) return;
@@ -62,7 +70,7 @@ export default function KVKeyPage() {
       setMissing(true);
       setEntry(null);
     }
-  }, [clusterId, bucket, decodedKey]);
+  }, [clusterId, bucket, decodedKey, t]);
 
   useEffect(() => {
     loadGenRef.current += 1;

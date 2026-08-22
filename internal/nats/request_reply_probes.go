@@ -9,7 +9,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/gopherust-io/nats-consol/internal/domain"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/repo"
 	"github.com/gopherust-io/nats-consol/pkg/common/b64util"
 	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
@@ -24,7 +24,6 @@ type probeRunner interface {
 	) (*nats.Msg, time.Duration, error)
 }
 
-// ProbeRequestHeaders builds Nats-Content-Type headers for the given format.
 func ProbeRequestHeaders(format domain.RequestReplyPayloadFormat, hasPayload bool) nats.Header {
 	format = format.Normalize()
 	if strings.IsEmpty(string(format)) {
@@ -47,24 +46,29 @@ func ProbeRequestHeaders(format domain.RequestReplyPayloadFormat, hasPayload boo
 	}
 }
 
-// DetectReplyFormat maps Nats-Content-Type (or Content-Type) to a reply format string.
 func DetectReplyFormat(headers nats.Header) string {
+	const (
+		bytes                   = "bytes"
+		applicationJSON         = "application/json"
+		applicationMsgPack      = "application/msgpack"
+		applicationXMsgPack     = "application/x-msgpack"
+		applicationProtobuf     = "application/protobuf"
+		applicationXProtobuf    = "application/x-protobuf"
+		applicationVNDGooglePB  = "application/vnd.google.protobuf"
+	)
 	if headers == nil {
-		return "json"
+		return libnats.ContentTypeJSON
 	}
 	ct := headers.Get(libnats.HeaderContentType)
-	if strings.IsEmpty(ct) {
-		ct = headers.Get("Content-Type")
-	}
 	switch ct {
-	case libnats.ContentTypeMsgPack, "application/msgpack", "application/x-msgpack":
-		return "msgpack"
-	case libnats.ContentTypeProto, "application/protobuf", "application/x-protobuf", "application/vnd.google.protobuf":
-		return "protobuf"
-	case libnats.ContentTypeJSON, "application/json", "":
-		return "json"
+	case libnats.ContentTypeMsgPack, applicationMsgPack, applicationXMsgPack:
+		return libnats.ContentTypeMsgPack
+	case libnats.ContentTypeProto, applicationProtobuf, applicationXProtobuf, applicationVNDGooglePB:
+		return libnats.ContentTypeProto
+	case libnats.ContentTypeJSON, applicationJSON, "":
+		return libnats.ContentTypeJSON
 	default:
-		return "bytes"
+		return bytes
 	}
 }
 
@@ -81,13 +85,12 @@ func headerMap(headers nats.Header) map[string]string {
 	return out
 }
 
-// RunRequestReplyProbe executes a single probe and returns a run result (with reply preview fields).
 func RunRequestReplyProbe(
 	ctx context.Context,
 	client probeRunner,
 	probe domain.RequestReplyProbe,
 	measuredAt time.Time,
-) (domain.RequestReplyProbeRunResult, *store.MetricSampleRow) {
+) (domain.RequestReplyProbeRunResult, *repo.MetricSampleRow) {
 	payload := decodeProbePayloadBytes(probe.PayloadB64)
 	timeout := time.Duration(probe.TimeoutMs) * time.Millisecond
 	if timeout <= 0 {
@@ -117,22 +120,21 @@ func RunRequestReplyProbe(
 		result.ReplyHeaders = headerMap(reply.Header)
 		result.ReplyFormat = DetectReplyFormat(reply.Header)
 	}
-	sample := &store.MetricSampleRow{
+	sample := &repo.MetricSampleRow{
 		Metric: domain.RequestReplyProbeMetric(probe.Subject),
 		Value:  result.LatencyMs,
 	}
 	return result, sample
 }
 
-// RunRequestReplyProbes executes enabled probes and returns results plus metric samples.
 func RunRequestReplyProbes(
 	ctx context.Context,
 	client probeRunner,
 	probes []domain.RequestReplyProbe,
 	measuredAt time.Time,
-) ([]domain.RequestReplyProbeResult, []store.MetricSampleRow) {
+) ([]domain.RequestReplyProbeResult, []repo.MetricSampleRow) {
 	results := make([]domain.RequestReplyProbeResult, 0, len(probes))
-	samples := make([]store.MetricSampleRow, 0, len(probes))
+	samples := make([]repo.MetricSampleRow, 0, len(probes))
 
 	for _, probe := range probes {
 		if !probe.Enabled {

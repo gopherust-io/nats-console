@@ -10,6 +10,7 @@ import { getWebSocketURL, jetStreamUIBase } from "../lib/api";
 import { useCluster } from "../lib/cluster";
 import { formatDateTime } from "../lib/datetime";
 import { LIVE_STREAM_MAX_MESSAGES, LIVE_SUBJECT_FILTER_DEBOUNCE_MS } from "../lib/constants";
+import { compactPayloadPreview } from "../lib/messagePayloadDecode";
 import { rowFromMessage } from "../lib/messageDownload";
 
 type LiveMessage = {
@@ -99,6 +100,10 @@ export default function LiveStreamPage() {
     const batch = pendingRef.current;
     if (batch.length === 0) return;
     pendingRef.current = [];
+    // Warm preview cache on the message object before React paints rows.
+    for (const msg of batch) {
+      if (msg.data) compactPayloadPreview(msg.data, undefined, msg);
+    }
     setMessages((prev) => {
       if (gen !== flushGenRef.current) return prev;
       const combined = prev.concat(batch);
@@ -132,70 +137,104 @@ export default function LiveStreamPage() {
 
     flushGenRef.current += 1;
     const gen = flushGenRef.current;
-    const url = getWebSocketURL(id, name, subjectFilter || undefined, fromSeq);
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
-    setStatus("connecting");
-    setStatusDetail("");
-    pendingRef.current = [];
-    setMessages([]);
-    if (flushTimerRef.current !== null) {
-      window.clearTimeout(flushTimerRef.current);
-      flushTimerRef.current = null;
-    }
+    let closedByCleanup = false;
+    let reconnectTimer: number | null = null;
+    let attempt = 0;
+    const maxAttempts = 5;
 
-    const isActive = () => wsRef.current === ws && gen === flushGenRef.current;
-
-    ws.onopen = () => {
-      if (!isActive()) return;
-      setStatus("connected");
-    };
-    ws.onclose = () => {
-      if (!isActive()) return;
-      setStatus("disconnected");
-    };
-    ws.onerror = () => {
-      if (!isActive()) return;
-      setStatus("error");
-    };
-    ws.onmessage = (event) => {
-      if (!isActive()) return;
-      let frame: LiveMessage;
-      try {
-        frame = JSON.parse(event.data) as LiveMessage;
-      } catch {
-        setStatus("error");
-        setStatusDetail("parse error");
-        return;
+    const connect = () => {
+      if (gen !== flushGenRef.current) return;
+      const url = getWebSocketURL(id, name, subjectFilter || undefined, fromSeq);
+      const ws = new WebSocket(url);
+      wsRef.current = ws;
+      setStatus("connecting");
+      if (attempt === 0) {
+        setStatusDetail("");
+        pendingRef.current = [];
+        setMessages([]);
+      } else {
+        setStatusDetail(t("liveStream.reconnecting", { attempt, max: maxAttempts }));
       }
-      if (frame.type === "message") {
-        if (pausedRef.current) return;
-        pendingRef.current.push(frame);
-        if (flushTimerRef.current === null) {
-          flushTimerRef.current = window.setTimeout(() => {
-            flushTimerRef.current = null;
-            flushPending(gen);
-          }, WS_BATCH_MS);
-        }
-      } else if (frame.type === "error") {
-        setStatus("error");
-        setStatusDetail(frame.error ?? "error");
-      }
-    };
-
-    return () => {
-      flushGenRef.current += 1;
-      pendingRef.current = [];
       if (flushTimerRef.current !== null) {
         window.clearTimeout(flushTimerRef.current);
         flushTimerRef.current = null;
       }
-      if (wsRef.current === ws) {
+
+      const isActive = () => wsRef.current === ws && gen === flushGenRef.current;
+
+      ws.onopen = () => {
+        if (!isActive()) return;
+        attempt = 0;
+        setStatus("connected");
+        setStatusDetail("");
+      };
+      ws.onerror = () => {
+        if (!isActive()) return;
+        setStatus("error");
+        setStatusDetail((prev) => prev || t("liveStream.connectionFailed"));
+      };
+      ws.onclose = () => {
+        if (!isActive()) return;
         wsRef.current = null;
-      }
-      ws.close();
+        if (closedByCleanup) {
+          setStatus("disconnected");
+          return;
+        }
+        if (attempt < maxAttempts) {
+          attempt += 1;
+          const delayMs = Math.min(1000 * 2 ** (attempt - 1), 15_000);
+          setStatus("connecting");
+          setStatusDetail(t("liveStream.reconnecting", { attempt, max: maxAttempts }));
+          reconnectTimer = window.setTimeout(connect, delayMs);
+          return;
+        }
+        setStatus("error");
+        setStatusDetail((prev) => prev || t("liveStream.connectionFailed"));
+      };
+      ws.onmessage = (event) => {
+        if (!isActive()) return;
+        let frame: LiveMessage;
+        try {
+          frame = JSON.parse(event.data) as LiveMessage;
+        } catch {
+          setStatus("error");
+          setStatusDetail("parse error");
+          return;
+        }
+        if (frame.type === "message") {
+          if (pausedRef.current) return;
+          pendingRef.current.push(frame);
+          if (flushTimerRef.current === null) {
+            flushTimerRef.current = window.setTimeout(() => {
+              flushTimerRef.current = null;
+              flushPending(gen);
+            }, WS_BATCH_MS);
+          }
+        } else if (frame.type === "error") {
+          setStatus("error");
+          setStatusDetail(frame.error ?? "error");
+        }
+      };
     };
-  }, [id, name, subjectFilter, fromSeq, flushPending]);
+
+    connect();
+
+    return () => {
+      closedByCleanup = true;
+      flushGenRef.current += 1;
+      pendingRef.current = [];
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+      }
+      if (flushTimerRef.current !== null) {
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      const ws = wsRef.current;
+      wsRef.current = null;
+      ws?.close();
+    };
+  }, [id, name, subjectFilter, fromSeq, flushPending, t]);
 
   const virtualizer = useVirtualizer({
     count: messages.length,
@@ -300,7 +339,7 @@ export default function LiveStreamPage() {
 
       <p className="text-muted mb-12">{t("liveStream.clientHint")}</p>
 
-      {status === "error" && statusDetail && <Alert variant="error">{statusDetail}</Alert>}
+      {status === "error" && <Alert variant="error">{statusDetail || t("liveStream.connectionFailed")}</Alert>}
 
       <div className="live-controls">
         <label>

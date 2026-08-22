@@ -5,8 +5,11 @@ import {
   diffLeaderChange,
   electionCaptionKey,
   planElectionSequence,
+  planOptimisticElection,
+  planSettleFromCandidate,
   type ElectionOverlay,
   type ElectionPhase,
+  type ElectionStep,
   type RaftElectionPeer,
   type RaftVisualRole,
 } from "../lib/raftElection";
@@ -28,6 +31,7 @@ export function useRaftElection(
   const prevLeaderRef = useRef<string | undefined>(undefined);
   const primedRef = useRef(false);
   const busyRef = useRef(false);
+  const optimisticRef = useRef(false);
   const unreachableForRef = useRef<string | undefined>(undefined);
   const timersRef = useRef<number[]>([]);
   const peersRef = useRef(peers);
@@ -43,24 +47,28 @@ export function useRaftElection(
     busyRef.current = false;
   }, [clearTimers]);
 
-  const runSequence = useCallback(
-    (fromLeader: string | undefined, toLeader: string, opts?: { force?: boolean }) => {
+  const runSteps = useCallback(
+    (steps: ElectionStep[], opts?: { force?: boolean }) => {
       if (busyRef.current && !opts?.force) return;
-      const steps = planElectionSequence(peersRef.current, fromLeader, toLeader);
+      if (steps.length === 0) return;
 
       stopSequence();
       busyRef.current = true;
 
       if (reduceMotion) {
+        const last = steps[steps.length - 1]!;
         setOverlay({
-          phase: "settled",
-          fromLeader,
-          toLeader,
-          candidate: toLeader,
+          phase: last.optimistic ? "candidate" : "settled",
+          fromLeader: last.fromLeader,
+          toLeader: last.toLeader,
+          candidate: last.candidate,
+          optimistic: last.optimistic,
         });
+        if (last.optimistic) return;
         const id = window.setTimeout(() => {
           setOverlay(null);
           busyRef.current = false;
+          optimisticRef.current = false;
         }, 600);
         timersRef.current.push(id);
         return;
@@ -75,11 +83,13 @@ export function useRaftElection(
             fromLeader: step.fromLeader,
             toLeader: step.toLeader,
             candidate: step.candidate,
+            optimistic: step.optimistic,
           });
           if (step.phase === "settled") {
             const clearId = window.setTimeout(() => {
               setOverlay(null);
               busyRef.current = false;
+              optimisticRef.current = false;
             }, 900);
             timersRef.current.push(clearId);
           }
@@ -91,13 +101,28 @@ export function useRaftElection(
     [reduceMotion, stopSequence],
   );
 
+  const startOptimisticElection = useCallback(
+    (fromLeader: string) => {
+      const steps = planOptimisticElection(peersRef.current, fromLeader);
+      if (!steps) {
+        optimisticRef.current = false;
+        stopSequence();
+        setOverlay({ phase: "leaderUnreachable", fromLeader });
+        return;
+      }
+      optimisticRef.current = true;
+      runSteps(steps, { force: true });
+    },
+    [runSteps, stopSequence],
+  );
+
   useEffect(() => () => clearTimers(), [clearTimers]);
 
-  // Reset election priming when switching clusters (same route stays mounted).
   useEffect(() => {
     primedRef.current = false;
     prevLeaderRef.current = undefined;
     unreachableForRef.current = undefined;
+    optimisticRef.current = false;
     stopSequence();
     setOverlay(null);
   }, [clusterId, stopSequence]);
@@ -107,6 +132,9 @@ export function useRaftElection(
     const peersNow = peersRef.current;
 
     if (!primedRef.current) {
+      // Wait for first snapshot (peers and/or leader) so cold load does not
+      // treat "" → firstLeader as a fake election.
+      if (peersNow.length === 0 && !next) return;
       primedRef.current = true;
       prevLeaderRef.current = next;
       return;
@@ -115,38 +143,56 @@ export function useRaftElection(
     const prev = prevLeaderRef.current;
 
     if (prev !== next) {
+      const wasOptimistic = optimisticRef.current;
+      // First discovery of a meta leader (not recovering from outage) is not an election.
+      if (!prev && next && !wasOptimistic && !unreachableForRef.current) {
+        prevLeaderRef.current = next;
+        return;
+      }
+
       const diff = diffLeaderChange(prev, next, peersNow);
       prevLeaderRef.current = next;
       unreachableForRef.current = undefined;
+
       if (diff.kind === "change" && diff.next) {
-        // Interrupt unreachable overlay so the real meta leader always wins.
-        runSequence(diff.old || undefined, diff.next, { force: true });
+        if (wasOptimistic) {
+          optimisticRef.current = false;
+          runSteps(planSettleFromCandidate(diff.old || undefined, diff.next), { force: true });
+        } else {
+          optimisticRef.current = false;
+          runSteps(planElectionSequence(peersNow, diff.old || undefined, diff.next), {
+            force: true,
+          });
+        }
+      } else if (diff.kind === "lost") {
+        unreachableForRef.current = diff.old;
+        startOptimisticElection(diff.old);
       } else {
+        optimisticRef.current = false;
         stopSequence();
         setOverlay(null);
       }
       return;
     }
 
-    // Same reported leader, but peer is missing/offline — wait for meta; do not
-    // invent a candidate election on an arbitrary standby.
+    // Same reported meta leader, but peer is missing/offline — open election
+    // without naming a winner until jetstreamLeader flips.
     if (next) {
       const leaderPeer = peersNow.find((p) => p.name === next);
       if (!leaderPeer || !leaderPeer.online) {
         if (unreachableForRef.current !== next) {
           unreachableForRef.current = next;
-          stopSequence();
-          setOverlay({
-            phase: "leaderUnreachable",
-            fromLeader: next,
-          });
+          startOptimisticElection(next);
         }
       } else if (unreachableForRef.current === next) {
+        // Clear leaderUnreachable and optimistic wait once the leader is reachable again.
         unreachableForRef.current = undefined;
+        optimisticRef.current = false;
+        stopSequence();
         setOverlay(null);
       }
     }
-  }, [jetstreamLeader, peers, runSequence, stopSequence]);
+  }, [jetstreamLeader, peers, runSteps, startOptimisticElection, stopSequence]);
 
   const visualRoles = useMemo(
     () => applyVisualRoles(peers, jetstreamLeader, overlay),

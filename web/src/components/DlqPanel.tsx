@@ -13,6 +13,7 @@ import {
   type DLQMessage,
   type DLQRetryRequest,
   type DLQRetryResult,
+  type IncidentCapsuleDetail,
 } from "../lib/api";
 import { formatDateTime } from "../lib/datetime";
 import { clusterQueryKey } from "../lib/query";
@@ -64,6 +65,22 @@ export default function DlqPanel({ clusterId, streamName, canManage }: DlqPanelP
       },
     });
   }, [clusterId, queryClient, streamName]);
+
+  const captureMutation = useMutation({
+    mutationFn: async (seq: number) =>
+      (
+        await api<IncidentCapsuleDetail>(
+          clusterPath(clusterId, `/streams/${encodeURIComponent(streamName)}/dlq/messages/${seq}/capsule`),
+          { method: "POST" },
+        )
+      ).data,
+    onSuccess: (capsule) => {
+      toast.success(t("capsules.captureSuccess", { id: capsule.id }));
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || t("capsules.captureFailed"));
+    },
+  });
 
   const retryMutation = useMutation({
     mutationFn: async (body: DLQRetryRequest) =>
@@ -354,6 +371,24 @@ export default function DlqPanel({ clusterId, streamName, canManage }: DlqPanelP
                 onClick={() => retryMutation.mutate({ seqs: [detail.seq] })}
               >
                 {t("streams.dlqRetry")}
+              </button>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={
+                  captureMutation.isPending ||
+                  !detail.sourceStream ||
+                  !detail.sourceSeq ||
+                  !detail.consumer
+                }
+                title={
+                  !detail.sourceStream || !detail.sourceSeq || !detail.consumer
+                    ? t("capsules.captureNeedsHeaders")
+                    : undefined
+                }
+                onClick={() => captureMutation.mutate(detail.seq)}
+              >
+                {t("capsules.captureFromDlq")}
               </button>
             </div>
           )}

@@ -71,17 +71,15 @@ func TestConsumerInfoFromNATSUsesCamelCaseFields(t *testing.T) {
 
 func TestAccountInfoFromNATSUsesCamelCaseFields(t *testing.T) {
 	info := AccountInfoFromNATS(&nats.AccountInfo{
-		Tier: nats.Tier{
-			Memory:    1024,
-			Store:     2048,
-			Streams:   1,
-			Consumers: 2,
-			Limits: nats.AccountLimits{
-				MaxMemory:    4096,
-				MaxStore:     8192,
-				MaxStreams:   10,
-				MaxConsumers: 20,
-			},
+		Memory:    1024,
+		Store:     2048,
+		Streams:   1,
+		Consumers: 2,
+		Limits: nats.AccountLimits{
+			MaxMemory:    4096,
+			MaxStore:     8192,
+			MaxStreams:   10,
+			MaxConsumers: 20,
 		},
 	})
 	assert.Equal(t, uint64(1024), info.Memory)

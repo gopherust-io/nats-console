@@ -45,7 +45,7 @@ func SanitizeHistory(history []Message) []Message {
 	out := make([]Message, 0, len(history))
 	for _, msg := range history {
 		role := normalizeHistoryRole(msg.Role)
-		if role == "" {
+		if commonstrings.IsEmpty(role) {
 			continue
 		}
 		content := SanitizeMessage(msg.Content)
@@ -138,7 +138,7 @@ func redactURL(raw string) string {
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
-		if part == "" {
+		if commonstrings.IsEmpty(part) {
 			continue
 		}
 		u, err := url.Parse(part)

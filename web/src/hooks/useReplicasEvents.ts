@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getReplicasEventsURL } from "../lib/api";
 import type { ReplicasSnapshot } from "../lib/replicas";
 import { isReplicasSnapshotNewer } from "../lib/replicas";
@@ -11,13 +11,17 @@ const RECONNECT_MAX_MS = 30_000;
  * Subscribes to demand-driven replicas SSE and writes snapshots into the React Query cache.
  * Mount only from the Replicas page so the backend scrapes while viewers are present.
  */
-export function useReplicasEvents(clusterId: string | null) {
+export function useReplicasEvents(clusterId: string | null): { live: boolean } {
+  const [live, setLive] = useState(false);
   const attemptRef = useRef(0);
   const esRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!clusterId) return;
+    if (!clusterId) {
+      setLive(false);
+      return;
+    }
 
     let cancelled = false;
 
@@ -45,6 +49,7 @@ export function useReplicasEvents(clusterId: string | null) {
 
       es.addEventListener("replicas", (ev) => {
         attemptRef.current = 0;
+        if (!cancelled) setLive(true);
         const raw = (ev as MessageEvent).data;
         if (typeof raw !== "string" || !raw) return;
         try {
@@ -60,12 +65,16 @@ export function useReplicasEvents(clusterId: string | null) {
 
       es.onopen = () => {
         attemptRef.current = 0;
+        if (!cancelled) setLive(true);
       };
 
       es.onerror = () => {
+        if (!cancelled) setLive(false);
         closeSource();
         if (cancelled) return;
         if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+        // Fall back to REST while SSE is down so online/offline does not freeze.
+        void queryClient.invalidateQueries({ queryKey: clusterQueryKey(clusterId, "replicas") });
         const attempt = attemptRef.current++;
         const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempt);
         clearReconnect();
@@ -77,12 +86,11 @@ export function useReplicasEvents(clusterId: string | null) {
       if (document.visibilityState === "hidden") {
         clearReconnect();
         closeSource();
+        if (!cancelled) setLive(false);
         return;
       }
       attemptRef.current = 0;
       connect();
-      // Do not invalidate HTTP while SSE is reconnecting — avoids older scrapes
-      // overwriting fresher EventSource payloads.
     };
 
     connect();
@@ -93,6 +101,9 @@ export function useReplicasEvents(clusterId: string | null) {
       document.removeEventListener("visibilitychange", onVisibility);
       clearReconnect();
       closeSource();
+      setLive(false);
     };
   }, [clusterId]);
+
+  return { live };
 }

@@ -27,6 +27,7 @@ The browser talks only to the Consol API. The API talks to PostgreSQL (settings 
 - **Systems** — open a registered system and work inside it  
 - **Replicas** — view-only NATS server peers (routes + JetStream meta) for the selected system  
 - **Topology** — visual map of streams and consumers
+- **Supercluster** — NATS gateway mesh is **not** a first-class UI in 0.11+; operate regions as separate registered clusters and see [Supercluster](./supercluster.md) for behavior and restore checklist
 - **Event Catalog** — Swagger-style docs for events (owner, description, JSON Schema, consumers)  
 - **Live Architecture** — animated deploy / DDD-layer painting (Docs)  
 - **Architecture Review** — event-architecture problems and suggestions (Docs)
@@ -65,9 +66,10 @@ flowchart LR
 ## Quick links
 
 - [Main README](../README.md) — feature list, env reference, API summary  
-- [OpenAPI spec](../api/openapi.yaml) — full REST API  
+- [OpenAPI spec](../api/swagger.yaml) — REST API (`make openapi`; served at `/api/openapi.yaml`)  
 - [Docker Compose](../docker-compose.yml) — local full stack  
 - [Local NATS Docker labs](./local-docker.md) — single / cluster / supercluster / auth  
+- [Supercluster](./supercluster.md) — Consol vs NATS mesh, operate today, restore checklist  
 - [Helm chart](../deploy/helm/nats-consol/) — Kubernetes deployment  
 
 Questions or bugs? Open an issue on [GitHub](https://github.com/gopherust-io/nats-consol).

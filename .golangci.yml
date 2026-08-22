@@ -27,6 +27,17 @@ linters:
     govet:
       disable:
         - fieldalignment
+    # Prefer env/json first (current style). Align off: keep hand-tuned spacing.
+    tagalign:
+      align: false
+      sort: true
+      order:
+        - json
+        - env
+        - prefix
+        - default
+        - required
+        - sensitive
   exclusions:
     paths:
       - internal/config/config_env_gen.go

@@ -3,32 +3,26 @@ import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import TimeRangeSelector from "../components/metrics/TimeRangeSelector";
+import Alert from "../components/ui/Alert";
+import ClockNumber from "../components/ui/ClockNumber";
+import PageLoader from "../components/ui/PageLoader";
 import QueryErrorState from "../components/ui/QueryErrorState";
+import { useAccountOverviewEvents } from "../hooks/useAccountOverviewEvents";
 import { useClusterMetricsHistory } from "../hooks/useClusterMetricsHistory";
 import { AccountInfo, api, clusterPath } from "../lib/api";
-import { MetricsRangePreset } from "../lib/metricsHistory";
+import { METRICS_HISTORY_POLL_MS } from "../lib/constants";
+import { MetricsHistoryPoint, MetricsRangePreset } from "../lib/metricsHistory";
 import { useCluster } from "../lib/cluster";
-import { MONITORING_POLL_MS, SYSTEMS_CONNECTIONS_POLL_MS } from "../lib/constants";
 import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
 import { formatLatencyMs, type RequestReplySnapshot } from "../lib/requestReplyInspector";
-import { fetchTopology, type TopologyNode } from "../lib/topology";
+import "../styles/replicas.css";
+import "../styles/account.css";
 
 const MetricsTimeSeriesChart = lazy(() => import("../components/metrics/MetricsTimeSeriesChart"));
 
 // Account-scoped gauges from JetStream AccountInfo (connected account), not cluster /varz counters.
 const metrics =
   "jetstream.streams,jetstream.consumers,jetstream.storage_bytes,jetstream.memory_bytes,jetstream.consumer_max_lag,server.cpu_percent,server.mem_bytes";
-
-type TopologyHealth = "healthy" | "warning" | "unhealthy" | "unknown";
-
-type TopologyKpis = {
-  leaders: number;
-  replicas: number;
-  health: TopologyHealth;
-  connected: boolean | null;
-  slowConsumers: number;
-  issues: string[];
-};
 
 function seriesPoints(
   history: ReturnType<typeof useClusterMetricsHistory>["data"],
@@ -37,15 +31,18 @@ function seriesPoints(
   return history?.series.find((item) => item.metric === metric)?.points ?? [];
 }
 
-function lastValue(points: { v: number }[]) {
-  return points.length ? points[points.length - 1].v : 0;
+function withLiveTail(points: MetricsHistoryPoint[], live: number | undefined): MetricsHistoryPoint[] {
+  if (live == null || Number.isNaN(live)) return points;
+  const last = points.length ? points[points.length - 1] : null;
+  if (last && last.v === live) return points;
+  return [...points, { t: new Date().toISOString(), v: live }];
 }
 
 function formatBytes(value: number) {
-  if (value < 1024) return `${Math.round(value).toLocaleString()} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  if (value < 1024) return `${Math.round(value).toLocaleString()}B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)}KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)}MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)}GB`;
 }
 
 function formatLimitCount(used = 0, max = 0) {
@@ -58,178 +55,105 @@ function formatLimitBytes(used = 0, max = 0) {
   return `${formatBytes(used)} / ${limit}`;
 }
 
-function formatCount(value: number) {
-  return Math.round(value).toLocaleString();
+function usagePct(used: number, max: number) {
+  if (max <= 0) return 0;
+  return Math.min(100, Math.round((used / max) * 100));
 }
 
-function formatPercent(value: number) {
-  if (!Number.isFinite(value)) return "—";
-  return `${value.toFixed(1)}%`;
-}
-
-function walkTopology(node: TopologyNode, visit: (item: TopologyNode) => void) {
-  visit(node);
-  for (const child of node.children ?? []) {
-    walkTopology(child, visit);
-  }
-}
-
-function deriveClusterHealth(root: TopologyNode | null, connected: boolean | null): TopologyKpis {
-  const issues: string[] = [];
-  let leaders = 0;
-  let replicas = 0;
-  let slowConsumers = 0;
-
-  if (root) {
-    walkTopology(root, (node) => {
-      if (node.role === "leader") leaders += 1;
-      if (node.role === "replica") replicas += 1;
-      if (node.kind === "consumer" && node.status === "warning") {
-        slowConsumers += 1;
-        return;
-      }
-      if (node.kind !== "cluster" && node.kind !== "stream") return;
-
-      if (node.status === "unhealthy") {
-        issues.push(`${node.kind}:${node.name}`);
-      }
-      for (const peer of node.raft?.peers ?? []) {
-        if (peer.offline) {
-          issues.push(`${node.name}:${peer.name}`);
-        }
-      }
-      if ((node.raft?.clusterSize ?? 0) > 1 && !node.raft?.leader) {
-        issues.push(`${node.name}:no-leader`);
-      }
-    });
-  }
-
-  if (connected === false) {
-    return {
-      leaders,
-      replicas,
-      health: "unhealthy",
-      connected,
-      slowConsumers,
-      issues: ["connection"],
-    };
-  }
-  if (!root) {
-    return {
-      leaders,
-      replicas,
-      health: "unknown",
-      connected,
-      slowConsumers,
-      issues,
-    };
-  }
-  if (issues.length > 0) {
-    return {
-      leaders,
-      replicas,
-      health: "unhealthy",
-      connected,
-      slowConsumers,
-      issues,
-    };
-  }
-  if (connected === true) {
-    return {
-      leaders,
-      replicas,
-      health: "healthy",
-      connected,
-      slowConsumers,
-      issues,
-    };
-  }
-  return {
-    leaders,
-    replicas,
-    health: "unknown",
-    connected,
-    slowConsumers,
-    issues,
-  };
+function usageTone(pct: number, hasLimit: boolean): "ok" | "warn" | "danger" {
+  if (!hasLimit) return "ok";
+  if (pct >= 90) return "danger";
+  if (pct >= 70) return "warn";
+  return "ok";
 }
 
 export default function AccountOverviewPage() {
   const { t } = useTranslation();
   const { accountName, clusterId: routeCluster } = useParams();
-  const { clusterId: contextClusterId, cluster } = useCluster();
+  const { clusterId: contextClusterId } = useCluster();
   const clusterId = routeCluster ?? contextClusterId;
   const [range, setRange] = useState<MetricsRangePreset>("1h");
+
+  const { live } = useAccountOverviewEvents(clusterId);
 
   const accountQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "account"),
     queryFn: async () => (await api<AccountInfo>(clusterPath(clusterId!, "/account"))).data,
     enabled: Boolean(clusterId),
-    refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
+    staleTime: 5_000,
+    refetchOnWindowFocus: !live,
+    refetchInterval: live ? false : visibilityAwareInterval(5_000),
   });
 
-  const connectionsQuery = useQuery({
-    queryKey: ["clusters", "connections"],
-    queryFn: async () =>
-      (await api<{ clusterId: string; connected: boolean }[]>("/api/v1/clusters/connections")).data ?? [],
-    refetchInterval: visibilityAwareInterval(SYSTEMS_CONNECTIONS_POLL_MS),
-  });
-
-  const historyQuery = useClusterMetricsHistory(clusterId, range, metrics);
-  const topologyQuery = useQuery({
-    queryKey: clusterQueryKey(clusterId, "topology-overview"),
-    queryFn: () => fetchTopology(clusterId!, cluster?.name ?? "Cluster", { fresh: true }),
-    enabled: Boolean(clusterId),
-    refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
+  const historyQuery = useClusterMetricsHistory(clusterId, range, metrics, {
+    // SSE already pushes live gauges; history only needs a slow backfill when live.
+    refetchInterval: live ? false : METRICS_HISTORY_POLL_MS,
   });
 
   const requestReplyQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "request-reply"),
     queryFn: async () => (await api<RequestReplySnapshot>(clusterPath(clusterId!, "/request-reply"))).data,
     enabled: Boolean(clusterId),
-    refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
+    staleTime: 5_000,
+    refetchOnWindowFocus: !live,
+    refetchInterval: live ? false : visibilityAwareInterval(5_000),
   });
 
-  const streams = seriesPoints(historyQuery.data, "jetstream.streams");
-  const consumers = seriesPoints(historyQuery.data, "jetstream.consumers");
-  const storage = seriesPoints(historyQuery.data, "jetstream.storage_bytes");
-  const memory = seriesPoints(historyQuery.data, "jetstream.memory_bytes");
-  const maxLag = seriesPoints(historyQuery.data, "jetstream.consumer_max_lag");
-  const cpu = seriesPoints(historyQuery.data, "server.cpu_percent");
-  const serverMemory = seriesPoints(historyQuery.data, "server.mem_bytes");
   const account = accountQuery.data;
-  const clusterConnected = useMemo(() => {
-    if (!clusterId) return null;
-    const match = connectionsQuery.data?.find((item) => item.clusterId === clusterId);
-    return match?.connected ?? null;
-  }, [connectionsQuery.data, clusterId]);
-  const topologyKpis = useMemo(
-    () => deriveClusterHealth(topologyQuery.data ?? null, clusterConnected),
-    [topologyQuery.data, clusterConnected],
+  const streamPoints = withLiveTail(seriesPoints(historyQuery.data, "jetstream.streams"), account?.streams);
+  const consumerPoints = withLiveTail(
+    seriesPoints(historyQuery.data, "jetstream.consumers"),
+    account?.consumers,
   );
-  const topologyHealth = t(`account.clusterTopology.health.${topologyKpis.health}`);
-  const connectionLabel =
-    topologyKpis.connected === true
-      ? t("account.clusterTopology.connectionConnected")
-      : topologyKpis.connected === false
-        ? t("account.clusterTopology.connectionDisconnected")
-        : t("account.unknownStatus");
+  const storagePoints = withLiveTail(
+    seriesPoints(historyQuery.data, "jetstream.storage_bytes"),
+    account?.storage,
+  );
+  const memoryPoints = withLiveTail(
+    seriesPoints(historyQuery.data, "jetstream.memory_bytes"),
+    account?.memory,
+  );
+
+  // Tiles always prefer live AccountInfo (SSE/REST), never history last-point.
+  const streams = account?.streams ?? 0;
+  const consumers = account?.consumers ?? 0;
+  const storage = account?.storage ?? 0;
+  const memory = account?.memory ?? 0;
 
   const rr = requestReplyQuery.data;
   const hasRrParticipants = (rr?.requesters ?? 0) > 0 || (rr?.responders ?? 0) > 0;
+  const emDash = t("common.emDash");
 
   const chartPairs = useMemo(
     () => [
-      { title: t("account.streams"), value: formatCount(lastValue(streams)), key: "streams", points: streams },
-      { title: t("account.consumers"), value: formatCount(lastValue(consumers)), key: "consumers", points: consumers },
-      { title: t("account.storage"), value: formatBytes(lastValue(storage)), key: "storage", points: storage },
-      { title: t("account.memory"), value: formatBytes(lastValue(memory)), key: "memory", points: memory },
+      {
+        title: t("account.streams"),
+        key: "streams",
+        points: streamPoints,
+      },
+      {
+        title: t("account.consumers"),
+        key: "consumers",
+        points: consumerPoints,
+      },
+      {
+        title: t("account.storage"),
+        key: "storage",
+        points: storagePoints,
+      },
+      {
+        title: t("account.memory"),
+        key: "memory",
+        points: memoryPoints,
+      },
     ],
-    [streams, consumers, storage, memory, t],
+    [streamPoints, consumerPoints, storagePoints, memoryPoints, t],
   );
 
+  const loading = accountQuery.isLoading && !account;
+
   return (
-    <div>
+    <div className="replicas-page account-page">
       <div className="nc-page-header">
         <div className="nc-page-header__text">
           <h1 className="nc-page-title">{t("account.overviewTitle")}</h1>
@@ -238,139 +162,215 @@ export default function AccountOverviewPage() {
         <TimeRangeSelector value={range} onChange={setRange} />
       </div>
 
+      {loading && <PageLoader />}
+
       {accountQuery.isError && (
         <QueryErrorState error={accountQuery.error} onRetry={() => void accountQuery.refetch()} />
-      )}
-      {topologyQuery.isError && (
-        <QueryErrorState error={topologyQuery.error} onRetry={() => void topologyQuery.refetch()} />
       )}
       {requestReplyQuery.isError && (
         <QueryErrorState error={requestReplyQuery.error} onRetry={() => void requestReplyQuery.refetch()} />
       )}
 
-      <div className="nc-metrics-grid">
-        {chartPairs.map((card) => (
-          <div className="nc-metric-card" key={card.key}>
-            <h3>{card.title}</h3>
-            <p className="nc-metric-card__value">{card.value}</p>
-            <Suspense fallback={null}>
-              <MetricsTimeSeriesChart
-                title={card.title}
-                series={[{ key: card.key, label: card.title, color: "var(--accent)", points: card.points }]}
-              />
-            </Suspense>
-          </div>
-        ))}
-      </div>
+      {!loading && account && !live && (
+        <Alert variant="info">{t("account.staleSnapshot")}</Alert>
+      )}
 
-      <div className="nc-overview-sections">
-      <section className="nc-overview-section nc-meta-card">
-        <h4>{t("account.clusterTopology.title")}</h4>
-        <p className="nc-page-sub">{t("account.clusterTopology.subtitle")}</p>
-        <div className="nc-metrics-grid nc-metrics-grid--embedded">
-          <div className="nc-metric-card nc-metric-card--compact">
-            <h3>{t("account.clusterTopology.leaders")}</h3>
-            <p className="nc-metric-card__value">{formatCount(topologyKpis.leaders)}</p>
+      {!loading && (
+        <>
+          <div className="replicas-summary">
+            <div className="replicas-card replicas-stat-card">
+              <span className="replicas-card__badge">{t("account.streams")}</span>
+              <div className="replicas-card__body">
+                <div className="replicas-stat-card__value mono">
+                  <ClockNumber value={Math.round(streams)} />
+                </div>
+              </div>
+            </div>
+            <div className="replicas-card replicas-stat-card">
+              <span className="replicas-card__badge">{t("account.consumers")}</span>
+              <div className="replicas-card__body">
+                <div className="replicas-stat-card__value mono">
+                  <ClockNumber value={Math.round(consumers)} />
+                </div>
+              </div>
+            </div>
+            <div className="replicas-card replicas-stat-card">
+              <span className="replicas-card__badge">{t("account.storage")}</span>
+              <div className="replicas-card__body">
+                <div className="replicas-stat-card__value mono">
+                  <ClockNumber value={Math.round(storage)} format={formatBytes} />
+                </div>
+              </div>
+            </div>
+            <div className="replicas-card replicas-stat-card">
+              <span className="replicas-card__badge">{t("account.memory")}</span>
+              <div className="replicas-card__body">
+                <div className="replicas-stat-card__value mono">
+                  <ClockNumber value={Math.round(memory)} format={formatBytes} />
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="nc-metric-card nc-metric-card--compact">
-            <h3>{t("account.clusterTopology.replicas")}</h3>
-            <p className="nc-metric-card__value">{formatCount(topologyKpis.replicas)}</p>
-          </div>
-          <div className="nc-metric-card nc-metric-card--compact">
-            <h3>{t("account.clusterTopology.healthLabel")}</h3>
-            <p className={`nc-metric-card__value nc-metric-card__value--status nc-health-${topologyKpis.health}`}>
-              {topologyHealth}
-            </p>
-            <p className="nc-metric-card__hint">{connectionLabel}</p>
-            {topologyKpis.slowConsumers > 0 && (
-              <p className="nc-metric-card__hint">
-                {t("account.clusterTopology.slowConsumers", { count: topologyKpis.slowConsumers })}
-              </p>
-            )}
-          </div>
-          <div className="nc-metric-card nc-metric-card--compact">
-            <h3>{t("account.clusterTopology.latency")}</h3>
-            <p className="nc-metric-card__value">{formatCount(lastValue(maxLag))}</p>
-          </div>
-          <div className="nc-metric-card nc-metric-card--compact">
-            <h3>{t("account.clusterTopology.cpu")}</h3>
-            <p className="nc-metric-card__value">{formatPercent(lastValue(cpu))}</p>
-          </div>
-          <div className="nc-metric-card nc-metric-card--compact">
-            <h3>{t("account.clusterTopology.memory")}</h3>
-            <p className="nc-metric-card__value">{formatBytes(lastValue(serverMemory))}</p>
-          </div>
-        </div>
-      </section>
 
-      <section className="nc-overview-section nc-meta-card">
-        <h4>{t("account.requestReply.title")}</h4>
-        <p className="nc-page-sub">{t("account.requestReply.subtitle")}</p>
-        <div className="nc-metrics-grid nc-metrics-grid--embedded">
-          <div className="nc-metric-card nc-metric-card--compact">
-            <h3>{t("account.requestReply.requesters")}</h3>
-            <p className="nc-metric-card__value">
-              {hasRrParticipants ? formatCount(rr?.requesters ?? 0) : t("common.emDash")}
-            </p>
+          <div className="account-charts-grid">
+            {chartPairs.map((card) => (
+              <div className="replicas-card account-chart-card" key={card.key}>
+                <span className="replicas-card__badge">{card.title}</span>
+                <div className="replicas-card__body account-chart-card__body">
+                  <Suspense fallback={null}>
+                    <MetricsTimeSeriesChart
+                      title={card.title}
+                      embedded
+                      series={[
+                        { key: card.key, label: card.title, color: "var(--accent)", points: card.points },
+                      ]}
+                    />
+                  </Suspense>
+                </div>
+              </div>
+            ))}
           </div>
-          <div className="nc-metric-card nc-metric-card--compact">
-            <h3>{t("account.requestReply.responders")}</h3>
-            <p className="nc-metric-card__value">
-              {hasRrParticipants ? formatCount(rr?.responders ?? 0) : t("common.emDash")}
-            </p>
-          </div>
-          <div className="nc-metric-card nc-metric-card--compact">
-            <h3>{t("account.requestReply.medianRtt")}</h3>
-            <p className="nc-metric-card__value">
-              {hasRrParticipants ? formatLatencyMs(rr?.medianRttMs ?? null) : t("common.emDash")}
-            </p>
-          </div>
-        </div>
-      </section>
 
-      <section className="nc-overview-section nc-meta-card">
-        <h4>{accountName ?? t("account.accountFallback")}</h4>
-        <p className="nc-page-sub">{t("account.settingsSubtitle")}</p>
+          <div className="replicas-panel">
+            <div className="replicas-panel__head">
+              <h2 className="replicas-panel__title">{t("account.requestReply.title")}</h2>
+            </div>
+            <p className="raft-election__caption">{t("account.requestReply.subtitle")}</p>
+            <div className="account-rr-grid">
+              <div className="replicas-card replicas-stat-card">
+                <span className="replicas-card__badge">{t("account.requestReply.requesters")}</span>
+                <div className="replicas-card__body">
+                  <div className="replicas-stat-card__value mono">
+                    {hasRrParticipants ? (
+                      <ClockNumber value={Math.round(rr?.requesters ?? 0)} />
+                    ) : (
+                      emDash
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="replicas-card replicas-stat-card">
+                <span className="replicas-card__badge">{t("account.requestReply.responders")}</span>
+                <div className="replicas-card__body">
+                  <div className="replicas-stat-card__value mono">
+                    {hasRrParticipants ? (
+                      <ClockNumber value={Math.round(rr?.responders ?? 0)} />
+                    ) : (
+                      emDash
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="replicas-card replicas-stat-card">
+                <span className="replicas-card__badge">{t("account.requestReply.medianRtt")}</span>
+                <div className="replicas-card__body">
+                  <div className="replicas-stat-card__value mono">
+                    {hasRrParticipants ? formatLatencyMs(rr?.medianRttMs ?? null) : emDash}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
 
-        <div className="nc-overview-subsection">
-          <h5>{t("account.general")}</h5>
-          <p>{t("account.generalHelp")}</p>
-          <div className="nc-form-row">
-            <label htmlFor="overview-account-name">{t("account.accountName")}</label>
-            <input id="overview-account-name" value={accountName ?? t("account.accountFallback")} readOnly disabled />
-          </div>
-        </div>
+          <div className="replicas-panel account-identity-panel">
+            <div className="replicas-panel__head account-identity-panel__head">
+              <div className="account-identity-panel__title-row">
+                <h2 className="replicas-panel__title">{accountName ?? t("account.accountFallback")}</h2>
+                {accountName === "Default" ? (
+                  <span className="account-identity-chip account-identity-chip--default">
+                    {t("systems.defaultAccount")}
+                  </span>
+                ) : (
+                  <span className="account-identity-chip">{t("systems.natsAccount")}</span>
+                )}
+                {account ? (
+                  <span className="account-identity-chip account-identity-chip--ok">
+                    {t("account.jetStreamOn")}
+                  </span>
+                ) : null}
+                {live ? (
+                  <span className="nc-conn-live" title={t("account.clusterStatus.liveHint")}>
+                    <span className="nc-conn-live__dot" aria-hidden="true" />
+                    {t("account.clusterStatus.live")}
+                  </span>
+                ) : account ? (
+                  <span className="nc-conn-status nc-conn-status--warn" title={t("account.staleSnapshot")}>
+                    <span className="nc-conn-status__dot" aria-hidden="true" />
+                    {t("account.reconnecting")}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <p className="raft-election__caption">{t("account.limitsHelp")}</p>
 
-        <div className="nc-overview-subsection">
-          <h5>{t("account.limits")}</h5>
-          <p>{t("account.limitsHelp")}</p>
-          <div className="nc-meta-row">
-            <span>{t("account.streams")}</span>
-            <span>{formatLimitCount(account?.streams, account?.limits?.maxStreams)}</span>
+            <div className="replicas-summary account-limit-cards" aria-label={t("account.limits")}>
+              {[
+                {
+                  key: "streams",
+                  label: t("account.streams"),
+                  value: <ClockNumber value={Math.round(streams)} />,
+                  hint: formatLimitCount(streams, account?.limits?.maxStreams),
+                  used: streams,
+                  max: account?.limits?.maxStreams ?? 0,
+                },
+                {
+                  key: "consumers",
+                  label: t("account.consumers"),
+                  value: <ClockNumber value={Math.round(consumers)} />,
+                  hint: formatLimitCount(consumers, account?.limits?.maxConsumers),
+                  used: consumers,
+                  max: account?.limits?.maxConsumers ?? 0,
+                },
+                {
+                  key: "disk",
+                  label: t("account.diskStorage"),
+                  value: <ClockNumber value={Math.round(storage)} format={formatBytes} />,
+                  hint: formatLimitBytes(storage, account?.limits?.maxStorage),
+                  used: storage,
+                  max: account?.limits?.maxStorage ?? 0,
+                },
+                {
+                  key: "memory",
+                  label: t("systems.memoryStorage"),
+                  value: <ClockNumber value={Math.round(memory)} format={formatBytes} />,
+                  hint: formatLimitBytes(memory, account?.limits?.maxMemory),
+                  used: memory,
+                  max: account?.limits?.maxMemory ?? 0,
+                },
+              ].map((item) => {
+                const capped = item.max > 0;
+                const pct = usagePct(item.used, item.max);
+                const tone = usageTone(pct, capped);
+                return (
+                  <div className="replicas-card replicas-stat-card" key={item.key}>
+                    <span className="replicas-card__badge">{item.label}</span>
+                    <div className="replicas-card__body">
+                      <div className="replicas-stat-card__value mono">{item.value}</div>
+                      <p className="account-limit-card__hint mono">{item.hint}</p>
+                      {capped ? (
+                        <div
+                          className={`account-limit-bar account-limit-bar--${tone}`}
+                          role="meter"
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={pct}
+                          aria-label={item.label}
+                        >
+                          <span className="account-limit-bar__fill" style={{ width: `${pct}%` }} />
+                        </div>
+                      ) : (
+                        <span className="account-identity-chip account-identity-chip--unlimited">
+                          {t("account.unlimited")}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-          <div className="nc-meta-row">
-            <span>{t("account.consumers")}</span>
-            <span>{formatLimitCount(account?.consumers, account?.limits?.maxConsumers)}</span>
-          </div>
-          <div className="nc-meta-row">
-            <span>{t("account.diskStorage")}</span>
-            <span>{formatLimitBytes(account?.storage, account?.limits?.maxStorage)}</span>
-          </div>
-          <div className="nc-meta-row">
-            <span>{t("systems.memoryStorage")}</span>
-            <span>{formatLimitBytes(account?.memory, account?.limits?.maxMemory)}</span>
-          </div>
-        </div>
-
-        <div className="nc-overview-subsection">
-          <h5>{t("account.jetStreamSection")}</h5>
-          <div className="nc-meta-row">
-            <span>{t("account.jetStreamEnabled")}</span>
-            <span>{account ? t("common.enabled") : t("account.unknownStatus")}</span>
-          </div>
-        </div>
-      </section>
-      </div>
+        </>
+      )}
     </div>
   );
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/repo"
 	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
@@ -34,7 +34,7 @@ type PageContext struct {
 }
 
 type ContextBuilder struct {
-	store    *store.Store
+	db       *repo.DB
 	nats     *natsclient.Manager
 	cache    map[string]contextCacheEntry
 	cacheTTL time.Duration
@@ -46,12 +46,12 @@ type contextCacheEntry struct {
 	formatted string
 }
 
-func NewContextBuilder(st *store.Store, nats *natsclient.Manager, cacheTTL time.Duration) *ContextBuilder {
+func NewContextBuilder(db *repo.DB, nats *natsclient.Manager, cacheTTL time.Duration) *ContextBuilder {
 	if cacheTTL <= 0 {
 		cacheTTL = defaultContextCacheTTL
 	}
 	return &ContextBuilder{
-		store:    st,
+		db:       db,
 		nats:     nats,
 		cacheTTL: cacheTTL,
 		cache:    make(map[string]contextCacheEntry),
@@ -123,7 +123,7 @@ func (b *ContextBuilder) evictOldestLocked() {
 }
 
 func (b *ContextBuilder) buildFresh(ctx context.Context, clusterID string, page PageContext) (map[string]any, error) {
-	cluster, err := b.store.GetCluster(ctx, clusterID)
+	cluster, err := b.db.GetCluster(ctx, clusterID)
 	if err != nil {
 		return nil, err
 	}

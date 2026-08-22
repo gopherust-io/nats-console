@@ -3,7 +3,7 @@ package auth
 import (
 	"time"
 
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
@@ -11,7 +11,7 @@ const defaultSessionCacheTTL = 45 * time.Second
 
 type cachedSession struct {
 	fingerprint string
-	user        store.User
+	user        domain.User
 }
 
 type sessionCache struct {
@@ -25,15 +25,15 @@ func newSessionCache(ttl time.Duration) *sessionCache {
 	return &sessionCache{cache: newTTLCache[string, cachedSession](ttl)}
 }
 
-func (c *sessionCache) Get(token, fingerprint string) (store.User, bool) {
+func (c *sessionCache) Get(token, fingerprint string) (domain.User, bool) {
 	entry, ok := c.cache.Get(token)
 	if !ok || entry.fingerprint != fingerprint {
-		return store.User{}, false
+		return domain.User{}, false
 	}
 	return entry.user, true
 }
 
-func (c *sessionCache) Set(token, fingerprint string, user store.User) {
+func (c *sessionCache) Set(token, fingerprint string, user domain.User) {
 	if strings.IsEmpty(token) {
 		return
 	}

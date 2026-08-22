@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Link, Navigate, useSearchParams } from "react-router";
@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion } from "motion/react";
 import TopologyInspector from "../components/TopologyInspector";
 import TopologyTree from "../components/TopologyTree";
+import VirtualCatalogList from "../components/VirtualCatalogList";
 import EmptyState from "../components/ui/EmptyState";
 import PageHeader from "../components/ui/PageHeader";
 import QueryErrorState from "../components/ui/QueryErrorState";
@@ -31,7 +32,6 @@ import {
   zombieFindingHref,
   zombieFindingLabel,
   ZOMBIES_LOCATION_STATE,
-  type ZombieFinding,
 } from "../lib/zombie";
 import {
   fetchSubjectNaming,
@@ -39,7 +39,6 @@ import {
   sortSubjectNamingFindings,
   subjectNamingFindingHref,
   subjectNamingFindingLabel,
-  type SubjectNamingFinding,
 } from "../lib/subjectNaming";
 import {
   eventGenomeCatalogHref,
@@ -48,7 +47,6 @@ import {
   fetchEventGenome,
   GENOME_LOCATION_STATE,
   sortEventGenomeFindings,
-  type EventGenomeFinding,
 } from "../lib/eventGenome";
 import { ARCHITECTURE_REVIEW_HREF } from "../lib/architectureReview";
 import { downloadArchitectureExport } from "../lib/architectureExport";
@@ -133,8 +131,12 @@ export default function TopologyPage() {
   );
   const [filterInput, setFilterInput] = useState("");
   const [filterQuery, setFilterQuery] = useState("");
+  const deferredFilterQuery = useDeferredValue(filterQuery);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  // Manual refresh requests hub bypass; interval polls leave this false.
+  const freshOnNextRef = useRef(false);
+  const takeFresh = () => freshOnNextRef.current;
 
   const assistantConfigQuery = useQuery({
     queryKey: ["assistant-config"],
@@ -144,28 +146,28 @@ export default function TopologyPage() {
 
   const topologyQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "topology"),
-    queryFn: () => fetchTopology(clusterId!, cluster?.name ?? "Cluster", { fresh: true }),
+    queryFn: () => fetchTopology(clusterId!, cluster?.name ?? "Cluster", { fresh: takeFresh() }),
     enabled: Boolean(clusterId) && view === "constellation",
     refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
   });
 
   const zombiesQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "zombies"),
-    queryFn: () => fetchZombies(clusterId!, { fresh: true }),
+    queryFn: () => fetchZombies(clusterId!, { fresh: takeFresh() }),
     enabled: Boolean(clusterId) && view === "zombies",
     refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
   });
 
   const namingQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "subject-naming"),
-    queryFn: () => fetchSubjectNaming(clusterId!, { fresh: true }),
+    queryFn: () => fetchSubjectNaming(clusterId!, { fresh: takeFresh() }),
     enabled: Boolean(clusterId) && view === "naming",
     refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
   });
 
   const genomeQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "event-genome"),
-    queryFn: () => fetchEventGenome(clusterId!, { fresh: true }),
+    queryFn: () => fetchEventGenome(clusterId!, { fresh: takeFresh() }),
     enabled: Boolean(clusterId) && view === "genome",
     refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
   });
@@ -186,11 +188,14 @@ export default function TopologyPage() {
 
   const filteredRoot = useMemo(() => {
     if (!root) return null;
-    return filterTopology(root, filterQuery) ?? null;
-  }, [root, filterQuery]);
+    return filterTopology(root, deferredFilterQuery) ?? null;
+  }, [root, deferredFilterQuery]);
 
   const counts = useMemo(() => (root ? countTopology(root) : null), [root]);
   const streamList = useMemo(() => (filteredRoot ? getStreamNodes(filteredRoot) : []), [filteredRoot]);
+  const topologyNodeCount = counts
+    ? counts.streams + counts.subjects + counts.consumers
+    : 0;
 
   const zombieFindings = useMemo(
     () => sortZombieFindings(zombiesQuery.data?.findings ?? []),
@@ -254,7 +259,8 @@ export default function TopologyPage() {
     };
   }, [showSignalOverlay]);
 
-  const layoutEnabled = filterQuery === "" && !topologyQuery.isFetching;
+  const layoutEnabled =
+    deferredFilterQuery === "" && !topologyQuery.isFetching && topologyNodeCount <= 100;
   const hasStreams = streamList.length > 0;
   const showConstellation = view === "constellation";
   const showZombies = view === "zombies";
@@ -323,10 +329,15 @@ export default function TopologyPage() {
               className="btn btn--secondary"
               type="button"
               onClick={() => {
-                topologyQuery.refetch();
-                zombiesQuery.refetch();
-                namingQuery.refetch();
-                genomeQuery.refetch();
+                freshOnNextRef.current = true;
+                void Promise.all([
+                  topologyQuery.refetch(),
+                  zombiesQuery.refetch(),
+                  namingQuery.refetch(),
+                  genomeQuery.refetch(),
+                ]).finally(() => {
+                  freshOnNextRef.current = false;
+                });
               }}
               disabled={refreshBusy}
             >
@@ -488,29 +499,34 @@ export default function TopologyPage() {
             <EmptyState title={t("topology.zombiesEmpty")} description={t("topology.zombiesSubtitle")} />
           )}
           {!zombiesQuery.isLoading && !zombiesError && zombieFindings.length > 0 && (
-            <ul className="topology-zombies__list">
-              {zombieFindings.map((finding: ZombieFinding, index: number) => {
+            <VirtualCatalogList
+              items={zombieFindings}
+              empty={t("topology.zombiesEmpty")}
+              rowHeight={72}
+              maxHeight={560}
+              className="topology-zombies__list topology-zombies__list--virtual"
+              getKey={(finding) => `${finding.kind}-${finding.stream}-${finding.consumer}-${finding.subject}`}
+              isActive={() => false}
+              renderItem={(finding) => {
                 const href =
                   clusterId != null
                     ? zombieFindingHref(finding, clusterId, accountName || "Default")
                     : null;
                 return (
-                  <li key={`${finding.kind}-${finding.stream}-${finding.consumer}-${finding.subject}-${index}`}>
-                    <div className="topology-zombies__item">
-                      <div>
-                        <span className="topology-zombies__kind">{zombieKindLabel(t, finding.kind)}</span>
-                        <span className="topology-zombies__label">{zombieFindingLabel(finding)}</span>
-                      </div>
-                      {href && (
-                        <Link className="btn btn--secondary" to={href} state={ZOMBIES_LOCATION_STATE}>
-                          {t("topology.zombiesOpen")}
-                        </Link>
-                      )}
+                  <div className="topology-zombies__item">
+                    <div>
+                      <span className="topology-zombies__kind">{zombieKindLabel(t, finding.kind)}</span>
+                      <span className="topology-zombies__label">{zombieFindingLabel(finding)}</span>
                     </div>
-                  </li>
+                    {href && (
+                      <Link className="btn btn--secondary" to={href} state={ZOMBIES_LOCATION_STATE}>
+                        {t("topology.zombiesOpen")}
+                      </Link>
+                    )}
+                  </div>
                 );
-              })}
-            </ul>
+              }}
+            />
           )}
         </section>
       )}
@@ -531,43 +547,48 @@ export default function TopologyPage() {
             <EmptyState title={t("topology.namingEmpty")} description={t("topology.namingSubtitle")} />
           )}
           {!namingQuery.isLoading && !namingError && namingFindings.length > 0 && (
-            <ul className="topology-zombies__list">
-              {namingFindings.map((finding: SubjectNamingFinding, index: number) => {
+            <VirtualCatalogList
+              items={namingFindings}
+              empty={t("topology.namingEmpty")}
+              rowHeight={96}
+              maxHeight={560}
+              className="topology-zombies__list topology-zombies__list--virtual"
+              getKey={(finding) => `${finding.kind}-${finding.stream}-${finding.consumer}-${finding.subject}`}
+              isActive={() => false}
+              renderItem={(finding) => {
                 const href =
                   clusterId != null
                     ? subjectNamingFindingHref(finding, clusterId, accountName || "Default")
                     : null;
                 return (
-                  <li key={`${finding.kind}-${finding.stream}-${finding.consumer}-${finding.subject}-${index}`}>
-                    <div className="topology-zombies__item">
-                      <div>
-                        <span className="topology-zombies__kind">{namingKindLabel(t, finding.kind)}</span>
-                        <span className="topology-zombies__label">{subjectNamingFindingLabel(finding)}</span>
-                        {finding.suggested && (
-                          <span className="topology-zombies__suggested">
-                            {t("topology.namingSuggested")}: <strong>{finding.suggested}</strong>
-                          </span>
-                        )}
-                        {finding.cluster && finding.cluster.length > 1 && (
-                          <div className="topology-zombies__cluster">
-                            {finding.cluster.map((peer) => (
-                              <span key={peer} className="topology-zombies__chip">
-                                {peer}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      {href && (
-                        <Link className="btn btn--secondary" to={href} state={NAMING_LOCATION_STATE}>
-                          {t("topology.namingOpen")}
-                        </Link>
+                  <div className="topology-zombies__item">
+                    <div>
+                      <span className="topology-zombies__kind">{namingKindLabel(t, finding.kind)}</span>
+                      <span className="topology-zombies__label">{subjectNamingFindingLabel(finding)}</span>
+                      {finding.suggested && (
+                        <span className="topology-zombies__suggested">
+                          {t("topology.namingSuggested")}: <strong>{finding.suggested}</strong>
+                        </span>
+                      )}
+                      {finding.cluster && finding.cluster.length > 1 && (
+                        <div className="topology-zombies__cluster">
+                          {finding.cluster.map((peer) => (
+                            <span key={peer} className="topology-zombies__chip">
+                              {peer}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </div>
-                  </li>
+                    {href && (
+                      <Link className="btn btn--secondary" to={href} state={NAMING_LOCATION_STATE}>
+                        {t("topology.namingOpen")}
+                      </Link>
+                    )}
+                  </div>
                 );
-              })}
-            </ul>
+              }}
+            />
           )}
         </section>
       )}
@@ -588,48 +609,53 @@ export default function TopologyPage() {
             <EmptyState title={t("topology.genomeEmpty")} description={t("topology.genomeSubtitle")} />
           )}
           {!genomeQuery.isLoading && !genomeError && genomeFindings.length > 0 && (
-            <ul className="topology-zombies__list">
-              {genomeFindings.map((finding: EventGenomeFinding, index: number) => {
+            <VirtualCatalogList
+              items={genomeFindings}
+              empty={t("topology.genomeEmpty")}
+              rowHeight={96}
+              maxHeight={560}
+              className="topology-zombies__list topology-zombies__list--virtual"
+              getKey={(finding) => `${finding.genome}-${finding.stream}-${finding.consumer}-${finding.subject}`}
+              isActive={() => false}
+              renderItem={(finding) => {
                 const href =
                   clusterId != null
                     ? eventGenomeFindingHref(finding, clusterId, accountName || "Default")
                     : null;
                 return (
-                  <li key={`${finding.genome}-${finding.stream}-${finding.consumer}-${finding.subject}-${index}`}>
-                    <div className="topology-zombies__item">
-                      <div>
-                        <span className="topology-zombies__kind">{finding.genome}</span>
-                        <span className="topology-zombies__label">{eventGenomeFindingLabel(finding)}</span>
-                        {finding.suggested && (
-                          <span className="topology-zombies__suggested">
-                            {t("topology.genomeSuggested")}: <strong>{finding.suggested}</strong>
-                          </span>
-                        )}
-                        {finding.cluster && finding.cluster.length > 1 && (
-                          <div className="topology-zombies__cluster">
-                            {finding.cluster.map((peer) => (
-                              <span key={peer} className="topology-zombies__chip">
-                                {peer}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <div className="topology-zombies__actions">
-                        <Link className="btn btn--secondary" to={eventGenomeCatalogHref(finding.subject)}>
-                          {t("topology.genomeCatalog")}
-                        </Link>
-                        {href && (
-                          <Link className="btn btn--secondary" to={href} state={GENOME_LOCATION_STATE}>
-                            {t("topology.genomeOpen")}
-                          </Link>
-                        )}
-                      </div>
+                  <div className="topology-zombies__item">
+                    <div>
+                      <span className="topology-zombies__kind">{finding.genome}</span>
+                      <span className="topology-zombies__label">{eventGenomeFindingLabel(finding)}</span>
+                      {finding.suggested && (
+                        <span className="topology-zombies__suggested">
+                          {t("topology.genomeSuggested")}: <strong>{finding.suggested}</strong>
+                        </span>
+                      )}
+                      {finding.cluster && finding.cluster.length > 1 && (
+                        <div className="topology-zombies__cluster">
+                          {finding.cluster.map((peer) => (
+                            <span key={peer} className="topology-zombies__chip">
+                              {peer}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  </li>
+                    <div className="topology-zombies__actions">
+                      <Link className="btn btn--secondary" to={eventGenomeCatalogHref(finding.subject)}>
+                        {t("topology.genomeCatalog")}
+                      </Link>
+                      {href && (
+                        <Link className="btn btn--secondary" to={href} state={GENOME_LOCATION_STATE}>
+                          {t("topology.genomeOpen")}
+                        </Link>
+                      )}
+                    </div>
+                  </div>
                 );
-              })}
-            </ul>
+              }}
+            />
           )}
         </section>
       )}

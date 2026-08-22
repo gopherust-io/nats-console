@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/gopherust-io/nats-consol/internal/port"
-	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/nats-consol/pkg/common/safe"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 const (
@@ -47,11 +47,8 @@ type HealthService struct {
 }
 
 func NewHealthService(clusters port.ClusterRepository, gateway port.ClusterGateway, timeout time.Duration) *HealthService {
-	if timeout <= 0 {
-		timeout = 2 * time.Second
-	}
 	return &HealthService{
-		timeout: timeout,
+		timeout: max(timeout, 2*time.Second),
 		deps: []Dependency{
 			postgresDependency(clusters),
 			natsDefaultClusterDependency(clusters, gateway),
@@ -93,11 +90,9 @@ func (s *HealthService) Check(ctx context.Context) (HealthStatus, int) {
 
 	results := make([]result, len(s.deps))
 	var wg sync.WaitGroup
-	wg.Add(len(s.deps))
 
 	for i, dep := range s.deps {
-		go func(i int, dep Dependency) {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() {
 				if rec := recover(); rec != nil {
 					safe.Log("health", rec)
@@ -115,7 +110,7 @@ func (s *HealthService) Check(ctx context.Context) (HealthStatus, int) {
 				}
 			}
 			results[i] = result{name: dep.Name, status: status}
-		}(i, dep)
+		})
 	}
 	wg.Wait()
 

@@ -175,3 +175,53 @@ func TestExpandShallowViaLint(t *testing.T) {
 	require.NotNil(t, shallow)
 	assert.Equal(t, "orders.order.created", shallow.Suggested)
 }
+
+func TestExpandShallowDomainEntity(t *testing.T) {
+	t.Parallel()
+
+	snap := AnalyzeSubjectNaming([]SubjectNamingInput{{
+		Name:     "BILLING",
+		Subjects: []string{"billing.invoice"},
+	}})
+
+	var shallow *SubjectNamingFinding
+	for i := range snap.Findings {
+		if snap.Findings[i].Kind == SubjectNamingKindShallowHierarchy {
+			shallow = &snap.Findings[i]
+			break
+		}
+	}
+	require.NotNil(t, shallow)
+	assert.Equal(t, "billing.invoice.created", shallow.Suggested)
+}
+
+func TestExpandShallow(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		in   []string
+		want string
+	}{
+		{[]string{"orders", "created"}, "orders.order.created"},
+		{[]string{"order", "created"}, "order.order.created"},
+		{[]string{"billing", "invoice"}, "billing.invoice.created"},
+		{[]string{"payments", "transfer"}, "payments.transfer.created"},
+		{[]string{"payments", "settled"}, "payments.payment.settled"},
+		{[]string{"a", "b", "c"}, "a.b.c"},
+	}
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, expandShallow(tc.in), "in=%v", tc.in)
+	}
+}
+
+func TestLooksLikeAction(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, looksLikeAction("created"))
+	assert.True(t, looksLikeAction("paid"))
+	assert.True(t, looksLikeAction("settled"))
+	assert.True(t, looksLikeAction("shipped"))
+	assert.False(t, looksLikeAction("invoice"))
+	assert.False(t, looksLikeAction("transfer"))
+	assert.False(t, looksLikeAction("order"))
+}

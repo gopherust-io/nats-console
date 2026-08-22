@@ -1,12 +1,12 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useDeferredValue } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueries } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router";
 import VirtualTable, { type VirtualTableColumn } from "../components/VirtualTable";
-import { api, clusterPath, type StreamInfo } from "../lib/api";
 import { useCluster } from "../lib/cluster";
-import { HUB_LIST_POLL_MS } from "../lib/constants";
+import { MONITORING_POLL_MS } from "../lib/constants";
 import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
+import { fetchAllStreams } from "../lib/streams";
 
 
 type UnifiedRow = {
@@ -23,16 +23,23 @@ type UnifiedRow = {
 
 export default function AllStreamsPage() {
   const { t } = useTranslation();
-  const { clusters, setClusterId, loading: clustersLoading } = useCluster();
+  const { clusters, clusterId: selectedClusterId, setClusterId, loading: clustersLoading } = useCluster();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
 
   const streamQueries = useQueries({
-    queries: clusters.map((cluster) => ({
-      queryKey: clusterQueryKey(cluster.id, "streams"),
-      queryFn: async () => (await api<StreamInfo[]>(clusterPath(cluster.id, "/streams?offset=0&limit=500"))).data ?? [],
-      refetchInterval: visibilityAwareInterval(HUB_LIST_POLL_MS),
-    })),
+    queries: clusters.map((cluster) => {
+      const focused = cluster.id === selectedClusterId;
+      return {
+        queryKey: clusterQueryKey(cluster.id, "streams"),
+        queryFn: async () => fetchAllStreams(cluster.id),
+        // Only the selected cluster keeps a live poll; others fetch once.
+        refetchInterval: focused ? visibilityAwareInterval(MONITORING_POLL_MS) : false,
+        staleTime: focused ? MONITORING_POLL_MS : 5 * 60_000,
+        refetchOnWindowFocus: focused,
+      };
+    }),
   });
 
   const rows = useMemo(() => {
@@ -66,7 +73,7 @@ export default function AllStreamsPage() {
         });
       }
     });
-    const q = search.trim().toLowerCase();
+    const q = deferredSearch.trim().toLowerCase();
     if (!q) return out;
     return out.filter(
       (row) =>
@@ -74,7 +81,7 @@ export default function AllStreamsPage() {
         row.streamName.toLowerCase().includes(q) ||
         (row.error ?? "").toLowerCase().includes(q),
     );
-  }, [clusters, streamQueries, search, t]);
+  }, [clusters, streamQueries, deferredSearch, t]);
 
   const loading = clustersLoading || streamQueries.some((q) => q.isLoading || q.isFetching);
 

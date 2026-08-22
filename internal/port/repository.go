@@ -105,7 +105,7 @@ type NATSAccountRepository interface {
 	DeleteNATSAccountExport(ctx context.Context, clusterID, accountName, exportID string) error
 }
 
-type UnitOfWork interface {
+type DB interface {
 	ClusterRepository
 	UserRepository
 	AuditRepository
@@ -116,5 +116,5 @@ type UnitOfWork interface {
 	AlertRepository
 	AccessRepository
 	NATSAccountRepository
-	Close()
+	Stop()
 }

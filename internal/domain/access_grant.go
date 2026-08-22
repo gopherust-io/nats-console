@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 const (
@@ -59,7 +61,7 @@ func NATSUserResourceKey(clusterID, accountName, natsUserID string) string {
 // ValidateAccountName rejects empty names and names containing ':' which would
 // break resource-key parsing.
 func ValidateAccountName(name string) error {
-	if strings.TrimSpace(name) == "" {
+	if commonstrings.IsEmpty(strings.TrimSpace(name)) {
 		return fmt.Errorf("%w: account name is required", ErrInvalidInput)
 	}
 	if strings.Contains(name, ":") {

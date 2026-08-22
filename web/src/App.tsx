@@ -10,7 +10,6 @@ import InviteAcceptPage from "./pages/InviteAcceptPage";
 
 const AllStreamsPage = lazy(() => import("./pages/AllStreamsPage"));
 const SystemsPage = lazy(() => import("./pages/SystemsPage"));
-const SystemUsagePage = lazy(() => import("./pages/SystemsPage").then((m) => ({ default: m.SystemUsagePage })));
 const SystemAccountsPage = lazy(() => import("./pages/SystemAccountsPage"));
 const AccessPage = lazy(() => import("./pages/AccessPage"));
 const AccountOverviewPage = lazy(() => import("./pages/AccountOverviewPage"));
@@ -53,9 +52,10 @@ function SuspensePage({ children }: { children: React.ReactNode }) {
 }
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { user, loading, sessionError } = useAuth();
+  const { user, loading } = useAuth();
   if (loading) return <PageLoaderFallback />;
-  if (!user && sessionError) return <PageLoaderFallback />;
+  // Network sessionError keeps user=null but AuthProvider already shows a retry banner.
+  // Never spin forever — send the user to login so they can recover or sign in again.
   if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
@@ -95,6 +95,15 @@ function RedirectLegacyStream() {
   );
 }
 
+/** Old account Access URL → unified cluster Access with account scope. */
+function RedirectAccountAccess() {
+  const { clusterId, accountName } = useParams();
+  if (!clusterId) return <Navigate to="/systems" replace />;
+  const account = accountName || "Default";
+  const qs = new URLSearchParams({ scope: "account", account });
+  return <Navigate to={`/systems/${clusterId}/access?${qs}`} replace />;
+}
+
 export default function App() {
   return (
     <AuthProvider>
@@ -118,9 +127,8 @@ export default function App() {
           <Route path="systems/streams" element={<SuspensePage><AllStreamsPage /></SuspensePage>} />
           <Route path="systems/clusters" element={<SuspensePage><ClustersPage /></SuspensePage>} />
           <Route path="systems/:clusterId" element={<SuspensePage><SystemAccountsPage /></SuspensePage>} />
-          <Route path="systems/:clusterId/usage" element={<SuspensePage><SystemUsagePage /></SuspensePage>} />
           <Route path="systems/:clusterId/replicas" element={<SuspensePage><ReplicasPage /></SuspensePage>} />
-          <Route path="systems/:clusterId/access" element={<SuspensePage><AccessPage scope="system" /></SuspensePage>} />
+          <Route path="systems/:clusterId/access" element={<SuspensePage><AccessPage /></SuspensePage>} />
           <Route path="systems/:clusterId/accounts/:accountName" element={<SuspensePage><AccountOverviewPage /></SuspensePage>} />
           <Route path="systems/:clusterId/accounts/:accountName/connections" element={<SuspensePage><ConnectionsPage /></SuspensePage>} />
           <Route path="systems/:clusterId/accounts/:accountName/jetstream" element={<SuspensePage><JetStreamHubPage /></SuspensePage>} />
@@ -133,7 +141,10 @@ export default function App() {
           <Route path="systems/:clusterId/accounts/:accountName/jetstream/objects" element={<SuspensePage><ObjectBucketsPage /></SuspensePage>} />
           <Route path="systems/:clusterId/accounts/:accountName/jetstream/objects/:bucket" element={<SuspensePage><ObjectBucketPage /></SuspensePage>} />
           <Route path="systems/:clusterId/accounts/:accountName/users" element={<SuspensePage><NatsUsersPage /></SuspensePage>} />
-          <Route path="systems/:clusterId/accounts/:accountName/access" element={<SuspensePage><AccessPage scope="account" /></SuspensePage>} />
+          <Route
+            path="systems/:clusterId/accounts/:accountName/access"
+            element={<RedirectAccountAccess />}
+          />
           <Route path="systems/:clusterId/accounts/:accountName/sharing" element={<SuspensePage><SharingPage /></SuspensePage>} />
           <Route
             path="systems/:clusterId/accounts/:accountName/settings"

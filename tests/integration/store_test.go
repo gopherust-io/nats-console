@@ -6,11 +6,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/gopherust-io/nats-consol/internal/crypto"
-	"github.com/gopherust-io/nats-consol/internal/store"
-	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gopherust-io/nats-consol/internal/crypto"
+	"github.com/gopherust-io/nats-consol/internal/repo"
+	"github.com/gopherust-io/nats-consol/tests/testutil"
 )
 
 func TestStoreClusterCRUD(t *testing.T) {
@@ -19,7 +20,7 @@ func TestStoreClusterCRUD(t *testing.T) {
 	pgURL := testutil.StartPostgres(t, ctx)
 	st := testutil.OpenStore(t, ctx, pgURL)
 
-	created, err := st.CreateCluster(ctx, store.ClusterCreate{
+	created, err := st.CreateCluster(ctx, repo.ClusterCreate{
 		Name:          "prod",
 		NATSURL:       "nats://nats.example:4222",
 		MonitoringURL: "http://nats.example:8222",
@@ -49,20 +50,20 @@ func TestStoreUserRoles(t *testing.T) {
 	pgURL := testutil.StartPostgres(t, ctx)
 	st := testutil.OpenStore(t, ctx, pgURL)
 
-	user, err := st.CreateUser(ctx, store.UserCreate{
+	user, err := st.CreateUser(ctx, repo.UserCreate{
 		Username: "alice",
 		Email:    "alice@example.com",
 		Password: "secret-password",
-		Roles:    []string{store.RoleViewer},
+		Roles:    []string{repo.RoleViewer},
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, st.SetUserRoles(ctx, user.ID, []string{store.RoleOperator}))
+	require.NoError(t, st.SetUserRoles(ctx, user.ID, []string{repo.RoleOperator}))
 
 	got, err := st.GetUserByID(ctx, user.ID)
 	require.NoError(t, err)
 	require.Len(t, got.Roles, 1)
-	assert.Equal(t, store.RoleOperator, got.Roles[0])
+	assert.Equal(t, repo.RoleOperator, got.Roles[0])
 }
 
 func TestStoreEncryptsClusterToken(t *testing.T) {
@@ -73,11 +74,11 @@ func TestStoreEncryptsClusterToken(t *testing.T) {
 	enc, err := crypto.New("test-encryption-key-32chars!")
 	require.NoError(t, err)
 
-	st, err := store.Open(ctx, pgURL, testutil.MigrationsDir(), enc, store.DefaultPoolConfig())
+	st, err := repo.Open(ctx, pgURL, enc, repo.DefaultPoolConfig())
 	require.NoError(t, err)
-	t.Cleanup(st.Close)
+	t.Cleanup(st.Stop)
 
-	created, err := st.CreateCluster(ctx, store.ClusterCreate{
+	created, err := st.CreateCluster(ctx, repo.ClusterCreate{
 		Name:    "secure",
 		NATSURL: "nats://localhost:4222",
 		Token:   "super-secret-token",

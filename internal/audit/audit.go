@@ -6,33 +6,35 @@ import (
 
 	"github.com/valyala/fasthttp"
 
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/repo"
 )
 
 const auditQueueSize = 512
 
 type Writer struct {
-	store *store.Store
-	ch    chan store.AuditCreate
+	db *repo.DB
+	ch chan repo.AuditCreate
 }
 
-func NewWriter(st *store.Store) *Writer {
-	w := &Writer{
-		store: st,
-		ch:    make(chan store.AuditCreate, auditQueueSize),
+func NewWriter(db *repo.DB) *Writer {
+	return &Writer{
+		db: db,
+		ch: make(chan repo.AuditCreate, auditQueueSize),
 	}
-	go w.worker()
-	return w
 }
 
-func (w *Writer) worker() {
+func (w *Writer) Start(ctx context.Context) {
 	for in := range w.ch {
-		_ = w.store.InsertAudit(context.Background(), in)
+		_ = w.db.InsertAudit(ctx, in)
 	}
 }
 
-func (w *Writer) Log(in store.AuditCreate) {
-	if w == nil || w.store == nil {
+func (w *Writer) Stop() {
+	close(w.ch)
+}
+
+func (w *Writer) Log(in repo.AuditCreate) {
+	if w == nil || w.db == nil {
 		return
 	}
 	select {
@@ -46,7 +48,6 @@ func ParseResource(path string) (resourceType, resourceName string) {
 	if len(parts) < 4 {
 		return "", ""
 	}
-	// /api/v1/clusters/{id}/...
 	if parts[2] != "clusters" {
 		return "", ""
 	}

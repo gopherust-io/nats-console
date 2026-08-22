@@ -43,7 +43,6 @@ export default tseslint.config(
             "useAuth",
             "useCluster",
             "useAccount",
-            "useTheme",
             "useToast",
             "applyTheme",
             "THEMES",

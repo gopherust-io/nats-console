@@ -59,6 +59,9 @@ func (s *ClusterService) Delete(ctx context.Context, id string) error {
 	if err := s.clusters.DeleteCluster(ctx, id); err != nil {
 		return err
 	}
+	// Drop cached client + credentials so a recreated cluster does not reuse
+	// a stale session. Any future UpdateCluster path that changes URL/token/
+	// creds must likewise call gateway.Evict(id) after a successful write.
 	s.gateway.Evict(id)
 	return nil
 }

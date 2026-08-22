@@ -11,7 +11,7 @@ import (
 
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/domain"
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
@@ -43,7 +43,7 @@ func TestLoadUserForSessionSkipsDBWhenVersionMatches(t *testing.T) {
 	}
 	// Without a store, LoadUserForSession must succeed from cache when versions match.
 	ctx := context.Background()
-	user := store.User{ID: "u1", Username: "alice", Roles: []string{store.RoleViewer}, SessionVersion: 1}
+	user := domain.User{ID: "u1", Username: "alice", Roles: []string{domain.RoleViewer}, SessionVersion: 1}
 	svc.InvalidateUser(ctx, "") // no-op
 	// Seed via unexported path: CreateSession + Parse won't fill grants cache.
 	// Exercise version helpers directly.
@@ -58,7 +58,7 @@ func TestLoadUserForSessionSkipsDBWhenVersionMatches(t *testing.T) {
 		t.Fatal("expected version 2")
 	}
 
-	token, err := svc.CreateSession(ctx, store.User{ID: "u1", Username: "alice", Roles: []string{store.RoleViewer}}, "fp-version")
+	token, err := svc.CreateSession(ctx, domain.User{ID: "u1", Username: "alice", Roles: []string{domain.RoleViewer}}, "fp-version")
 	if err != nil {
 		t.Fatal(err)
 	}

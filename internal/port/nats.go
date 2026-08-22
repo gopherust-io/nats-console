@@ -4,8 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/nats-io/nats.go"
+
+	"github.com/gopherust-io/nats-consol/internal/domain"
 )
 
 type JetStreamExecutor interface {
@@ -33,6 +34,11 @@ type JetStreamExecutor interface {
 	DeleteMessage(ctx context.Context, stream string, seq uint64) error
 	ListDLQMessages(ctx context.Context, stream string, startSeq uint64, limit int) (*domain.DLQListResult, error)
 	RetryDLQMessages(ctx context.Context, stream string, req domain.DLQRetryRequest) (*domain.DLQRetryResult, error)
+	CaptureIncidentCapsule(ctx context.Context, stream string, req domain.IncidentCapsuleCaptureRequest) (*domain.IncidentCapsuleDetail, error)
+	CaptureIncidentCapsuleFromDLQ(ctx context.Context, dlqStream string, seq uint64) (*domain.IncidentCapsuleDetail, error)
+	ListIncidentCapsules(ctx context.Context, stream, consumer string) ([]domain.IncidentCapsuleSummary, error)
+	LoadIncidentCapsule(ctx context.Context, id, bucket string) (*domain.IncidentCapsuleDetail, error)
+	PreviewIncidentCapsule(ctx context.Context, id, bucket string) (*domain.IncidentCapsuleDryRun, error)
 	Monitoring(ctx context.Context, path string) ([]byte, error)
 	ProbeRequest(ctx context.Context, subject string, format domain.RequestReplyPayloadFormat, payload []byte, timeout time.Duration) (*nats.Msg, time.Duration, error)
 	ListKVBuckets(ctx context.Context) ([]domain.KVBucketInfo, error)
@@ -62,9 +68,10 @@ type ClusterGateway interface {
 	Test(ctx context.Context, clusterID string) (domain.ClusterTestResult, error)
 	ConnectionStatus(ctx context.Context, clusterID string) (domain.NATSConnectionStatus, error)
 	ListConnectionStatuses(ctx context.Context) []domain.NATSConnectionStatus
+	SubscribeConnectionStatus(clusterID string) (updates <-chan domain.NATSConnectionStatus, latest domain.NATSConnectionStatus, unsubscribe func())
 	Evict(clusterID string)
 	Touch(clusterID string)
-	Close()
+	Stop()
 	WithExecutor(ctx context.Context, clusterID string, fn func(JetStreamExecutor) error) error
 	GetExecutor(ctx context.Context, clusterID string) (JetStreamExecutor, error)
 }

@@ -47,6 +47,23 @@ jobs:
         run: |
           echo "${HOME}/go/bin" >> "${GITHUB_PATH}"
           goalign analyze -r --arch=amd64 --fail-on-findings --min-waste=1 -e web/,bin/,node_modules/ .
+      - name: Cache swag
+        id: swag-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/bin/swag
+          key: swag-v1.16.4-${{ runner.os }}
+      - name: Install swag
+        if: steps.swag-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/go/bin"
+          go install github.com/swaggo/swag/cmd/swag@v1.16.4
+      - name: OpenAPI drift
+        run: |
+          echo "${HOME}/go/bin" >> "${GITHUB_PATH}"
+          make openapi
+          git diff --exit-code -- api/swagger.yaml
       - name: Unit tests
         run: make test-unit
       - name: Build server

@@ -1,4 +1,4 @@
-import { clusterPath } from "./api";
+import { apiBinary, ApiError, clusterPath } from "./api";
 import { downloadBlob, sanitizeFilenamePart } from "./messageDownload";
 
 export type ArchitectureExportOptions = {
@@ -35,29 +35,23 @@ export async function downloadArchitectureExport(
       ? "/api/v1/architecture-export/demo"
       : exportPath(clusterId!, { ...options, demo: demo || options?.demo });
 
-  // Always GET — POST would require write RBAC; ai=1 is a query flag on the same handler.
-  const response = await fetch(path, { method: "GET", credentials: "include" });
-  if (!response.ok) {
-    let detail: string;
-    try {
-      const body = await response.json();
-      detail = body?.error?.message || body?.message || "";
-    } catch {
-      detail = (await response.text().catch(() => "")).trim();
-    }
-    if (response.status === 404) {
+  try {
+    // Always GET — POST would require write RBAC; ai=1 is a query flag on the same handler.
+    const { response, blob } = await apiBinary(path, { method: "GET" });
+    const fallback = `nats-consol-architecture-${sanitizeFilenamePart(demo ? "demo" : clusterId!)}.zip`;
+    const name = filenameFromDisposition(response.headers.get("Content-Disposition"), fallback);
+    downloadBlob(name, blob);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
       throw new Error(
-        detail ||
+        err.message ||
           "Architecture export endpoint not found (404). Rebuild/restart the Consol API (e.g. make reload-api) so architecture-export routes are loaded.",
+        { cause: err },
       );
     }
-    throw new Error(detail || `Architecture export failed (${response.status})`);
+    if (err instanceof Error) throw err;
+    throw new Error("Architecture export failed", { cause: err });
   }
-
-  const blob = await response.blob();
-  const fallback = `nats-consol-architecture-${sanitizeFilenamePart(demo ? "demo" : clusterId!)}.zip`;
-  const name = filenameFromDisposition(response.headers.get("Content-Disposition"), fallback);
-  downloadBlob(name, blob);
 }
 
 export const ARCHITECTURE_GENERATOR_HREF = "/docs/architecture-generator";

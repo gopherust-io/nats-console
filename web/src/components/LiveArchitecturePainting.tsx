@@ -164,6 +164,7 @@ export default function LiveArchitecturePainting({ scene }: LiveArchitecturePain
     paused: false,
     reduceMotion: false,
     hidden: false,
+    inView: true,
     scene: scene as LiveArchScene,
     scenarioIndex: 0,
   });
@@ -430,8 +431,8 @@ export default function LiveArchitecturePainting({ scene }: LiveArchitecturePain
     const onResize = () => syncCanvasSize();
     const onVisibility = () => {
       const hidden = document.visibilityState === "hidden";
-      sim.current.hidden = hidden;
-      if (hidden) stopLoop();
+      sim.current.hidden = hidden || !sim.current.inView;
+      if (sim.current.hidden) stopLoop();
       else startLoop();
     };
     const themeObserver = new MutationObserver(refreshPaintColors);
@@ -440,12 +441,26 @@ export default function LiveArchitecturePainting({ scene }: LiveArchitecturePain
       attributeFilter: ["data-theme"],
     });
     sim.current.hidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+    sim.current.inView = true;
+    const rootEl = rootRef.current;
+    let io: IntersectionObserver | null = null;
+    if (rootEl && typeof IntersectionObserver !== "undefined") {
+      io = new IntersectionObserver(
+        ([entry]) => {
+          sim.current.inView = entry.isIntersecting;
+          onVisibility();
+        },
+        { threshold: 0.05 },
+      );
+      io.observe(rootEl);
+    }
     window.addEventListener("resize", onResize);
     document.addEventListener("visibilitychange", onVisibility);
     if (!sim.current.hidden) startLoop();
     return () => {
       stopLoop();
       themeObserver.disconnect();
+      io?.disconnect();
       window.removeEventListener("resize", onResize);
       document.removeEventListener("visibilitychange", onVisibility);
     };

@@ -26,13 +26,6 @@ test.describe("systems and accounts", () => {
     await expect(page).toHaveURL(new RegExp(`${CLUSTER.id}/accounts/${ACCOUNT}`));
   });
 
-  test("system usage page shows usage cards", async ({ page }) => {
-    await page.goto(`/systems/${CLUSTER.id}/usage`);
-    await expect(page.getByRole("heading", { name: "Usage" })).toBeVisible();
-    await expect(page.getByText("Streams")).toBeVisible();
-    await expect(page.getByText("Consumers")).toBeVisible();
-  });
-
   test("system access empty and add user", async ({ page }) => {
     const person = samplePerson();
     let grants: Array<{
@@ -109,9 +102,9 @@ test.describe("systems and accounts", () => {
     // Legacy /settings redirects onto the account overview (settings live there).
     await page.goto(`${base}/settings`);
     await expect(page).toHaveURL(new RegExp(`/systems/${CLUSTER.id}/accounts/${ACCOUNT}$`));
-    await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Limits" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "JetStream" })).toBeVisible();
+    await expect(page.getByText("Default account")).toBeVisible();
+    await expect(page.getByText("JetStream on")).toBeVisible();
+    await expect(page.getByText("Unlimited").first()).toBeVisible();
   });
 
   test("account sharing empty and create export", async ({ page }) => {

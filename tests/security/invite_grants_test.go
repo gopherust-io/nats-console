@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/repo"
 	"github.com/gopherust-io/nats-consol/pkg/common/serializer"
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/nats-consol/tests/testutil"
@@ -22,11 +22,11 @@ func TestInviteAcceptAndSystemGrant(t *testing.T) {
 	ctx := context.Background()
 	clusterID := stack.DefaultClusterID(t)
 
-	pending, err := stack.Store.CreateUser(ctx, store.UserCreate{
+	pending, err := stack.Store.CreateUser(ctx, repo.UserCreate{
 		Username: "invited-person",
 		Email:    "invited@example.com",
-		Roles:    []string{store.RoleViewer},
-		AccessRules: &store.AccessRules{
+		Roles:    []string{repo.RoleViewer},
+		AccessRules: &repo.AccessRules{
 			ClusterIDs: []string{},
 		},
 	})
@@ -35,11 +35,11 @@ func TestInviteAcceptAndSystemGrant(t *testing.T) {
 	inv, err := stack.Store.CreateUserInvite(ctx, pending.ID, 0)
 	require.NoError(t, err)
 
-	_, err = stack.Store.UpsertAccessGrant(ctx, store.AccessGrantUpsert{
+	_, err = stack.Store.UpsertAccessGrant(ctx, repo.AccessGrantUpsert{
 		UserID:       pending.ID,
-		ResourceType: store.ResourceSystem,
+		ResourceType: repo.ResourceSystem,
 		ResourceKey:  clusterID,
-		Role:         store.GrantObserver,
+		Role:         repo.GrantObserver,
 	})
 	require.NoError(t, err)
 
@@ -98,26 +98,26 @@ func TestCredentialDownloaderGate(t *testing.T) {
 	ctx := context.Background()
 	clusterID := stack.DefaultClusterID(t)
 
-	downloader, err := stack.Store.CreateUser(ctx, store.UserCreate{
+	downloader, err := stack.Store.CreateUser(ctx, repo.UserCreate{
 		Username: "cred-dl",
 		Email:    "cred@example.com",
 		Password: "cred-pass",
-		Roles:    []string{store.RoleViewer},
-		AccessRules: &store.AccessRules{
+		Roles:    []string{repo.RoleViewer},
+		AccessRules: &repo.AccessRules{
 			ClusterIDs: []string{},
 		},
 	})
 	require.NoError(t, err)
 
-	_, err = stack.Store.UpsertAccessGrant(ctx, store.AccessGrantUpsert{
+	_, err = stack.Store.UpsertAccessGrant(ctx, repo.AccessGrantUpsert{
 		UserID:       downloader.ID,
-		ResourceType: store.ResourceAccount,
+		ResourceType: repo.ResourceAccount,
 		ResourceKey:  clusterID + ":Default",
-		Role:         store.GrantCredentialDownloader,
+		Role:         repo.GrantCredentialDownloader,
 	})
 	require.NoError(t, err)
 
-	natsUser, err := stack.Store.CreateNATSAccountUser(ctx, store.NATSAccountUserCreate{
+	natsUser, err := stack.Store.CreateNATSAccountUser(ctx, repo.NATSAccountUserCreate{
 		ClusterID:   clusterID,
 		AccountName: "Default",
 		Name:        "app-user",

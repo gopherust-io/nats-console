@@ -12,7 +12,8 @@
 
 ## Docs
 
-- [ ] Updated README/docs/OpenAPI/changelog when public behavior changed
+- [ ] Updated README/docs/changelog when public behavior changed
+- [ ] Public API: swag annotations + `make openapi` (commit `api/swagger.yaml`)
 
 ## Checklist
 

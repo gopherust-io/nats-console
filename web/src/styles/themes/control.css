@@ -1,10 +1,10 @@
 [data-theme="control"] {
   color-scheme: dark;
-  --bg-body: #101013;
-  --bg-gradient: #101013;
-  --bg-sidebar: #18181b;
-  --bg-card: #18181b;
-  --bg-input: #242429;
+  --bg-body: #050505;
+  --bg-gradient: #050505;
+  --bg-sidebar: #080808;
+  --bg-card: #050505;
+  --bg-input: #121214;
   --bg-table-hover: rgba(16, 185, 129, 0.06);
   --bg-nav-active: rgba(16, 185, 129, 0.14);
   --bg-badge: rgba(16, 185, 129, 0.12);
@@ -12,8 +12,24 @@
   --text-primary: #fafafa;
   --text-secondary: #e4e4e7;
   --text-muted: #a1a1aa;
-  --border: #242429;
-  --border-subtle: rgba(36, 36, 41, 0.8);
+  --border: #1a1a1c;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --card-radius: 16px;
+  --card-top-glow: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.03) 28%,
+    rgba(255, 255, 255, 0.2) 50%,
+    rgba(255, 255, 255, 0.03) 72%,
+    transparent 100%
+  );
+  --card-surface: radial-gradient(
+      90% 55% at 50% 0%,
+      rgba(255, 255, 255, 0.035) 0%,
+      transparent 58%
+    ),
+    var(--bg-card);
+  --card-border: 1px solid rgba(255, 255, 255, 0.07);
   --accent: #10b981;
   --accent-hover: #059669;
   --accent-text: #ffffff;
@@ -28,7 +44,7 @@
   --error-bg: rgba(239, 68, 68, 0.12);
   --shadow: none;
   --shadow-sm: none;
-  --brand-bg: linear-gradient(135deg, #10b981 0%, #14b8a6 100%);
+  --brand-bg: linear-gradient(115deg, #f4f4f5 0%, #d4d4d8 45%, #a1a1aa 100%);
   --brand-shadow: none;
   --btn-bg: #10b981;
   --btn-bg-hover: #059669;
@@ -38,16 +54,16 @@
   --btn-sheen: none;
   --btn-hover-lift: none;
   --btn-secondary-bg: transparent;
-  --btn-secondary-bg-hover: #242429;
+  --btn-secondary-bg-hover: #121214;
   --btn-secondary-text: #e4e4e7;
   --btn-secondary-text-hover: #fafafa;
-  --btn-secondary-border: #242429;
-  --btn-secondary-border-hover: #34343c;
+  --btn-secondary-border: #1a1a1c;
+  --btn-secondary-border-hover: #2a2a2e;
   --btn-secondary-shadow: none;
   --sidebar-blur: 0px;
   --card-blur: 0px;
-  --surface-elevated: #242429;
-  --surface-overlay: #34343c;
+  --surface-elevated: #121214;
+  --surface-overlay: #1a1a1c;
 }
 
 [data-theme="control"] .sidebar,
@@ -62,7 +78,22 @@
 [data-theme="control"] .table-wrap,
 [data-theme="control"] .live-log {
   box-shadow: none;
-  border-color: var(--border);
+  border-color: rgba(255, 255, 255, 0.09);
+}
+
+[data-theme="control"] .card,
+[data-theme="control"] .stat-card,
+[data-theme="control"] .panel,
+[data-theme="control"] .nc-system-card,
+[data-theme="control"] .nc-create-card,
+[data-theme="control"] .nc-usage-card,
+[data-theme="control"] .replicas-card,
+[data-theme="control"] .replicas-panel,
+[data-theme="control"] .arch-review {
+  border-radius: var(--card-radius);
+  background: var(--card-surface);
+  border: var(--card-border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 [data-theme="control"] .btn::after {
@@ -135,5 +166,5 @@
 }
 
 [data-theme="control"] .login-page__backdrop {
-  background: #101013;
+  background: #050505;
 }

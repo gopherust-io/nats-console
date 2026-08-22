@@ -2,6 +2,7 @@ import {
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -26,23 +27,62 @@ import {
   type AssistantPanelLayout,
 } from "../lib/assistantPanelLayout";
 import AssistantMessageBody from "./AssistantMessageBody";
+import { Send } from "lucide-react";
+import { LiquidMetalButton } from "./ui/liquid-metal-button";
 
 const STARTERS = [
   "Diagnose this cluster's JetStream health",
   "Which streams are closest to storage or retention limits?",
   "Walk me through fixing consumer lag on the current stream",
   "Give a runbook for a safe purge on the current stream",
+  "Which consumers have the worst ack pending or redelivery risk?",
+  "Explain the current consumer's config and whether pull or push fits better",
+  "How do I safely reset a consumer without losing messages?",
+  "Compare Limits vs Interest vs WorkQueue for the current stream",
+  "Is R1 a risk on any important streams, and what should I change?",
+  "What subjects are overlapping or misconfigured across streams?",
+  "Summarize KV bucket health and TTL / history risks",
+  "When should I use KV vs a stream for this use case?",
+  "Give a 5-minute incident checklist for JetStream unavailable",
+  "What metrics should I watch before a deploy that adds publishers?",
+  "How do I drain lag safely during a consumer migration?",
+  "Where in the console should I look for replica issues?",
+  "Walk me through Live mode for debugging slow consumers",
+  "List streams with the highest message rates and what that implies",
+  "Which streams look under-replicated relative to their importance?",
+  "How should I size MaxBytes and MaxAge for the current stream?",
+  "Explain discard new vs discard old for the current stream",
+  "What does consumer AckWait and MaxDeliver mean here, and are they sane?",
+  "How do I recover from a stuck pending ack backlog?",
+  "Give steps to add a mirror or source without disrupting publishers",
+  "How do I validate JetStream after a NATS rolling restart?",
+  "What are the top risks if a node in this cluster disappears?",
+  "Help me design subjects and stream boundaries for a new domain",
+  "How do Object Store buckets differ from streams for large payloads?",
+  "What should I check before deleting a stream or KV bucket?",
+  "Suggest a monitoring checklist for consumer lag SLOs",
+  "How do I use the Topology view to spot JetStream hotspots?",
+  "Explain idle consumers vs active lag — which ones need action first?",
+  "Give a safe playbook for raising stream storage limits",
+  "What console pages should I open for a storage-pressure alert?",
+  "How do I republish or replay historical messages safely?",
+  "When is interest-based retention dangerous for this cluster?",
 ];
 
 type DragMode = "move" | "resize";
 
-export default function AssistantPanel() {
+type AssistantPanelProps = {
+  /** Open immediately on mount (used when shell mounts after first FAB click). */
+  defaultOpen?: boolean;
+};
+
+export default function AssistantPanel({ defaultOpen = false }: AssistantPanelProps) {
   const { user } = useAuth();
   const { clusterId: contextClusterId } = useCluster();
   const { clusterId: routeClusterId } = useParams();
   const location = useLocation();
   const clusterId = routeClusterId ?? contextClusterId;
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [configured, setConfigured] = useState(false);
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [input, setInput] = useState("");
@@ -61,22 +101,34 @@ export default function AssistantPanel() {
     origin: AssistantPanelLayout;
   } | null>(null);
 
-  useEffect(() => {
+  const clearChat = useCallback(() => {
     setMessages([]);
     setError(null);
     setInput("");
     lastRequestRef.current = null;
-  }, [clusterId]);
+  }, []);
 
   useEffect(() => {
-    if (!user) {
-      setConfigured(false);
+    clearChat();
+  }, [clusterId, clearChat]);
+
+  useEffect(() => {
+    if (!user || !open) {
       return;
     }
-    fetchAssistantConfig().then((cfg) => {
-      setConfigured(cfg.aiEnabled);
-    });
-  }, [user]);
+    let cancelled = false;
+    fetchAssistantConfig()
+      .then((cfg) => {
+        if (!cancelled) setConfigured(cfg.aiEnabled);
+      })
+      .catch(() => {
+        // Distinguish outage from "not configured": leave configured unknown/false but do not crash.
+        if (!cancelled) setConfigured(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, open]);
 
   useEffect(() => {
     fullscreenRef.current = fullscreen;
@@ -282,16 +334,16 @@ export default function AssistantPanel() {
 
   return (
     <>
-      <button
-        type="button"
+      <LiquidMetalButton
+        variant="fab"
+        viewMode="icon"
+        label="AI"
         className={`assistant-fab${configured ? "" : " assistant-fab--setup"}`}
         onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-label="Open NATS JetStream assistant"
+        ariaExpanded={open}
+        ariaLabel="Open NATS JetStream assistant"
         title="JetStream AI assistant"
-      >
-        AI
-      </button>
+      />
 
       {open && (
         <div
@@ -316,6 +368,19 @@ export default function AssistantPanel() {
               </div>
             </div>
             <div className="assistant-panel__actions">
+              {configured && (
+                <button
+                  type="button"
+                  className="assistant-panel__clear"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={clearChat}
+                  disabled={loading || (messages.length === 0 && !error && !input)}
+                  aria-label="Clear chat"
+                  title="Clear chat"
+                >
+                  Clear
+                </button>
+              )}
               <button
                 type="button"
                 className="assistant-panel__icon-btn"
@@ -340,7 +405,7 @@ export default function AssistantPanel() {
 
           {!configured ? (
             <div className="assistant-panel__setup">
-              <p>Добавьте Gemini API key в файл <code>.env</code> в корне проекта.</p>
+              <p>Add a Gemini API key to the <code>.env</code> file in the project root.</p>
               <pre className="assistant-panel__code">{`AI_ENABLED=true
 AI_API_KEY=your-gemini-key
 AI_MODEL=gemini-2.5-flash`}</pre>
@@ -398,9 +463,23 @@ AI_MODEL=gemini-2.5-flash`}</pre>
                   rows={2}
                   disabled={loading || !clusterId}
                 />
-                <button className="btn" type="submit" disabled={loading || !input.trim() || !clusterId}>
-                  Send
-                </button>
+                <LiquidMetalButton
+                  type="submit"
+                  viewMode="icon"
+                  label="Send"
+                  ariaLabel="Send message"
+                  className="assistant-panel__send"
+                  disabled={loading || !input.trim() || !clusterId}
+                  icon={
+                    <Send
+                      size={16}
+                      style={{
+                        color: "#a3a3a3",
+                        filter: "drop-shadow(0px 1px 2px rgba(0, 0, 0, 0.5))",
+                      }}
+                    />
+                  }
+                />
               </form>
             </>
           )}
