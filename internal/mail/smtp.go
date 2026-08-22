@@ -25,6 +25,10 @@ type SMTPSender struct {
 }
 
 func NewSMTPSenderFromConfig(ctx context.Context, cfg config.Config) (*SMTPSender, error) {
+	if !cfg.SMTP.Enabled {
+		return nil, nil
+	}
+
 	dialer := &net.Dialer{Timeout: cfg.SMTP.Timeout}
 	conn, err := dialer.DialContext(ctx, "tcp", fmt.Sprintf("%s:%d", cfg.SMTP.Host, cfg.SMTP.Port))
 	if err != nil {
@@ -107,6 +111,9 @@ func (s *SMTPSender) Send(_ context.Context, to []string, subject, textBody, htm
 }
 
 func (s *SMTPSender) Stop() error {
+	if s == nil {
+		return nil
+	}
 	return errors.Join(s.conn.Close(), s.client.Close())
 }
 

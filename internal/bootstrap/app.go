@@ -105,7 +105,11 @@ func New(ctx context.Context) (*App, error) {
 	if err != nil {
 		tel.Fatal().Err(err).Str("component", "bootstrap").Msg("failed to init smtpSender")
 	}
-	tel.Info().Str("component", "smtpSender").Msg("smtpSender successfully initialized")
+	if smtpSender == nil {
+		tel.Info().Str("component", "smtpSender").Msg("smtp disabled; alert email delivery off")
+	} else {
+		tel.Info().Str("component", "smtpSender").Msg("smtpSender successfully initialized")
+	}
 
 	natsMetrics := snapshot.NewSnapshot(db.DB(), manager, cfg, smtpSender)
 	go natsMetrics.Start(ctx)

@@ -12,6 +12,7 @@ All notable changes to NATS Consol are documented in this file.
 - Dockerfile Go **1.27.0**; drop local `replace` for `gopherust-io/nats` (published v0.6.0); sonic Go 1.27-capable pin; pprof off by default in compose/`.env.example`.
 - Docs: `go run ./cmd` (not `./cmd/server`); OpenAPI/`web` package version **0.14.0**.
 - golangci `modernize` / errcheck cleanups so CI stays green on golangci-lint v2.13+.
+- Skip SMTP dial when `SMTP_ENABLED=false` so compose smoke works without the `mail` profile.
 
 ### Changed
 
