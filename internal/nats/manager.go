@@ -173,10 +173,11 @@ func (m *Manager) Touch(clusterID string) {
 }
 
 func (m *Manager) Stop() {
+	m.mu.Lock()
 	if m.sweepStop != nil {
 		close(m.sweepStop)
+		m.sweepStop = nil
 	}
-	m.mu.Lock()
 	toClose := make([]*Client, 0, len(m.cache))
 	for id, entry := range m.cache {
 		toClose = append(toClose, entry.client)

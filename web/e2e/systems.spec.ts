@@ -13,7 +13,7 @@ test.describe("systems and accounts", () => {
 
   test("systems list shows connected cluster", async ({ page }) => {
     await page.goto("/systems");
-    await expect(page.getByRole("heading", { name: "Systems" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Clusters" })).toBeVisible();
     await expect(page.getByText(CLUSTER.name)).toBeVisible();
     await expect(page.getByText("Connected")).toBeVisible();
   });
@@ -21,7 +21,7 @@ test.describe("systems and accounts", () => {
   test("system accounts page lists Default", async ({ page }) => {
     await page.goto(`/systems/${CLUSTER.id}`);
     await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
-    await expect(page.getByText(ACCOUNT)).toBeVisible();
+    await expect(page.getByRole("link", { name: ACCOUNT })).toBeVisible();
     await page.getByRole("link", { name: ACCOUNT }).click();
     await expect(page).toHaveURL(new RegExp(`${CLUSTER.id}/accounts/${ACCOUNT}`));
   });
@@ -80,7 +80,8 @@ test.describe("systems and accounts", () => {
     await expect(page.getByRole("heading", { name: "Access" })).toBeVisible();
     await expect(page.getByText("No access grants yet.")).toBeVisible();
 
-    await page.getByLabel("Person").selectOption(person.id);
+    await page.getByLabel("Person").click();
+    await page.getByRole("option", { name: person.username }).click();
     await page.getByRole("button", { name: "Add User" }).click();
     await expect(page.getByRole("cell", { name: person.username })).toBeVisible();
   });

@@ -180,7 +180,9 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 	}
 
 	err = upgrader.Upgrade(ctx, func(conn *websocket.Conn) {
-		h.serveConn(ctx, conn, client, clusterID, stream, subjectFilter, fromSeq)
+		// Use reqCtx, not *fasthttp.RequestCtx: Upgrade releases/resets the
+		// RequestCtx, and serving the conn on it races with fasthttp pooling.
+		h.serveConn(reqCtx, conn, client, clusterID, stream, subjectFilter, fromSeq)
 	})
 	if err != nil {
 		tel.Error().Err(err).Str("component", "live").Msg("websocket upgrade failed")
