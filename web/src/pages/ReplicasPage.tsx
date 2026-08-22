@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import RaftElectionStage from "../components/RaftElectionStage";
+import Alert from "../components/ui/Alert";
 import ClockNumber from "../components/ui/ClockNumber";
 import PageLoader from "../components/ui/PageLoader";
 import QueryErrorState from "../components/ui/QueryErrorState";
@@ -11,11 +12,13 @@ import { useReplicasEvents } from "../hooks/useReplicasEvents";
 import { api, clusterPath } from "../lib/api";
 import { useCluster } from "../lib/cluster";
 import {
+  isExpectedMetricNa,
   isReplicasSnapshotNewer,
+  monitoringRaftRole,
   type ReplicaPeer,
   type ReplicasSnapshot,
 } from "../lib/replicas";
-import { clusterQueryKey, queryClient } from "../lib/query";
+import { clusterQueryKey, queryClient, visibilityAwareInterval } from "../lib/query";
 import "../styles/replicas.css";
 
 export type { ReplicaPeer, ReplicasSnapshot } from "../lib/replicas";
@@ -54,7 +57,8 @@ function mergeStickyPeers(
       leader: true,
     });
   }
-  const room = Math.max(clusterSize, incoming.length) - byName.size;
+  // Keep prior peers as offline sticky even when meta clusterSize briefly shrinks.
+  const room = Math.max(clusterSize, incoming.length, prev.length) - byName.size;
   if (room > 0) {
     let added = 0;
     for (const old of prev) {
@@ -72,21 +76,61 @@ function mergeStickyPeers(
   });
 }
 
+/** Table status tone: ok = online, warn = lagging, danger = offline. */
+function peerStatusTone(peer: ReplicaPeer): "ok" | "warn" | "danger" {
+  if (!peer.online) return "danger";
+  if (peer.current === false) return "warn";
+  return "ok";
+}
+
+function peerStatusLabel(
+  peer: ReplicaPeer,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string {
+  if (!peer.online) return t("replicas.offlineLabel");
+  if (peer.current === false) {
+    return peer.lag != null
+      ? t("replicas.laggingWithLag", { lag: peer.lag })
+      : t("replicas.lagging");
+  }
+  return t("replicas.onlineLabel");
+}
+
+type MetricCellProps = {
+  peer: ReplicaPeer;
+  scope: "routeLink" | "varzHealth";
+  hasValue: boolean;
+  children: ReactNode;
+  naTitle: string;
+  empty: string;
+};
+
+function MetricCell({ peer, scope, hasValue, children, naTitle, empty }: MetricCellProps) {
+  if (hasValue) return <>{children}</>;
+  if (isExpectedMetricNa(peer, scope)) {
+    return (
+      <span className="replicas-na" title={naTitle}>
+        n/a
+      </span>
+    );
+  }
+  return <>{empty}</>;
+}
+
 export default function ReplicasPage() {
   const { t } = useTranslation();
   const { clusterId: routeCluster } = useParams();
-  const { clusterId: contextClusterId, cluster } = useCluster();
+  const { clusterId: contextClusterId } = useCluster();
   const clusterId = routeCluster ?? contextClusterId;
   const [selectedPeerName, setSelectedPeerName] = useState<string | null>(null);
 
-  // Demand-driven SSE (~2s scrape) while this page is open.
-  useReplicasEvents(clusterId ?? null);
+  const { live } = useReplicasEvents(clusterId ?? null);
 
   const replicasQuery = useQuery({
     queryKey: clusterQueryKey(clusterId ?? null, "replicas"),
     queryFn: async () => {
       const incoming = (
-        await api<ReplicasSnapshot>(clusterPath(clusterId!, "/replicas?fresh=1"))
+        await api<ReplicasSnapshot>(clusterPath(clusterId!, "/replicas"))
       ).data;
       const prev = queryClient.getQueryData<ReplicasSnapshot>(
         clusterQueryKey(clusterId!, "replicas"),
@@ -94,10 +138,10 @@ export default function ReplicasPage() {
       return isReplicasSnapshotNewer(incoming, prev) ? incoming : (prev ?? incoming);
     },
     enabled: Boolean(clusterId),
-    // SSE keeps the cache fresh; HTTP poll is only a cold-start / reconnect fallback.
     staleTime: 5_000,
-    refetchInterval: false,
-    refetchOnWindowFocus: false,
+    // While SSE is down, poll REST so online/offline does not freeze on the last frame.
+    refetchInterval: live ? false : visibilityAwareInterval(5_000),
+    refetchOnWindowFocus: !live,
   });
 
   const snap = replicasQuery.data;
@@ -131,6 +175,15 @@ export default function ReplicasPage() {
     }
   }, [peers, selectedPeerName]);
 
+  useEffect(() => {
+    if (!selectedPeerName) return;
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setSelectedPeerName(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [selectedPeerName]);
+
   const electionPeers = useMemo(
     () =>
       peers.map((p) => ({
@@ -151,30 +204,35 @@ export default function ReplicasPage() {
   });
 
   const onlineCount = peers.filter((p) => p.online).length;
-  // Sticky ghosts must not inflate reported cluster size.
   const clusterSize = snap?.clusterSize || snap?.peerCount || peers.length;
+  const quorum = clusterSize > 0 ? Math.floor(clusterSize / 2) + 1 : 0;
   const onlinePct =
     clusterSize > 0 ? Math.min(100, Math.round((onlineCount / clusterSize) * 100)) : 0;
   const onlineTone =
     clusterSize === 0 || onlineCount === 0
       ? "danger"
-      : onlineCount < Math.floor(clusterSize / 2) + 1
+      : onlineCount < quorum
         ? "warn"
         : "ok";
   const jsLeader = snap?.jetstreamLeader || t("common.emDash");
   const monitored = snap?.monitoredServer || t("common.emDash");
+  const emDash = t("common.emDash");
+  const naMonitored = t("replicas.naMonitored");
+  const naRoute = t("replicas.naRoute");
 
   const showError = replicasQuery.isError && !snap;
   const showContent = Boolean(snap) || (!replicasQuery.isLoading && !replicasQuery.isError);
+
+  const staleAt =
+    snap?.capturedAt && !Number.isNaN(Date.parse(snap.capturedAt))
+      ? new Date(snap.capturedAt).toLocaleString()
+      : null;
 
   return (
     <div className="replicas-page">
       <div className="nc-page-header">
         <div className="nc-page-header__text">
           <h1 className="nc-page-title">{t("replicas.title")}</h1>
-          <p className="nc-page-sub">
-            {t("replicas.subtitle", { name: cluster?.name ?? snap?.clusterName ?? t("systems.thisSystem") })}
-          </p>
         </div>
       </div>
 
@@ -183,11 +241,22 @@ export default function ReplicasPage() {
         <QueryErrorState error={replicasQuery.error} onRetry={() => void replicasQuery.refetch()} />
       )}
 
+      {showContent && snap && !live && (
+        <Alert variant="info">
+          {t("replicas.staleSnapshot")}
+          {staleAt ? ` ${t("replicas.staleSnapshotAt", { time: staleAt })}` : null}
+        </Alert>
+      )}
+
       {showContent && snap && (
         <>
           <div className="replicas-summary">
             <div className="replicas-card replicas-online-card">
-              <span className="replicas-card__badge">{t("replicas.online")}</span>
+              <span
+                className={`replicas-card__badge${onlineCount === 0 ? " replicas-card__badge--down" : ""}`}
+              >
+                {onlineCount === 0 ? t("replicas.down") : t("replicas.online")}
+              </span>
               <div className="replicas-card__body">
                 <div
                   className={`replicas-gauge replicas-gauge--${onlineTone}`}
@@ -205,13 +274,22 @@ export default function ReplicasPage() {
                     <ClockNumber value={clusterSize || onlineCount} />
                   </span>
                 </div>
+                {clusterSize > 0 ? (
+                  <p className="replicas-online-card__quorum mono">
+                    {t("replicas.quorumLine", {
+                      online: onlineCount,
+                      size: clusterSize,
+                      quorum,
+                    })}
+                  </p>
+                ) : null}
               </div>
             </div>
             <div className="replicas-card replicas-stat-card">
               <span className="replicas-card__badge">{t("replicas.clusterSize")}</span>
               <div className="replicas-card__body">
                 <div className="replicas-stat-card__value mono">
-                  {clusterSize > 0 ? <ClockNumber value={clusterSize} /> : t("common.emDash")}
+                  {clusterSize > 0 ? <ClockNumber value={clusterSize} /> : emDash}
                 </div>
               </div>
             </div>
@@ -256,10 +334,10 @@ export default function ReplicasPage() {
                       <th>{t("replicas.colName")}</th>
                       <th>{t("replicas.colRaft")}</th>
                       <th>{t("replicas.colRole")}</th>
-                      <th>{t("replicas.colStatus")}</th>
                       <th>{t("replicas.colUptime")}</th>
                       <th>{t("replicas.colRtt")}</th>
-                      <th>{t("replicas.colVersion")}</th>
+                      <th>{t("replicas.colIdle")}</th>
+                      <th>{t("replicas.colPending")}</th>
                       <th>{t("replicas.colConnections")}</th>
                       <th>{t("replicas.colCpu")}</th>
                       <th>{t("replicas.colMem")}</th>
@@ -268,72 +346,113 @@ export default function ReplicasPage() {
                   </thead>
                   <tbody>
                     {peers.map((peer) => {
-                      const visual = election.visualRoles[peer.name];
-                      const raftRole =
-                        !peer.online || visual === "offline"
-                          ? null
-                          : visual === "candidate" ||
-                              visual === "leader" ||
-                              visual === "follower" ||
-                              visual === "hotStandby"
-                            ? visual
-                            : null;
+                      const raftRole = monitoringRaftRole(peer, snap.jetstreamLeader);
+                      const hasMsgs = peer.inMsgs != null || peer.outMsgs != null;
                       return (
-                        <tr
-                          key={peer.name}
-                          className={
-                            selectedPeerName === peer.name ? "raft-peer-row--selected" : undefined
-                          }
-                          onClick={() =>
-                            setSelectedPeerName(selectedPeerName === peer.name ? null : peer.name)
-                          }
-                          style={{ cursor: "pointer" }}
-                        >
-                          <td className="mono">{peer.name}</td>
+                        <tr key={peer.name}>
+                          <td className="mono">
+                            <span className="replicas-peer-name">
+                              <span
+                                className={`replicas-status-dot replicas-status-dot--${peerStatusTone(peer)}`}
+                                title={peerStatusLabel(peer, t)}
+                                aria-label={peerStatusLabel(peer, t)}
+                              />
+                              {peer.name}
+                            </span>
+                          </td>
                           <td>
-                            {raftRole ? t(`replicas.election.role.${raftRole}`) : t("common.emDash")}
+                            {raftRole
+                              ? t(`replicas.election.role.${raftRole}`)
+                              : emDash}
                           </td>
                           <td>{t(`replicas.role.${peer.role}`, { defaultValue: peer.role })}</td>
-                          <td>
-                            {peer.online ? t("replicas.onlineLabel") : t("replicas.offlineLabel")}
-                            {peer.current === false && peer.online ? (
-                              <span className="text-muted"> · {t("replicas.notCurrent")}</span>
-                            ) : null}
-                          </td>
-                          <td className="mono">{peer.uptime || t("common.emDash")}</td>
-                          <td className="mono">{peer.rtt || t("common.emDash")}</td>
-                          <td className="mono">{peer.version || t("common.emDash")}</td>
+                          <td className="mono">{peer.uptime || emDash}</td>
                           <td className="mono">
-                            {peer.connections != null ? (
-                              <ClockNumber value={peer.connections} />
-                            ) : (
-                              t("common.emDash")
-                            )}
+                            <MetricCell
+                              peer={peer}
+                              scope="routeLink"
+                              hasValue={Boolean(peer.rtt)}
+                              naTitle={naMonitored}
+                              empty={emDash}
+                            >
+                              {peer.rtt}
+                            </MetricCell>
                           </td>
                           <td className="mono">
-                            {peer.cpu != null ? (
+                            <MetricCell
+                              peer={peer}
+                              scope="routeLink"
+                              hasValue={Boolean(peer.idle)}
+                              naTitle={naMonitored}
+                              empty={emDash}
+                            >
+                              {peer.idle}
+                            </MetricCell>
+                          </td>
+                          <td className="mono">
+                            <MetricCell
+                              peer={peer}
+                              scope="routeLink"
+                              hasValue={peer.pending != null}
+                              naTitle={naMonitored}
+                              empty={emDash}
+                            >
+                              <ClockNumber value={peer.pending!} />
+                            </MetricCell>
+                          </td>
+                          <td className="mono">
+                            <MetricCell
+                              peer={peer}
+                              scope="varzHealth"
+                              hasValue={peer.connections != null}
+                              naTitle={naRoute}
+                              empty={emDash}
+                            >
+                              <ClockNumber value={peer.connections!} />
+                            </MetricCell>
+                          </td>
+                          <td className="mono">
+                            <MetricCell
+                              peer={peer}
+                              scope="varzHealth"
+                              hasValue={peer.cpu != null}
+                              naTitle={naRoute}
+                              empty={emDash}
+                            >
                               <>
                                 <ClockNumber
-                                  value={Math.round(peer.cpu * 10)}
+                                  value={Math.round(peer.cpu! * 10)}
                                   format={(n) => (n / 10).toFixed(1)}
                                 />
                                 %
                               </>
-                            ) : (
-                              t("common.emDash")
-                            )}
+                            </MetricCell>
                           </td>
-                          <td className="mono">{formatMem(peer.mem)}</td>
                           <td className="mono">
-                            {peer.inMsgs != null || peer.outMsgs != null ? (
+                            <MetricCell
+                              peer={peer}
+                              scope="varzHealth"
+                              hasValue={peer.mem != null}
+                              naTitle={naRoute}
+                              empty={emDash}
+                            >
+                              {formatMem(peer.mem)}
+                            </MetricCell>
+                          </td>
+                          <td className="mono">
+                            <MetricCell
+                              peer={peer}
+                              scope="routeLink"
+                              hasValue={hasMsgs}
+                              naTitle={naMonitored}
+                              empty={emDash}
+                            >
                               <>
                                 <ClockNumber value={peer.inMsgs ?? 0} />
                                 {" / "}
                                 <ClockNumber value={peer.outMsgs ?? 0} />
                               </>
-                            ) : (
-                              t("common.emDash")
-                            )}
+                            </MetricCell>
                           </td>
                         </tr>
                       );
@@ -345,6 +464,31 @@ export default function ReplicasPage() {
           )}
         </>
       )}
+
+      <footer className="replicas-terms-wrap">
+        <p className="replicas-terms__eyebrow">{t("replicas.terms.title")}</p>
+        <dl className="replicas-terms" aria-label={t("replicas.terms.title")}>
+          {(
+            [
+              ["leader", "leaderDef"],
+              ["follower", "followerDef"],
+              ["candidate", "candidateDef"],
+              ["route", "routeDef"],
+              ["monitored", "monitoredDef"],
+              ["raft", "raftDef"],
+              ["rtt", "rttDef"],
+              ["conns", "connsDef"],
+              ["idle", "idleDef"],
+              ["pending", "pendingDef"],
+            ] as const
+          ).map(([term, def]) => (
+            <div key={term} className={`replicas-terms__item replicas-terms__item--${term}`}>
+              <dt>{t(`replicas.terms.${term}`)}</dt>
+              <dd>{t(`replicas.terms.${def}`)}</dd>
+            </div>
+          ))}
+        </dl>
+      </footer>
     </div>
   );
 }

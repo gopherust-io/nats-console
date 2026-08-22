@@ -7,7 +7,7 @@ RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS build
+FROM golang:1.27.0-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS build
 WORKDIR /src
 RUN apk add --no-cache git ca-certificates
 COPY go.mod go.sum ./
@@ -24,11 +24,8 @@ FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d650
 RUN apk add --no-cache ca-certificates
 WORKDIR /app
 COPY --from=build /out/nats-consol /app/nats-consol
-COPY migrations /app/migrations
-COPY api/openapi.yaml /app/api/openapi.yaml
 ENV HTTP_ADDR=:8080 \
-    STATIC_DIR=/app/web \
-    OPENAPI_PATH=/app/api/openapi.yaml
+    STATIC_DIR=/app/web
 COPY --from=web /src/web/dist /app/web
 EXPOSE 8080
 ENTRYPOINT ["/app/nats-consol"]

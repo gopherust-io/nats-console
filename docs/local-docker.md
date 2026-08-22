@@ -90,6 +90,8 @@ nats --server nats://127.0.0.1:4222 server list
 
 Two clusters (`east`, `west`), two nodes each, linked by **gateways**. Distinct JetStream domains (`east` / `west`).
 
+How Consol treats this mesh (register each region separately, current gaps, restore checklist): [Supercluster](./supercluster.md).
+
 ```bash
 docker compose -f docker/nats/supercluster/docker-compose.yml up -d
 ```

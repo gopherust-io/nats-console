@@ -1,48 +1,92 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "react-router";
+import { Link } from "react-router";
 import Alert from "../components/ui/Alert";
 import QueryErrorState from "../components/ui/QueryErrorState";
-import { api, clusterPath } from "../lib/api";
+import { useConnectionEvents } from "../hooks/useConnectionEvents";
+import { useAccount } from "../lib/account";
+import { api, type NATSConnectionStatus } from "../lib/api";
 import { useCluster } from "../lib/cluster";
-import { SYSTEMS_CONNECTIONS_POLL_MS, MONITORING_POLL_MS } from "../lib/constants";
+import { SYSTEMS_CONNECTIONS_POLL_MS } from "../lib/constants";
+import { formatDateTime } from "../lib/datetime";
 import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
 
-type ConnStatus = {
-  clusterId: string;
-  connected: boolean;
-};
+function SystemCardIcon({ isDefault }: { isDefault: boolean }) {
+  return (
+    <span className="nc-system-card__icon" aria-hidden="true">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+        {isDefault ? (
+          <>
+            <rect x="3" y="4" width="18" height="6" rx="1.5" />
+            <rect x="3" y="14" width="18" height="6" rx="1.5" />
+            <circle cx="7" cy="7" r="1" fill="currentColor" stroke="none" />
+            <circle cx="7" cy="17" r="1" fill="currentColor" stroke="none" />
+          </>
+        ) : (
+          <>
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4l1.4-1.4M17 7l1.4-1.4"
+              strokeLinecap="round"
+            />
+          </>
+        )}
+      </svg>
+    </span>
+  );
+}
 
 export default function SystemsPage() {
   const { t } = useTranslation();
-  const { clusters, loading, error } = useCluster();
+  const { clusters, clusterId, loading, error } = useCluster();
+  const { accounts } = useAccount();
+
+  useConnectionEvents(clusterId);
+
+  const connectionQuery = useQuery({
+    queryKey: clusterQueryKey(clusterId, "connection"),
+    queryFn: async () =>
+      (await api<NATSConnectionStatus>(`/api/v1/clusters/${encodeURIComponent(clusterId!)}/connection`))
+        .data,
+    enabled: Boolean(clusterId),
+  });
 
   const connectionsQuery = useQuery({
     queryKey: ["clusters", "connections"],
-    queryFn: async () => (await api<ConnStatus[]>("/api/v1/clusters/connections")).data ?? [],
+    queryFn: async () =>
+      (await api<NATSConnectionStatus[]>("/api/v1/clusters/connections")).data ?? [],
     refetchInterval: visibilityAwareInterval(SYSTEMS_CONNECTIONS_POLL_MS),
   });
 
   const statusById = useMemo(() => {
-    const map = new Map<string, ConnStatus>();
-    for (const c of connectionsQuery.data ?? []) {
-      map.set(c.clusterId, c);
+    const map = new Map<string, NATSConnectionStatus>();
+    for (const item of connectionsQuery.data ?? []) {
+      map.set(item.clusterId, item);
+    }
+    if (clusterId && connectionQuery.data) {
+      map.set(clusterId, connectionQuery.data);
     }
     return map;
-  }, [connectionsQuery.data]);
+  }, [connectionsQuery.data, connectionQuery.data, clusterId]);
 
   return (
-    <div>
+    <div className="nc-systems-page">
       <div className="nc-page-header">
         <div className="nc-page-header__text">
           <h1 className="nc-page-title">{t("systems.title")}</h1>
-          <p className="nc-page-sub">{t("systems.subtitle")}</p>
         </div>
       </div>
 
       {error && <Alert variant="error">{error}</Alert>}
-      {connectionsQuery.isError && (
+      {connectionQuery.isError && (
+        <QueryErrorState
+          error={connectionQuery.error}
+          title={t("errors.connectionsStatus")}
+          onRetry={() => void connectionQuery.refetch()}
+        />
+      )}
+      {connectionsQuery.isError && !connectionQuery.isError && (
         <QueryErrorState
           error={connectionsQuery.error}
           title={t("errors.connectionsStatus")}
@@ -51,95 +95,94 @@ export default function SystemsPage() {
       )}
       {loading && <p className="text-muted">{t("systems.loading")}</p>}
 
-      <div className="nc-card-grid">
-        <Link className="nc-system-card" to="/systems/clusters">
-          <div className="nc-system-card__body">
-            <div>
-              <div className="nc-system-card__name">{t("nav.clusters")}</div>
-              <div className="nc-system-card__meta">
-                <span>{t("systems.clustersCardDesc")}</span>
-              </div>
-            </div>
-          </div>
-        </Link>
-        {clusters.map((cluster) => {
-          const connected = statusById.get(cluster.id)?.connected === true;
+      <div className="nc-card-grid nc-systems-page__grid">
+        {clusters.map((item) => {
+          const accountCount = item.id === clusterId ? accounts.length : Math.max(accounts.length, 1);
+          const status = statusById.get(item.id);
+          const connected = status?.connected === true;
+          const known = status !== undefined;
+          const jetStreamOk = status?.jetstreamOk === true;
           return (
-            <Link key={cluster.id} className="nc-system-card" to={`/systems/${cluster.id}`}>
-              <div className="nc-system-card__body">
-                <div>
-                  <div className="nc-system-card__name">{cluster.name}</div>
-                  <div className="nc-system-card__meta">
-                    <span>{cluster.isDefault ? t("systems.defaultSystem") : t("systems.natsCluster")}</span>
-                  </div>
-                </div>
-                <span className={connected ? "nc-connected" : "nc-disconnected"}>
-                  {connected ? t("systems.connected") : t("systems.disconnected")}
-                </span>
+            <Link key={item.id} className="nc-system-card" to={`/systems/${item.id}`}>
+              <div className="nc-system-card__top">
+                <SystemCardIcon isDefault={item.isDefault} />
+                {connected ? (
+                  <span
+                    className="nc-conn-live"
+                    title={t("systems.availabilityHint")}
+                    aria-label={t("account.clusterStatus.available")}
+                  >
+                    <span className="nc-conn-live__dot" aria-hidden="true" />
+                    {t("account.clusterStatus.live")}
+                  </span>
+                ) : known ? (
+                  <span
+                    className="nc-conn-live nc-conn-live--down"
+                    title={t("systems.unavailabilityHint")}
+                    aria-label={t("account.clusterStatus.unavailable")}
+                  >
+                    <span className="nc-conn-live__dot" aria-hidden="true" />
+                    {t("account.clusterStatus.unavailable")}
+                  </span>
+                ) : (
+                  <span className="nc-conn-status" aria-label={t("account.unknownStatus")}>
+                    <span className="nc-conn-status__dot" aria-hidden="true" />
+                    {t("account.unknownStatus")}
+                  </span>
+                )}
               </div>
+              <div className="nc-system-card__body">
+                <div className="nc-system-card__name">{item.name}</div>
+                <div className="nc-system-card__meta">
+                  <span>{item.isDefault ? t("systems.defaultSystem") : t("systems.natsCluster")}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{t("systems.accountsCount", { count: accountCount })}</span>
+                </div>
+              </div>
+              <div
+                className="nc-system-card__stats"
+                aria-label={t("account.clusterStatus.title")}
+              >
+                <div className="nc-system-card__stat">
+                  <span className="nc-system-card__stat-label">{t("account.clusterStatus.jetStream")}</span>
+                  <span
+                    className={`nc-system-card__stat-value mono${
+                      !known
+                        ? ""
+                        : jetStreamOk
+                          ? " nc-system-card__stat-value--ok"
+                          : " nc-system-card__stat-value--danger"
+                    }`}
+                  >
+                    {!known
+                      ? t("common.emDash")
+                      : jetStreamOk
+                        ? t("common.enabled")
+                        : t("account.clusterStatus.jetStreamDown")}
+                  </span>
+                </div>
+                <div className="nc-system-card__stat">
+                  <span className="nc-system-card__stat-label">{t("account.clusterStatus.server")}</span>
+                  <span className="nc-system-card__stat-value mono">
+                    {status?.serverName || t("common.emDash")}
+                  </span>
+                </div>
+                <div className="nc-system-card__stat">
+                  <span className="nc-system-card__stat-label">{t("account.clusterStatus.lastChecked")}</span>
+                  <span className="nc-system-card__stat-value mono">
+                    {formatDateTime(status?.lastCheckedAt, t("common.emDash"))}
+                  </span>
+                </div>
+              </div>
+              {status?.lastError ? (
+                <p className="nc-system-card__error" role="status">
+                  <span className="nc-system-card__stat-label">{t("account.clusterStatus.lastError")}</span>
+                  {status.lastError}
+                </p>
+              ) : null}
             </Link>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-export function SystemUsagePage() {
-  const { t } = useTranslation();
-  const { clusterId: routeCluster } = useParams();
-  const { clusterId: contextCluster } = useCluster();
-  const id = routeCluster ?? contextCluster;
-  const accountQuery = useQuery({
-    queryKey: clusterQueryKey(id, "account"),
-    queryFn: async () => (await api(clusterPath(id!, "/account"))).data,
-    enabled: Boolean(id),
-    refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
-  });
-
-  const account = accountQuery.data as {
-    streams?: number;
-    consumers?: number;
-    storage?: number;
-    memory?: number;
-    limits?: { maxStreams?: number; maxConsumers?: number; maxStorage?: number; maxMemory?: number };
-  } | null;
-
-  function pct(used = 0, max = 0) {
-    if (!max || max < 0) return t("common.emDash");
-    return `${Math.min(100, (used / max) * 100).toFixed(1)}%`;
-  }
-
-  return (
-    <div>
-      <h1 className="nc-page-title">{t("systems.usageTitle")}</h1>
-      <p className="nc-page-sub">{t("systems.usageSubtitle")}</p>
-      {accountQuery.isError && (
-        <QueryErrorState error={accountQuery.error} onRetry={() => void accountQuery.refetch()} />
-      )}
-      <div className="nc-usage-grid">
-        <div className="nc-usage-card">
-          <div className="nc-usage-card__label">{t("systems.streams")}</div>
-          <div className="nc-usage-card__ring">{pct(account?.streams, account?.limits?.maxStreams)}</div>
-          <div className="nc-usage-card__tier">
-            {account?.streams ?? 0} / {account?.limits?.maxStreams ?? "∞"}
-          </div>
-        </div>
-        <div className="nc-usage-card">
-          <div className="nc-usage-card__label">{t("systems.consumers")}</div>
-          <div className="nc-usage-card__ring">{pct(account?.consumers, account?.limits?.maxConsumers)}</div>
-          <div className="nc-usage-card__tier">
-            {account?.consumers ?? 0} / {account?.limits?.maxConsumers ?? "∞"}
-          </div>
-        </div>
-        <div className="nc-usage-card">
-          <div className="nc-usage-card__label">{t("systems.fileStorage")}</div>
-          <div className="nc-usage-card__ring">{pct(account?.storage, account?.limits?.maxStorage)}</div>
-        </div>
-        <div className="nc-usage-card">
-          <div className="nc-usage-card__label">{t("systems.memoryStorage")}</div>
-          <div className="nc-usage-card__ring">{pct(account?.memory, account?.limits?.maxMemory)}</div>
-        </div>
       </div>
     </div>
   );

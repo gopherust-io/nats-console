@@ -1,10 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
-import ThemeSwitcher from "./ThemeSwitcher";
+import { Link, NavLink, Outlet, useLocation, useParams } from "react-router";
+import BrandLogo from "./BrandLogo";
 import NotificationsBell from "./NotificationsBell";
 import { SegHintHost } from "./Seg";
 import ErrorBoundary from "./ui/ErrorBoundary";
+import { LiquidMetalButton } from "./ui/liquid-metal-button";
 import { useAccount } from "../lib/account";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
@@ -137,10 +138,9 @@ function UserMenu() {
 
 function Breadcrumbs() {
   const { t } = useTranslation();
-  const { clusters, clusterId, setClusterId } = useCluster();
-  const { accounts, accountName, setAccountName } = useAccount();
+  const { clusters, clusterId } = useCluster();
+  const { accountName } = useAccount();
   const { clusterId: routeClusterId, accountName: routeAccount } = useParams();
-  const navigate = useNavigate();
   const location = useLocation();
 
   const onSystems = location.pathname === "/systems" || location.pathname === "/";
@@ -164,34 +164,6 @@ function Breadcrumbs() {
           <div className="nc-crumb">
             <Link to="/docs">{t("nav.docs")}</Link>
           </div>
-          {(location.pathname.startsWith("/docs/event-catalog") ||
-            location.pathname.startsWith("/docs/event-wikipedia") ||
-            location.pathname.startsWith("/docs/architecture-review") ||
-            location.pathname.startsWith("/docs/architecture-refactor") ||
-            location.pathname.startsWith("/docs/architecture-score") ||
-            location.pathname.startsWith("/docs/hidden-bottlenecks") ||
-            location.pathname.startsWith("/docs/chaos-story") ||
-            location.pathname.startsWith("/docs/architecture-generator")) &&
-            clusters.length > 0 && (
-            <>
-              <span className="nc-crumb__sep">/</span>
-              <div className="nc-crumb">
-                <select
-                  aria-label={t("nav.systemSelect")}
-                  value={clusterId ?? ""}
-                  onChange={(e) => {
-                    setClusterId(e.target.value);
-                  }}
-                >
-                  {clusters.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </>
-          )}
         </>
       )}
       {onAdmin && (
@@ -204,20 +176,7 @@ function Breadcrumbs() {
         <>
           <span className="nc-crumb__sep">/</span>
           <div className="nc-crumb">
-            <select
-              aria-label={t("nav.systemSelect")}
-              value={activeClusterId ?? ""}
-              onChange={(e) => {
-                setClusterId(e.target.value);
-                navigate(`/systems/${e.target.value}`);
-              }}
-            >
-              {clusters.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            <Link to={`/systems/${activeClusterId}`}>{t("nav.systems")}</Link>
           </div>
         </>
       )}
@@ -225,20 +184,9 @@ function Breadcrumbs() {
         <>
           <span className="nc-crumb__sep">/</span>
           <div className="nc-crumb">
-            <select
-              aria-label={t("nav.accountSelect")}
-              value={activeAccount ?? accountName}
-              onChange={(e) => {
-                setAccountName(e.target.value);
-                navigate(`/systems/${activeClusterId}/accounts/${encodeURIComponent(e.target.value)}`);
-              }}
-            >
-              {accounts.map((a) => (
-                <option key={a.name} value={a.name}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
+            <Link to={`/systems/${activeClusterId}/accounts/${encodeURIComponent(activeAccount ?? accountName)}`}>
+              {t("nav.accounts")}
+            </Link>
           </div>
         </>
       )}
@@ -299,9 +247,6 @@ function LevelTabs() {
         <NavLink to={base} end className={({ isActive }) => `nc-tab${isActive ? " active" : ""}`}>
           {t("nav.overview")}
         </NavLink>
-        <NavLink to={`${base}/usage`} className={({ isActive }) => `nc-tab${isActive ? " active" : ""}`}>
-          {t("nav.usage")}
-        </NavLink>
         <NavLink to={`${base}/replicas`} className={({ isActive }) => `nc-tab${isActive ? " active" : ""}`}>
           {t("nav.replicas")}
         </NavLink>
@@ -329,9 +274,6 @@ function LevelTabs() {
       </NavLink>
       <NavLink to={`${base}/users`} className={({ isActive }) => `nc-tab${isActive ? " active" : ""}`}>
         {t("nav.users")}
-      </NavLink>
-      <NavLink to={`${base}/access`} className={({ isActive }) => `nc-tab${isActive ? " active" : ""}`}>
-        {t("nav.access")}
       </NavLink>
       <NavLink to={`${base}/sharing`} className={({ isActive }) => `nc-tab${isActive ? " active" : ""}`}>
         {t("nav.sharing")}
@@ -374,15 +316,11 @@ export default function ConsolShell() {
     <div className="nc-shell">
       <header className="nc-topbar">
         <div className="nc-topbar__left">
-          <Link to="/systems" className="nc-topbar__brand">
-            <span className="brand__icon">
-              <span className="brand__mark">NC</span>
-            </span>
-            <span>{t("common.brand")}</span>
+          <Link to="/systems" className="nc-topbar__brand" aria-label={t("common.brandTitle")}>
+            <BrandLogo />
           </Link>
         </div>
         <div className="nc-topbar__actions">
-          <ThemeSwitcher />
           <NotificationsBell />
           <UserMenu />
         </div>
@@ -404,10 +342,30 @@ export default function ConsolShell() {
       <SegHintHost />
 
       {user && (
-        <Suspense fallback={null}>
-          <AssistantPanel />
-        </Suspense>
+        <AssistantLauncher />
       )}
     </div>
+  );
+}
+
+function AssistantLauncher() {
+  const [mounted, setMounted] = useState(false);
+  if (!mounted) {
+    return (
+      <LiquidMetalButton
+        variant="fab"
+        viewMode="icon"
+        label="AI"
+        className="assistant-fab"
+        onClick={() => setMounted(true)}
+        ariaLabel="Open NATS JetStream assistant"
+        title="JetStream AI assistant"
+      />
+    );
+  }
+  return (
+    <Suspense fallback={null}>
+      <AssistantPanel defaultOpen />
+    </Suspense>
   );
 }

@@ -3,7 +3,7 @@ package auth
 import (
 	"time"
 
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
@@ -12,21 +12,21 @@ import (
 const defaultUserCacheTTL = 5 * time.Second
 
 type userCache struct {
-	cache *ttlCache[string, store.User]
+	cache *ttlCache[string, domain.User]
 }
 
 func newUserCache(ttl time.Duration) *userCache {
 	if ttl <= 0 {
 		ttl = defaultUserCacheTTL
 	}
-	return &userCache{cache: newTTLCache[string, store.User](ttl)}
+	return &userCache{cache: newTTLCache[string, domain.User](ttl)}
 }
 
-func (c *userCache) Get(userID string) (store.User, bool) {
+func (c *userCache) Get(userID string) (domain.User, bool) {
 	return c.cache.Get(userID)
 }
 
-func (c *userCache) Set(user store.User) {
+func (c *userCache) Set(user domain.User) {
 	if strings.IsEmpty(user.ID) {
 		return
 	}

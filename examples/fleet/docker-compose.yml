@@ -2,12 +2,14 @@
 # visible in nats-consol Account → Connections.
 #
 # Included by the root nats-consol compose project (profile: fleet):
-#   make fleet-up
+#   make nats-cluster-up && make fleet-up
 #   # or: docker compose --profile fleet up -d --build
-# Cluster broker:
-#   NATS_URL=nats://nats-cluster-1:4222 docker compose --profile fleet up -d --build
 #
-# Build context is the nats-consol module root; sibling ../nats satisfies go.mod replace.
+# Default NATS_URL lists all cluster peers so clients dial randomly across
+# replicas and can reconnect when a node drops. Single broker override:
+#   FLEET_NATS_URL=nats://nats:4222 make fleet-up
+#
+# Build context is the nats-consol module root (pulls gopherust-io/nats from the module proxy).
 
 x-fleet: &fleet
   profiles: ["fleet"]
@@ -15,12 +17,11 @@ x-fleet: &fleet
   build:
     context: ../..
     dockerfile: examples/fleet/Dockerfile
-    additional_contexts:
-      nats: ../../../nats
   restart: unless-stopped
 
 x-fleet-env: &fleet-env
-  NATS_URL: ${NATS_URL:-nats://nats:4222}
+  NATS_URL: ${NATS_URL:-nats://nats-cluster-1:4222,nats://nats-cluster-2:4222,nats://nats-cluster-3:4222,nats://nats-cluster-4:4222,nats://nats-cluster-5:4222}
+  STREAM_REPLICAS: ${STREAM_REPLICAS:-1}
   TEL_ENABLE: ${TEL_ENABLE:-false}
 
 services:

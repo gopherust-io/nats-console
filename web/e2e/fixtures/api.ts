@@ -74,7 +74,9 @@ export const emptyMetricsHistory = {
   series: [],
 };
 
-export const connectedStatus = [{ clusterId: CLUSTER.id, connected: true }];
+export const connectedStatus = [
+  { clusterId: CLUSTER.id, connected: true, jetstreamOk: true, serverName: "n1" },
+];
 
 export function sampleStream(name = "ORDERS") {
   return {

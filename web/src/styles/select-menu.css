@@ -1,0 +1,228 @@
+/* Custom select — quiet console control + crisp menu */
+
+.nc-select {
+  --nc-select-pad-x: 0.8rem;
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.nc-select__trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  min-height: 2.5rem;
+  margin: 0;
+  padding: 0.4rem 0.55rem 0.4rem var(--nc-select-pad-x);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-md, 0.875rem);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.14s ease,
+    background 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
+.nc-select--sm {
+  --nc-select-pad-x: 0.7rem;
+}
+
+.nc-select--sm .nc-select__trigger {
+  min-height: 2.15rem;
+  padding-top: 0.28rem;
+  padding-bottom: 0.28rem;
+  font-size: var(--fs-base, 0.8125rem);
+}
+
+.nc-select__trigger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--text-muted) 42%, var(--border));
+  background: color-mix(in srgb, var(--text-primary) 3%, var(--bg-input));
+}
+
+.nc-select__trigger:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+.nc-select--open .nc-select__trigger {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-input));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.nc-select__trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.nc-select__trigger--placeholder .nc-select__label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.nc-select__mark {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-card) 70%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.nc-select--sm .nc-select__mark {
+  width: 1.35rem;
+  height: 1.35rem;
+  font-size: 0.62rem;
+  border-radius: 0.4rem;
+}
+
+.nc-select__value {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.nc-select__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+.nc-select__desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-2xs, 0.6875rem);
+  font-weight: 500;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.nc-select__chevron {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-left: 0.1rem;
+  color: var(--text-muted);
+  opacity: 0.85;
+  transition: transform 0.16s ease, color 0.14s ease, opacity 0.14s ease;
+}
+
+.nc-select--open .nc-select__chevron {
+  transform: rotate(180deg);
+  color: var(--text-primary);
+  opacity: 1;
+}
+
+.nc-select__menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 5px);
+  left: 0;
+  right: 0;
+  max-height: min(17rem, 52vh);
+  overflow: auto;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius-md) + 1px);
+  background: var(--bg-card);
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 42%, transparent);
+  --nc-enter-opacity: 0;
+  --nc-enter-scale: 0.98;
+  --nc-enter-translate-y: -0.25rem;
+  animation: nc-enter var(--nc-duration, 0.14s) var(--nc-ease-out, ease-out) both;
+}
+
+.nc-select__empty {
+  padding: 0.7rem 0.75rem;
+  color: var(--text-muted);
+  font-size: var(--fs-sm, 0.75rem);
+}
+
+.nc-select__option {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.45rem 0.5rem 0.45rem 0.55rem;
+  border: 0;
+  border-radius: calc(var(--radius-sm, 6px) + 1px);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.nc-select__option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.nc-select__option-label {
+  font-size: inherit;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+.nc-select__option-desc {
+  font-size: var(--fs-2xs, 0.6875rem);
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.nc-select__option--active {
+  background: color-mix(in srgb, var(--bg-input) 88%, var(--text-primary));
+}
+
+.nc-select__option--selected {
+  background: color-mix(in srgb, var(--success, #10b981) 12%, transparent);
+}
+
+.nc-select__option--selected.nc-select__option--active {
+  background: color-mix(in srgb, var(--success, #10b981) 18%, var(--bg-input));
+}
+
+.nc-select__option--selected .nc-select__mark {
+  color: color-mix(in srgb, var(--success, #10b981) 80%, var(--text-primary));
+  border-color: color-mix(in srgb, var(--success, #10b981) 35%, transparent);
+  background: color-mix(in srgb, var(--success, #10b981) 14%, var(--bg-input));
+}
+
+.nc-select__check {
+  flex: 0 0 auto;
+  width: 0.9rem;
+  height: 0.9rem;
+  display: grid;
+  place-items: center;
+  color: var(--success, #10b981);
+}
+

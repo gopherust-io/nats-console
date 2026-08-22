@@ -1,0 +1,190 @@
+/* Account overview — same dark nested-card language as Replicas */
+
+.account-page {
+  --raft-lift: none;
+  --raft-fill: var(--bg-card, #050505);
+  --raft-inner: color-mix(in srgb, #000 55%, var(--bg-card, #050505));
+  --raft-radius: var(--card-radius, 16px);
+  --raft-border: var(--card-border, 1px solid rgba(255, 255, 255, 0.09));
+  --raft-ink: #fff;
+}
+
+.account-page .replicas-summary .replicas-stat-card__value {
+  font-size: var(--fs-xl, 1.125rem);
+}
+
+.account-page .nc-page-header {
+  align-items: flex-start;
+}
+
+.account-page .nc-page-header__text {
+  min-width: 0;
+}
+
+.account-page .nc-page-sub {
+  margin: 0.35rem 0 0;
+  max-width: 36rem;
+}
+
+.account-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 1.25rem;
+  align-items: stretch;
+}
+
+.account-chart-card {
+  min-height: 0;
+  text-align: left;
+}
+
+.account-chart-card__body {
+  align-items: stretch;
+  justify-content: flex-start;
+  width: 100%;
+  min-width: 0;
+  padding-top: 0.55rem;
+}
+
+.account-chart-card .metrics-chart--embedded {
+  width: 100%;
+  min-width: 0;
+}
+
+.account-chart-card .metrics-chart__canvas,
+.account-chart-card .metrics-chart__empty {
+  width: 100%;
+}
+
+/* Recharts surfaces take focus on click and draw a browser outline around the plot. */
+.account-chart-card .recharts-wrapper,
+.account-chart-card .recharts-wrapper *,
+.account-chart-card .recharts-surface,
+.account-chart-card svg:focus,
+.account-chart-card svg:focus-visible {
+  outline: none !important;
+}
+
+.account-chart-card .recharts-wrapper:focus,
+.account-chart-card .recharts-wrapper:focus-visible,
+.account-chart-card .recharts-surface:focus,
+.account-chart-card .recharts-surface:focus-visible {
+  outline: none !important;
+  border: none;
+  box-shadow: none;
+}
+
+.account-rr-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.55rem;
+}
+
+.account-rr-grid .replicas-card {
+  min-height: 7.5rem;
+  margin: 0;
+}
+
+.account-identity-panel__head {
+  margin-bottom: 0.25rem;
+}
+
+.account-identity-panel__title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.75rem;
+}
+
+.account-identity-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: var(--fs-2xs, 0.625rem);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #9ca3af);
+  border: 1px solid color-mix(in srgb, var(--border, #555) 55%, transparent);
+  background: var(--raft-inner);
+}
+
+.account-identity-chip--default {
+  color: color-mix(in srgb, var(--accent, #3b82f6) 85%, var(--raft-ink));
+  border-color: color-mix(in srgb, var(--accent, #3b82f6) 36%, transparent);
+  background: color-mix(in srgb, var(--accent, #3b82f6) 14%, var(--raft-fill));
+}
+
+.account-identity-chip--ok {
+  color: color-mix(in srgb, var(--success, #10b981) 85%, var(--raft-ink));
+  border-color: color-mix(in srgb, var(--success, #10b981) 36%, transparent);
+  background: color-mix(in srgb, var(--success, #10b981) 14%, var(--raft-fill));
+}
+
+.account-identity-chip--unlimited {
+  color: var(--text-secondary, #9ca3af);
+  border-color: color-mix(in srgb, var(--border, #555) 45%, transparent);
+  background: color-mix(in srgb, var(--raft-fill) 70%, transparent);
+  font-weight: 600;
+}
+
+.account-limit-cards {
+  margin-top: 0.65rem;
+  margin-bottom: 0;
+}
+
+.account-limit-cards .replicas-card {
+  min-height: 10.5rem;
+}
+
+.account-limit-card__hint {
+  margin: 0.45rem 0 0.65rem;
+  font-size: var(--fs-sm, 0.75rem);
+  color: var(--text-muted, #6b7280);
+}
+
+.account-limit-cards .account-limit-bar {
+  width: min(100%, 8.5rem);
+  margin-top: 0.15rem;
+}
+
+.account-limit-cards .account-identity-chip--unlimited {
+  margin-top: 0.15rem;
+}
+
+.account-limit-bar {
+  width: 100%;
+  height: 0.35rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--border, #555) 35%, var(--raft-inner));
+}
+
+.account-limit-bar__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--success, #10b981);
+  transition: width 0.35s ease;
+}
+
+.account-limit-bar--warn .account-limit-bar__fill {
+  background: var(--warning, #d97706);
+}
+
+.account-limit-bar--danger .account-limit-bar__fill {
+  background: var(--danger, #ef4444);
+}
+
+@media (max-width: 900px) {
+  .account-charts-grid,
+  .account-rr-grid,
+  .account-limit-cards {
+    grid-template-columns: 1fr;
+  }
+}

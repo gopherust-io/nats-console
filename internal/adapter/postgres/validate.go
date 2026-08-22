@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// ValidateDatabaseURL requires a production-safe Postgres SSL mode.
 func ValidateDatabaseURL(databaseURL string) error {
 	u, err := url.Parse(databaseURL)
 	if err != nil {

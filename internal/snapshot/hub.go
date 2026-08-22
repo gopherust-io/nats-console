@@ -11,7 +11,8 @@ import (
 )
 
 // RequestReplyConnzPath is the monitoring query used for request/reply discovery.
-const RequestReplyConnzPath = "/connz?limit=1024&subs=1"
+// Must stay aligned with natsclient.RequestReplyConnzPath (subs=detail for qgroup).
+const RequestReplyConnzPath = "/connz?limit=1024&subs=detail"
 
 // TopologyJSZPath is the monitoring query used for topology / rich dashboard views.
 const TopologyJSZPath = "/jsz?streams=1&consumers=1&config=1"
@@ -149,7 +150,9 @@ func (h *Hub) Latest(clusterID string) (ClusterSnapshot, bool) {
 
 // MonitoringPayload returns a cached monitoring body for a normalized path, if present.
 // Supported: /varz, /jsz, and topology-style /jsz?streams=1&consumers=1&config=1.
-// Only the requested field is cloned (not the whole snapshot).
+//
+// The returned slice is shared and must be treated as immutable. Callers must not
+// retain a mutable alias across hub publishes; fasthttp SetBody copies on write.
 func (h *Hub) MonitoringPayload(clusterID, path string) ([]byte, time.Time, bool) {
 	if h == nil {
 		return nil, time.Time{}, false
@@ -184,9 +187,8 @@ func (h *Hub) MonitoringPayload(clusterID, path string) ([]byte, time.Time, bool
 	}
 	captured := entry.CapturedAt
 	h.mu.RUnlock()
-	out := cloneBytes(raw)
 	metrics.IncSnapshotHubHit(hit)
-	return out, captured, true
+	return raw, captured, true
 }
 
 // ProbeResultsOverlay returns cached request/reply probe results without cloning fat payloads.

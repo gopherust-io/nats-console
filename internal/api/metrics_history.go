@@ -6,6 +6,7 @@ import (
 
 	"github.com/valyala/fasthttp"
 
+	"github.com/gopherust-io/nats-consol/internal/api/apikit"
 	"github.com/gopherust-io/nats-consol/internal/app"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
@@ -21,9 +22,23 @@ func NewMetricsHistoryHandler(metrics *app.MetricsService) *MetricsHistoryHandle
 	return &MetricsHistoryHandler{metrics: metrics}
 }
 
+// History godoc
+//
+// @Summary History
+// @Tags Ops
+// @Param clusterId path string true "clusterId"
+// @Produce json
+// @Success 200 {object} MetricsHistoryEnvelope
+// @Failure 401 {object} ErrorEnvelope
+// @Failure 403 {object} ErrorEnvelope
+// @Failure 404 {object} ErrorEnvelope
+// @Security BasicAuth
+// @Security BearerAuth
+// @Security SessionCookie
+// @Router /api/v1/clusters/{clusterId}/metrics/history [get]
 func (h *MetricsHistoryHandler) History(ctx *fasthttp.RequestCtx) {
 	c := httpctx.FromRequest(ctx)
-	clusterID := clusterID(ctx)
+	clusterID := apikit.ClusterID(ctx)
 
 	to := time.Now().UTC()
 	from := to.Add(-24 * time.Hour)

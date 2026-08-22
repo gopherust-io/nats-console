@@ -7,26 +7,32 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gopherust-io/nats-consol/internal/config"
-	"github.com/gopherust-io/nats-consol/internal/metrics"
-	"github.com/gopherust-io/nats-consol/internal/store"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/metrics"
+	"github.com/gopherust-io/nats-consol/internal/repo"
 )
 
 const defaultClientCacheTTL = 5 * time.Minute
+const statusSubscriberBuffer = 4
 
 // goalign:ignore
 type Manager struct {
-	dial         singleflight.Group
-	store        *store.Store
-	cache        map[string]*cachedClient
-	credCache    map[string]cachedCredentials
-	status       map[string]*connectionState
-	views        *ViewCache
-	sweepStop    chan struct{}
-	cfg          config.Config
-	mu           sync.RWMutex
-	sweepRunning atomic.Bool
+	dial            singleflight.Group
+	db              *repo.DB
+	cache           map[string]*cachedClient
+	credCache       map[string]cachedCredentials
+	status          map[string]*connectionState
+	statusListeners map[string]map[chan domain.NATSConnectionStatus]struct{}
+	sessionGens     map[string]uint64
+	health          map[string]*healthBackoff
+	views           *ViewCache
+	sweepStop       chan struct{}
+	cfg             config.Config
+	mu              sync.RWMutex
+	sweepRunning    atomic.Bool
 }
 
 type cachedClient struct {
@@ -48,32 +54,36 @@ func (c *cachedClient) setLastUsed(t time.Time) {
 
 type cachedCredentials struct {
 	fetchedAt time.Time
-	cluster   store.Cluster
+	cluster   repo.Cluster
 }
 
-func NewManager(st *store.Store, cfg config.Config) *Manager {
-	viewTTL := cfg.JetStreamViewCacheTTL
-	if viewTTL <= 0 {
-		viewTTL = defaultViewCacheTTL
+func NewManager(db *repo.DB, cfg config.Config) *Manager {
+	return &Manager{
+		db:              db,
+		cfg:             cfg,
+		cache:           make(map[string]*cachedClient),
+		credCache:       make(map[string]cachedCredentials),
+		status:          make(map[string]*connectionState),
+		statusListeners: make(map[string]map[chan domain.NATSConnectionStatus]struct{}),
+		sessionGens:     make(map[string]uint64),
+		health:          make(map[string]*healthBackoff),
+		views:           NewViewCache(cfg.JetStreamViewCacheTTL),
 	}
-	m := &Manager{
-		store:     st,
-		cfg:       cfg,
-		cache:     make(map[string]*cachedClient),
-		credCache: make(map[string]cachedCredentials),
-		status:    make(map[string]*connectionState),
-		views:     NewViewCache(viewTTL),
-	}
-	m.startSweeper()
-	return m
 }
 
-// ViewCache returns the short-TTL JetStream/monitoring view cache.
+// RequestTimeout returns the configured per-request timeout used by scoped
+// executor helpers (WithExecutor). Zero means no wrapper timeout.
+func (m *Manager) RequestTimeout() time.Duration {
+	if m == nil {
+		return 0
+	}
+	return m.cfg.RequestTimeout
+}
+
 func (m *Manager) ViewCache() *ViewCache {
 	return m.views
 }
 
-// InvalidateViews drops cached JetStream/monitoring views for a cluster.
 func (m *Manager) InvalidateViews(clusterID string) {
 	if m == nil {
 		return
@@ -89,7 +99,7 @@ func (m *Manager) clientCacheTTL() time.Duration {
 }
 
 func (m *Manager) BootstrapDefaultCluster(ctx context.Context) error {
-	count, err := m.store.CountClusters(ctx)
+	count, err := m.db.CountClusters(ctx)
 	if err != nil {
 		return err
 	}
@@ -97,7 +107,7 @@ func (m *Manager) BootstrapDefaultCluster(ctx context.Context) error {
 		return nil
 	}
 
-	_, err = m.store.CreateCluster(ctx, store.ClusterCreate{
+	_, err = m.db.CreateCluster(ctx, repo.ClusterCreate{
 		Name:          m.cfg.DefaultClusterName,
 		NATSURL:       m.cfg.NATS.URL,
 		MonitoringURL: m.cfg.NATS.MonitoringURL,
@@ -116,18 +126,18 @@ func (m *Manager) Get(ctx context.Context, clusterID string) (*Client, error) {
 	return m.connect(ctx, cluster)
 }
 
-func (m *Manager) Test(ctx context.Context, clusterID string) (serverName string, jetstream bool, err error) {
+func (m *Manager) Test(ctx context.Context, clusterID string) (serverName string, jetStream bool, err error) {
 	return m.ping(ctx, clusterID)
 }
 
-func (m *Manager) ping(ctx context.Context, clusterID string) (serverName string, jetstream bool, err error) {
+func (m *Manager) ping(ctx context.Context, clusterID string) (serverName string, jetStream bool, err error) {
 	client, err := m.Get(ctx, clusterID)
 	if err != nil {
 		return "", false, err
 	}
 
 	if !client.IsAlive() {
-		// Drop a stale cached client and dial once more before reporting failure.
+		// Drop a stale cached client and dial once more before reporting failure
 		m.evict(clusterID)
 		client, err = m.Get(ctx, clusterID)
 		if err != nil {
@@ -162,25 +172,34 @@ func (m *Manager) Touch(clusterID string) {
 	}
 }
 
-func (m *Manager) Close() {
+func (m *Manager) Stop() {
+	m.mu.Lock()
 	if m.sweepStop != nil {
 		close(m.sweepStop)
+		m.sweepStop = nil
 	}
-	m.mu.Lock()
 	toClose := make([]*Client, 0, len(m.cache))
 	for id, entry := range m.cache {
 		toClose = append(toClose, entry.client)
 		delete(m.cache, id)
+		m.bumpSessionGenerationLocked(id)
 	}
 	m.credCache = make(map[string]cachedCredentials)
+	m.health = make(map[string]*healthBackoff)
+	for _, listeners := range m.statusListeners {
+		for ch := range listeners {
+			close(ch)
+		}
+	}
+	m.statusListeners = make(map[string]map[chan domain.NATSConnectionStatus]struct{})
 	m.mu.Unlock()
 	for _, client := range toClose {
-		client.Close()
+		_ = client.Close()
 	}
 	metrics.SetNATSConnectionsActive(0)
 }
 
-func (m *Manager) clusterCredentials(ctx context.Context, clusterID string) (store.Cluster, error) {
+func (m *Manager) clusterCredentials(ctx context.Context, clusterID string) (repo.Cluster, error) {
 	m.mu.RLock()
 	if entry, ok := m.credCache[clusterID]; ok && time.Since(entry.fetchedAt) < m.clientCacheTTL() {
 		cluster := entry.cluster
@@ -189,9 +208,9 @@ func (m *Manager) clusterCredentials(ctx context.Context, clusterID string) (sto
 	}
 	m.mu.RUnlock()
 
-	cluster, err := m.store.GetClusterCredentials(ctx, clusterID)
+	cluster, err := m.db.GetClusterCredentials(ctx, clusterID)
 	if err != nil {
-		return store.Cluster{}, err
+		return repo.Cluster{}, err
 	}
 
 	m.mu.Lock()
@@ -200,8 +219,7 @@ func (m *Manager) clusterCredentials(ctx context.Context, clusterID string) (sto
 	return cluster, nil
 }
 
-func (m *Manager) connect(ctx context.Context, cluster store.Cluster) (*Client, error) {
-	// Fast path: read lock + atomic touch (same pattern as Touch).
+func (m *Manager) connect(ctx context.Context, cluster repo.Cluster) (*Client, error) {
 	m.mu.RLock()
 	if entry, ok := m.cache[cluster.ID]; ok && time.Since(entry.lastUsed()) < m.clientCacheTTL() {
 		client := entry.client
@@ -231,7 +249,9 @@ func (m *Manager) connect(ctx context.Context, cluster store.Cluster) (*Client, 
 			m.mu.RUnlock()
 		}
 
+		dialStart := time.Now()
 		client, err := ConnectCluster(ctx, m.cfg, cluster, m.connectionHooks(cluster.ID))
+		metrics.ObserveNATSDialLatency(cluster.ID, time.Since(dialStart))
 		if err != nil {
 			metrics.IncNATSDialError(cluster.ID)
 			return nil, err
@@ -241,13 +261,14 @@ func (m *Manager) connect(ctx context.Context, cluster store.Cluster) (*Client, 
 		m.mu.Lock()
 		if old, ok := m.cache[cluster.ID]; ok {
 			oldClient = old.client
+			m.bumpSessionGenerationLocked(cluster.ID)
 		}
 		entry := &cachedClient{client: client}
 		entry.touch()
 		m.cache[cluster.ID] = entry
 		m.mu.Unlock()
 		if oldClient != nil {
-			oldClient.Close()
+			_ = oldClient.Close()
 		}
 
 		m.markConnected(cluster.ID, client)
@@ -268,9 +289,18 @@ func (m *Manager) evict(clusterID string) {
 		delete(m.cache, clusterID)
 	}
 	delete(m.credCache, clusterID)
-	delete(m.status, clusterID)
+	m.bumpSessionGenerationLocked(clusterID)
+	if st, ok := m.status[clusterID]; ok {
+		st.connected = false
+		st.jetStreamOK = false
+		st.lastCheckedAt = time.Now()
+		snap := m.snapshotLocked(clusterID)
+		m.publishStatusLocked(clusterID, snap)
+		delete(m.status, clusterID)
+	}
 	m.mu.Unlock()
 	if toClose != nil {
-		toClose.Close()
+		_ = toClose.Close()
 	}
+	metrics.SetNATSConnectionsActive(m.activeConnectionCount())
 }

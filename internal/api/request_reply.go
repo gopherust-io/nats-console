@@ -5,6 +5,7 @@ import (
 
 	"github.com/valyala/fasthttp"
 
+	"github.com/gopherust-io/nats-consol/internal/api/apikit"
 	"github.com/gopherust-io/nats-consol/internal/app"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
@@ -23,8 +24,22 @@ func NewRequestReplyHandler(svc *app.Services, hub *snapshot.Hub) *RequestReplyH
 	return &RequestReplyHandler{svc: svc, hub: hub}
 }
 
+// Snapshot godoc
+//
+// @Summary Snapshot
+// @Tags Ops
+// @Param clusterId path string true "clusterId"
+// @Produce json
+// @Success 200 {object} RequestReplyEnvelope
+// @Failure 401 {object} ErrorEnvelope
+// @Failure 403 {object} ErrorEnvelope
+// @Failure 404 {object} ErrorEnvelope
+// @Security BasicAuth
+// @Security BearerAuth
+// @Security SessionCookie
+// @Router /api/v1/clusters/{clusterId}/request-reply [get]
 func (h *RequestReplyHandler) Snapshot(ctx *fasthttp.RequestCtx) {
-	cluster := clusterID(ctx)
+	cluster := apikit.ClusterID(ctx)
 	fresh := strings.BytesToString(ctx.QueryArgs().Peek("fresh")) == "1"
 
 	var connz []byte
@@ -45,7 +60,7 @@ func (h *RequestReplyHandler) Snapshot(ctx *fasthttp.RequestCtx) {
 		c := httpctx.FromRequest(ctx)
 		client, err := h.svc.JetStream.GetExecutor(c, cluster)
 		if err != nil {
-			writeAPIError(ctx, err)
+			apikit.WriteAPIError(ctx, err)
 			return
 		}
 		data, err := client.Monitoring(c, natsclient.RequestReplyConnzPath)

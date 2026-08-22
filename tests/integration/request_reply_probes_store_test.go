@@ -7,12 +7,13 @@ import (
 	"encoding/base64"
 	"testing"
 
-	"github.com/gopherust-io/nats-consol/internal/domain"
-	"github.com/gopherust-io/nats-consol/internal/store"
-	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
-	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/repo"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
+	"github.com/gopherust-io/nats-consol/tests/testutil"
 )
 
 func TestStoreRequestReplyProbeCRUD(t *testing.T) {
@@ -65,5 +66,5 @@ func TestStoreRequestReplyProbeCRUD(t *testing.T) {
 
 	require.NoError(t, st.DeleteRequestReplyProbe(ctx, clusterID, created.ID))
 	_, err = st.GetRequestReplyProbe(ctx, clusterID, created.ID)
-	require.ErrorIs(t, err, store.ErrRequestReplyProbeNotFound)
+	require.ErrorIs(t, err, repo.ErrRequestReplyProbeNotFound)
 }

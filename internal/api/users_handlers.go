@@ -5,8 +5,8 @@ import (
 
 	"github.com/valyala/fasthttp"
 
+	"github.com/gopherust-io/nats-consol/internal/api/apikit"
 	"github.com/gopherust-io/nats-consol/internal/app"
-	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
@@ -24,23 +24,51 @@ func NewUsersHandler(svc *app.Services, cfg config.Config) *UsersHandler {
 	return &UsersHandler{svc: svc, cfg: cfg}
 }
 
+// List godoc
+//
+// @Summary List
+// @Tags Users
+// @Produce json
+// @Success 200 {object} UserListEnvelope
+// @Failure 401 {object} ErrorEnvelope
+// @Failure 403 {object} ErrorEnvelope
+// @Failure 404 {object} ErrorEnvelope
+// @Security BasicAuth
+// @Security BearerAuth
+// @Security SessionCookie
+// @Router /api/v1/users [get]
+// @Router /api/v1/people [get]
 func (h *UsersHandler) List(ctx *fasthttp.RequestCtx) {
-	actor, ok := actorFromContext(ctx)
+	actor, ok := apikit.ActorFromContext(ctx)
 	if !ok {
 		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 	users, err := h.svc.Users.List(httpctx.FromRequest(ctx), actor)
 	if err != nil {
-		writeAPIError(ctx, err)
+		apikit.WriteAPIError(ctx, err)
 		return
 	}
 	items := toUserResponses(users)
-	httpstatus.WriteDataMeta(ctx, fasthttp.StatusOK, items, totalMeta(len(items)))
+	httpstatus.WriteDataMeta(ctx, fasthttp.StatusOK, items, apikit.TotalMeta(len(items)))
 }
 
+// Create godoc
+//
+// @Summary Create
+// @Tags Users
+// @Produce json
+// @Success 201 {object} UserEnvelope
+// @Failure 401 {object} ErrorEnvelope
+// @Failure 403 {object} ErrorEnvelope
+// @Failure 404 {object} ErrorEnvelope
+// @Security BasicAuth
+// @Security BearerAuth
+// @Security SessionCookie
+// @Router /api/v1/users [post]
+// @Router /api/v1/people [post]
 func (h *UsersHandler) Create(ctx *fasthttp.RequestCtx) {
-	actor, ok := actorFromContext(ctx)
+	actor, ok := apikit.ActorFromContext(ctx)
 	if !ok {
 		httpstatus.WriteUnauthorized(ctx)
 		return
@@ -57,15 +85,15 @@ func (h *UsersHandler) Create(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	if strings.IsEmpty(req.Username) {
-		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("username"))
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, apikit.ErrMissing("username"))
 		return
 	}
-	if err := validatePassword(req.Password); err != nil {
+	if err := apikit.ValidatePassword(req.Password); err != nil {
 		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	if len(req.Roles) == 0 {
-		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("roles"))
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, apikit.ErrMissing("roles"))
 		return
 	}
 	user, err := h.svc.Users.Create(httpctx.FromRequest(ctx), actor, domain.UserCreate{
@@ -76,20 +104,34 @@ func (h *UsersHandler) Create(ctx *fasthttp.RequestCtx) {
 		AccessRules: req.AccessRules,
 	})
 	if err != nil {
-		writeAPIError(ctx, err)
+		apikit.WriteAPIError(ctx, err)
 		return
 	}
 	httpstatus.WriteData(ctx, fasthttp.StatusCreated, userResponseFromDomain(user))
 }
 
+// Update godoc
+//
+// @Summary Update
+// @Tags Users
+// @Param userId path string true "userId"
+// @Produce json
+// @Success 200 {object} UserEnvelope
+// @Failure 401 {object} ErrorEnvelope
+// @Failure 403 {object} ErrorEnvelope
+// @Failure 404 {object} ErrorEnvelope
+// @Security BasicAuth
+// @Security BearerAuth
+// @Security SessionCookie
+// @Router /api/v1/users/{userId} [put]
 func (h *UsersHandler) Update(ctx *fasthttp.RequestCtx) {
-	actor, ok := actorFromContext(ctx)
+	actor, ok := apikit.ActorFromContext(ctx)
 	if !ok {
 		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 	userID := httpctx.RouteParam(ctx, "userId")
-	if err := validateUUID(userID); err != nil {
+	if err := apikit.ValidateUUID(userID); err != nil {
 		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
@@ -108,7 +150,7 @@ func (h *UsersHandler) Update(ctx *fasthttp.RequestCtx) {
 		update.Email = req.Email
 	}
 	if req.Password != nil {
-		if err := validatePassword(*req.Password); err != nil {
+		if err := apikit.ValidatePassword(*req.Password); err != nil {
 			httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 			return
 		}
@@ -116,7 +158,7 @@ func (h *UsersHandler) Update(ctx *fasthttp.RequestCtx) {
 	}
 	if req.Roles != nil {
 		if len(req.Roles) == 0 {
-			httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("roles"))
+			httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, apikit.ErrMissing("roles"))
 			return
 		}
 		update.Roles = req.Roles
@@ -137,34 +179,62 @@ func (h *UsersHandler) Update(ctx *fasthttp.RequestCtx) {
 	}
 	user, err := h.svc.Users.Update(httpctx.FromRequest(ctx), actor, userID, update)
 	if err != nil {
-		writeAPIError(ctx, err)
+		apikit.WriteAPIError(ctx, err)
 		return
 	}
 	h.svc.Auth.InvalidateUser(httpctx.FromRequest(ctx), userID)
 	httpstatus.WriteData(ctx, fasthttp.StatusOK, userResponseFromDomain(user))
 }
 
+// Delete godoc
+//
+// @Summary Delete
+// @Tags Users
+// @Param userId path string true "userId"
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} ErrorEnvelope
+// @Failure 403 {object} ErrorEnvelope
+// @Failure 404 {object} ErrorEnvelope
+// @Security BasicAuth
+// @Security BearerAuth
+// @Security SessionCookie
+// @Router /api/v1/users/{userId} [delete]
 func (h *UsersHandler) Delete(ctx *fasthttp.RequestCtx) {
-	actor, ok := actorFromContext(ctx)
+	actor, ok := apikit.ActorFromContext(ctx)
 	if !ok {
 		httpstatus.WriteUnauthorized(ctx)
 		return
 	}
 	userID := httpctx.RouteParam(ctx, "userId")
-	if err := validateUUID(userID); err != nil {
+	if err := apikit.ValidateUUID(userID); err != nil {
 		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	if err := h.svc.Users.Delete(httpctx.FromRequest(ctx), actor, userID); err != nil {
-		writeAPIError(ctx, err)
+		apikit.WriteAPIError(ctx, err)
 		return
 	}
 	h.svc.Auth.InvalidateUser(httpctx.FromRequest(ctx), userID)
 	ctx.SetStatusCode(fasthttp.StatusNoContent)
 }
 
+// SetRoles godoc
+//
+// @Summary Set Roles
+// @Tags Users
+// @Param userId path string true "userId"
+// @Produce json
+// @Success 200 {object} UserEnvelope
+// @Failure 401 {object} ErrorEnvelope
+// @Failure 403 {object} ErrorEnvelope
+// @Failure 404 {object} ErrorEnvelope
+// @Security BasicAuth
+// @Security BearerAuth
+// @Security SessionCookie
+// @Router /api/v1/users/{userId}/roles [put]
 func (h *UsersHandler) SetRoles(ctx *fasthttp.RequestCtx) {
-	actor, ok := actorFromContext(ctx)
+	actor, ok := apikit.ActorFromContext(ctx)
 	if !ok {
 		httpstatus.WriteUnauthorized(ctx)
 		return
@@ -178,29 +248,20 @@ func (h *UsersHandler) SetRoles(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	if len(req.Roles) == 0 {
-		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, errMissing("roles"))
+		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, apikit.ErrMissing("roles"))
 		return
 	}
-	if err := validateUUID(userID); err != nil {
+	if err := apikit.ValidateUUID(userID); err != nil {
 		httpstatus.WriteError(ctx, fasthttp.StatusBadRequest, err)
 		return
 	}
 	user, err := h.svc.Users.SetRoles(httpctx.FromRequest(ctx), actor, userID, req.Roles)
 	if err != nil {
-		writeAPIError(ctx, err)
+		apikit.WriteAPIError(ctx, err)
 		return
 	}
 	h.svc.Auth.InvalidateUser(httpctx.FromRequest(ctx), userID)
 	httpstatus.WriteData(ctx, fasthttp.StatusOK, userResponseFromDomain(user))
-}
-
-func actorFromContext(ctx *fasthttp.RequestCtx) (domain.User, bool) {
-	c := httpctx.FromRequest(ctx)
-	user, ok := auth.UserFromContext(c)
-	if !ok {
-		return domain.User{}, false
-	}
-	return auth.StoreUserToDomain(user), true
 }
 
 type AuditHandler struct {
@@ -212,8 +273,21 @@ func NewAuditHandler(svc *app.Services, cfg config.Config) *AuditHandler {
 	return &AuditHandler{svc: svc, cfg: cfg}
 }
 
+// List godoc
+//
+// @Summary List
+// @Tags Audit
+// @Produce json
+// @Success 200 {object} AuditListEnvelope
+// @Failure 401 {object} ErrorEnvelope
+// @Failure 403 {object} ErrorEnvelope
+// @Failure 404 {object} ErrorEnvelope
+// @Security BasicAuth
+// @Security BearerAuth
+// @Security SessionCookie
+// @Router /api/v1/audit [get]
 func (h *AuditHandler) List(ctx *fasthttp.RequestCtx) {
-	actor, ok := actorFromContext(ctx)
+	actor, ok := apikit.ActorFromContext(ctx)
 	if !ok {
 		httpstatus.WriteUnauthorized(ctx)
 		return
@@ -227,7 +301,7 @@ func (h *AuditHandler) List(ctx *fasthttp.RequestCtx) {
 	}
 	clusterID := strings.BytesToString(ctx.QueryArgs().Peek("clusterId"))
 
-	scope, err := auditFilterForActor(actor, clusterID)
+	scope, err := apikit.AuditFilterForActor(actor, clusterID)
 	if err != nil {
 		httpstatus.WriteError(ctx, fasthttp.StatusForbidden, err)
 		return
@@ -237,8 +311,8 @@ func (h *AuditHandler) List(ctx *fasthttp.RequestCtx) {
 
 	entries, total, err := h.svc.Audit.List(httpctx.FromRequest(ctx), scope)
 	if err != nil {
-		writeAPIError(ctx, err)
+		apikit.WriteAPIError(ctx, err)
 		return
 	}
-	httpstatus.WriteDataMeta(ctx, fasthttp.StatusOK, nonNilSlice(entries), pageMeta(total, offset, limit))
+	httpstatus.WriteDataMeta(ctx, fasthttp.StatusOK, apikit.NonNilSlice(entries), apikit.PageMeta(total, offset, limit))
 }

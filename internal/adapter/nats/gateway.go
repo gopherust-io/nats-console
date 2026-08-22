@@ -7,35 +7,37 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/nats-io/nats.go"
+
 	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/metrics"
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
 	"github.com/gopherust-io/nats-consol/internal/port"
-	"github.com/gopherust-io/nats-consol/internal/store"
-	"github.com/nats-io/nats.go"
+	"github.com/gopherust-io/nats-consol/internal/repo"
 )
 
 type Gateway struct {
-	inner *natsclient.Manager
+	manager *natsclient.Manager
 }
 
 var _ port.ClusterGateway = (*Gateway)(nil)
 
-func NewGateway(inner *natsclient.Manager) *Gateway {
-	return &Gateway{inner: inner}
+func NewGateway(manager *natsclient.Manager) *Gateway {
+	return &Gateway{manager: manager}
 }
 
 func (g *Gateway) Manager() *natsclient.Manager {
-	return g.inner
+	return g.manager
 }
 
 func (g *Gateway) BootstrapDefault(ctx context.Context) error {
-	return g.inner.BootstrapDefaultCluster(ctx)
+	return g.manager.BootstrapDefaultCluster(ctx)
 }
 
 func (g *Gateway) Test(ctx context.Context, clusterID string) (domain.ClusterTestResult, error) {
-	serverName, jetstream, err := g.inner.Test(ctx, clusterID)
+	serverName, js, err := g.manager.Test(ctx, clusterID)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, repo.ErrNotFound) || errors.Is(err, domain.ErrNotFound) {
 			return domain.ClusterTestResult{}, domain.ErrNotFound
 		}
 		return domain.ClusterTestResult{
@@ -47,12 +49,12 @@ func (g *Gateway) Test(ctx context.Context, clusterID string) (domain.ClusterTes
 		OK:         true,
 		Message:    "Available",
 		ServerName: serverName,
-		JetStream:  jetstream,
+		JetStream:  js,
 	}, nil
 }
 
 func (g *Gateway) ConnectionStatus(ctx context.Context, clusterID string) (domain.NATSConnectionStatus, error) {
-	status, err := g.inner.Status(ctx, clusterID)
+	status, err := g.manager.Status(ctx, clusterID)
 	if err != nil {
 		return domain.NATSConnectionStatus{}, mapGatewayErr(err)
 	}
@@ -60,55 +62,116 @@ func (g *Gateway) ConnectionStatus(ctx context.Context, clusterID string) (domai
 }
 
 func (g *Gateway) ListConnectionStatuses(ctx context.Context) []domain.NATSConnectionStatus {
-	return g.inner.ListStatuses()
+	return g.manager.ListStatuses()
+}
+
+func (g *Gateway) SubscribeConnectionStatus(clusterID string) (updates <-chan domain.NATSConnectionStatus, latest domain.NATSConnectionStatus, unsubscribe func()) {
+	return g.manager.SubscribeStatus(clusterID)
 }
 
 func (g *Gateway) Evict(clusterID string) {
-	g.inner.Evict(clusterID)
-	g.inner.InvalidateViews(clusterID)
+	g.manager.Evict(clusterID)
+	g.manager.InvalidateViews(clusterID)
 }
 
 func (g *Gateway) Touch(clusterID string) {
-	g.inner.Touch(clusterID)
+	g.manager.Touch(clusterID)
 }
 
-func (g *Gateway) Close() {
-	g.inner.Close()
+func (g *Gateway) Stop() {
+	g.manager.Stop()
 }
 
 func (g *Gateway) InvalidateViews(clusterID string) {
-	g.inner.InvalidateViews(clusterID)
+	g.manager.InvalidateViews(clusterID)
 }
 
 func (g *Gateway) WithExecutor(ctx context.Context, clusterID string, fn func(port.JetStreamExecutor) error) error {
-	client, err := g.inner.Get(ctx, clusterID)
+	ctx, cancel := g.scopedContext(ctx)
+	defer cancel()
+
+	session, err := g.manager.Session(ctx, clusterID)
 	if err != nil {
+		metrics.IncNATSExecutorError(clusterID)
 		return mapGatewayErr(err)
 	}
-	return fn(g.wrap(clusterID, client))
+	defer func() { _ = session.Close() }()
+
+	client, err := session.Client()
+	if err != nil {
+		metrics.IncNATSExecutorError(clusterID)
+		return mapGatewayErr(err)
+	}
+
+	if err := fn(g.wrap(clusterID, client)); err != nil {
+		metrics.IncNATSExecutorError(clusterID)
+		return err
+	}
+	return nil
 }
 
 func (g *Gateway) GetExecutor(ctx context.Context, clusterID string) (port.JetStreamExecutor, error) {
-	client, err := g.inner.Get(ctx, clusterID)
+	ctx, cancel := g.scopedContext(ctx)
+	defer cancel()
+
+	session, err := g.manager.Session(ctx, clusterID)
+	if err != nil {
+		metrics.IncNATSExecutorError(clusterID)
+		return nil, mapGatewayErr(err)
+	}
+
+	client, err := session.Client()
+	if err != nil {
+		_ = session.Close()
+		metrics.IncNATSExecutorError(clusterID)
+		return nil, mapGatewayErr(err)
+	}
+
+	return g.wrap(clusterID, client), nil
+}
+
+// Session returns a live cluster session handle (session fabric). Prefer
+// WithExecutor / GetExecutor for JetStream work; use Session when callers need
+// Healthy probes or explicit lifecycle beyond a single executor callback.
+func (g *Gateway) Session(ctx context.Context, clusterID string) (*natsclient.Session, error) {
+	ctx, cancel := g.scopedContext(ctx)
+	defer cancel()
+
+	session, err := g.manager.Session(ctx, clusterID)
 	if err != nil {
 		return nil, mapGatewayErr(err)
 	}
-	return g.wrap(clusterID, client), nil
+	return session, nil
+}
+
+func (g *Gateway) scopedContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	timeout := g.manager.RequestTimeout()
+	if timeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, timeout)
 }
 
 func (g *Gateway) wrap(clusterID string, client *natsclient.Client) port.JetStreamExecutor {
 	return &cachingExecutor{
-		Executor:  Executor{client: client},
-		clusterID: clusterID,
-		views:     g.inner.ViewCache(),
-		invalidate: func() {
-			g.inner.InvalidateViews(clusterID)
+		Executor{client: client},
+		clusterID,
+		g.manager.ViewCache(),
+		func() {
+			g.manager.InvalidateViews(clusterID)
 		},
+		"",
 	}
 }
 
 func mapGatewayErr(err error) error {
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, repo.ErrNotFound) {
 		return domain.ErrNotFound
 	}
 	return err
@@ -365,6 +428,42 @@ func (e *cachingExecutor) RetryDLQMessages(ctx context.Context, stream string, r
 	return res, err
 }
 
+func (e *Executor) CaptureIncidentCapsule(ctx context.Context, stream string, req domain.IncidentCapsuleCaptureRequest) (*domain.IncidentCapsuleDetail, error) {
+	return e.client.CaptureIncidentCapsule(ctx, stream, req)
+}
+
+func (e *cachingExecutor) CaptureIncidentCapsule(ctx context.Context, stream string, req domain.IncidentCapsuleCaptureRequest) (*domain.IncidentCapsuleDetail, error) {
+	detail, err := e.client.CaptureIncidentCapsule(ctx, stream, req)
+	if err == nil {
+		e.invalidate()
+	}
+	return detail, err
+}
+
+func (e *Executor) CaptureIncidentCapsuleFromDLQ(ctx context.Context, dlqStream string, seq uint64) (*domain.IncidentCapsuleDetail, error) {
+	return e.client.CaptureIncidentCapsuleFromDLQ(ctx, dlqStream, seq)
+}
+
+func (e *cachingExecutor) CaptureIncidentCapsuleFromDLQ(ctx context.Context, dlqStream string, seq uint64) (*domain.IncidentCapsuleDetail, error) {
+	detail, err := e.client.CaptureIncidentCapsuleFromDLQ(ctx, dlqStream, seq)
+	if err == nil {
+		e.invalidate()
+	}
+	return detail, err
+}
+
+func (e *Executor) ListIncidentCapsules(ctx context.Context, stream, consumer string) ([]domain.IncidentCapsuleSummary, error) {
+	return e.client.ListIncidentCapsules(ctx, stream, consumer)
+}
+
+func (e *Executor) LoadIncidentCapsule(ctx context.Context, id, bucket string) (*domain.IncidentCapsuleDetail, error) {
+	return e.client.LoadIncidentCapsule(ctx, id, bucket)
+}
+
+func (e *Executor) PreviewIncidentCapsule(ctx context.Context, id, bucket string) (*domain.IncidentCapsuleDryRun, error) {
+	return e.client.PreviewIncidentCapsule(ctx, id, bucket)
+}
+
 func (e *Executor) Monitoring(ctx context.Context, path string) ([]byte, error) {
 	return e.client.Monitoring(ctx, path)
 }
@@ -376,7 +475,12 @@ func (e *Executor) ProbeRequest(ctx context.Context, subject string, format doma
 func (e *cachingExecutor) Monitoring(ctx context.Context, path string) ([]byte, error) {
 	key := natsclient.ViewCacheKey(e.clusterID, "monitoring", path)
 	v, etag, err := e.views.GetOrLoad(key, func() (any, error) {
-		return e.client.Monitoring(ctx, path)
+		raw, err := e.client.Monitoring(ctx, path)
+		if err != nil {
+			metrics.IncNATSMonitoringProxyError(e.clusterID)
+			return nil, err
+		}
+		return raw, nil
 	})
 	if err != nil {
 		return nil, err

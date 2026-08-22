@@ -3,10 +3,19 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	libnats "github.com/gopherust-io/nats"
 )
+
+func streamReplicas() int {
+	n, err := strconv.Atoi(envOr("STREAM_REPLICAS", "1"))
+	if err != nil || n < 1 {
+		return 1
+	}
+	return n
+}
 
 const (
 	dlqStreamName = "ORDERS_DLQ"
@@ -20,6 +29,10 @@ const (
 	objMediaBucket      = "fleet-media"
 	orderShardPrefix    = "orders.shard"
 	orderShardCount     = 2
+
+	// Host-side default: all 5-node lab client ports (make nats-cluster-up).
+	// Override with NATS_URL=nats://127.0.0.1:4222 for a single broker.
+	defaultFleetNATSURL = "nats://127.0.0.1:4222,nats://127.0.0.1:4223,nats://127.0.0.1:4224,nats://127.0.0.1:4225,nats://127.0.0.1:4226"
 )
 
 type streamDef struct {
@@ -82,11 +95,12 @@ func ensureTopology(ctx context.Context, client libnats.Client) error {
 		if s.Name == dlqStreamName {
 			maxAge = 7 * 24 * time.Hour
 		}
+		replicas := streamReplicas()
 		if _, err := client.Streams().CreateOrUpdateStream(ctx, libnats.StreamConfig{
 			Name:            s.Name,
 			Subjects:        s.Subjects,
-			Replicas:        1,
-			Storage:         libnats.MemoryStorage,
+			Replicas:        replicas,
+			Storage:         libnats.FileStorage,
 			Retention:       s.Retention,
 			MaxAge:          maxAge,
 			Discard:         libnats.DiscardOld,
@@ -113,12 +127,14 @@ func ensureTopology(ctx context.Context, client libnats.Client) error {
 		}
 	}
 
+	replicas := streamReplicas()
 	if _, err := client.KV().CreateOrUpdate(ctx, libnats.KeyValueConfig{
 		Bucket:      kvIdempotencyBucket,
 		Description: "fleet payment idempotency claims",
 		TTL:         10 * time.Minute,
 		History:     1,
-		Storage:     libnats.MemoryStorage,
+		Storage:     libnats.FileStorage,
+		Replicas:    replicas,
 	}); err != nil {
 		return fmt.Errorf("kv %s: %w", kvIdempotencyBucket, err)
 	}
@@ -127,7 +143,8 @@ func ensureTopology(ctx context.Context, client libnats.Client) error {
 		Description: "fleet user projector snapshots",
 		TTL:         24 * time.Hour,
 		History:     1,
-		Storage:     libnats.MemoryStorage,
+		Storage:     libnats.FileStorage,
+		Replicas:    replicas,
 	}); err != nil {
 		return fmt.Errorf("kv %s: %w", kvUsersBucket, err)
 	}
@@ -136,7 +153,8 @@ func ensureTopology(ctx context.Context, client libnats.Client) error {
 			Bucket:      objMediaBucket,
 			Description: "fleet media transcoder blobs",
 			TTL:         24 * time.Hour,
-			Storage:     libnats.MemoryStorage,
+			Storage:     libnats.FileStorage,
+			Replicas:    replicas,
 		}); createErr != nil {
 			return fmt.Errorf("object store %s: %w", objMediaBucket, createErr)
 		}
@@ -145,17 +163,25 @@ func ensureTopology(ctx context.Context, client libnats.Client) error {
 }
 
 func buildFleetConfig() libnats.Config {
-	cfg := libnats.ProdWorkerConfig()
-	cfg.Conn.Address = envOr("NATS_URL", "nats://127.0.0.1:4222")
+	cfg := libnats.DefaultConfig()
+	// Comma-separated peers: nats.go randomizes dial order (DontRandomize=false)
+	// so services spread across replicas and can reconnect to survivors.
+	cfg.Conn.Address = envOr("NATS_URL", defaultFleetNATSURL)
+	cfg.Conn.DontRandomize = false
+	cfg.Conn.AllowReconnect = true
 	cfg.Conn.ClientName = clientNameFor(fleetServiceName())
 
 	// Shared SERVICE=all process: pool off so push handlers are not collapsed
 	// into the first registered worker (poolOnce). Single-service Docker
 	// containers re-enable pool via buildConfigForService.
 	cfg.RuntimeConsumer.WorkerPoolEnabled = false
+	cfg.RuntimeConsumer.WorkerPoolSize = 8
+	cfg.RuntimeConsumer.WorkerBufferSize = 256
 	cfg.RuntimeConsumer.AckWait = ackWait
 	cfg.RuntimeConsumer.IdleHeartbeat = 0
 	cfg.RuntimeConsumer.FlowControl = false
+	cfg.RuntimeConsumer.PendingMsgLimit = 1000
+	cfg.RuntimeConsumer.PendingMsgBuffer = 10 << 20
 
 	cfg.Backpressure.Mode = libnats.BackpressureNak
 	cfg.Backpressure.MaxAckPending = 1000

@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog"
 
 	libnats "github.com/gopherust-io/nats"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 type fleetEvent struct {
@@ -29,7 +30,7 @@ type fleetEvent struct {
 var runID = strconv.FormatInt(time.Now().UnixNano(), 10)
 
 func envOr(key, fallback string) string {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(key)); !commonstrings.IsEmpty(v) {
 		return v
 	}
 	return fallback
@@ -37,7 +38,7 @@ func envOr(key, fallback string) string {
 
 func rateScale() float64 {
 	raw := strings.TrimSpace(os.Getenv("RATE_SCALE"))
-	if raw == "" {
+	if commonstrings.IsEmpty(raw) {
 		return 1
 	}
 	v, err := strconv.ParseFloat(raw, 64)

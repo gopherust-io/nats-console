@@ -1,32 +1,32 @@
 package live
 
 import (
-	"encoding/base64"
 	"strconv"
 	"time"
 	"unicode/utf8"
 
+	"github.com/cloudwego/base64x"
 	"github.com/nats-io/nats.go"
 
 	"github.com/gopherust-io/nats-consol/pkg/common/bufpool"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 func encodeLiveFrame(frame liveFrame) ([]byte, error) {
 	scratch := bufpool.Get()
-	defer bufpool.Put(scratch)
 	buf := *scratch
 
 	buf = append(buf, `{"type":`...)
 	buf = appendJSONString(buf, frame.Type.String())
-	if frame.Subject != "" {
+	if !commonstrings.IsEmpty(frame.Subject) {
 		buf = append(buf, `,"subject":`...)
 		buf = appendJSONString(buf, frame.Subject)
 	}
-	if frame.Time != "" {
+	if !commonstrings.IsEmpty(frame.Time) {
 		buf = append(buf, `,"time":`...)
 		buf = appendJSONString(buf, frame.Time)
 	}
-	if frame.Data != "" {
+	if !commonstrings.IsEmpty(frame.Data) {
 		buf = append(buf, `,"data":`...)
 		buf = appendJSONString(buf, frame.Data)
 	}
@@ -34,7 +34,7 @@ func encodeLiveFrame(frame liveFrame) ([]byte, error) {
 		buf = append(buf, `,"headers":`...)
 		buf = appendJSONHeaders(buf, frame.Headers)
 	}
-	if frame.Error != "" {
+	if !commonstrings.IsEmpty(frame.Error) {
 		buf = append(buf, `,"error":`...)
 		buf = appendJSONString(buf, frame.Error)
 	}
@@ -43,11 +43,12 @@ func encodeLiveFrame(frame liveFrame) ([]byte, error) {
 		buf = strconv.AppendUint(buf, frame.Seq, 10)
 	}
 	buf = append(buf, '}')
-	*scratch = buf
 
-	out := make([]byte, len(buf))
-	copy(out, buf)
-	return out, nil
+	// Take ownership of the pooled buffer so callers get a single allocation
+	// without a final memcpy. Replace the pool slot with a fresh small buffer.
+	*scratch = make([]byte, 0, 512)
+	bufpool.Put(scratch)
+	return buf, nil
 }
 
 // EncodeMessageFrame encodes a live message frame for benchmarks and tests.
@@ -55,26 +56,9 @@ func EncodeMessageFrame(seq uint64, subject string, payload []byte, now time.Tim
 	return encodeMessageFrame(seq, subject, payload, headers, now)
 }
 
-func headerMapFromNATS(h nats.Header) map[string]string {
-	if len(h) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(h))
-	for k, vals := range h {
-		if len(vals) > 0 {
-			out[k] = vals[0]
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
 func encodeMessageFrame(seq uint64, subject string, payload []byte, headers map[string]string, now time.Time) ([]byte, error) {
-	scratch := bufpool.Get()
-	defer bufpool.Put(scratch)
-	buf := *scratch
+	n := base64x.StdEncoding.EncodedLen(len(payload))
+	buf := make([]byte, 0, messageFrameCap(subject, n, headerMapBytesHint(headers)))
 
 	buf = append(buf, `{"type":"message","seq":`...)
 	buf = strconv.AppendUint(buf, seq, 10)
@@ -83,11 +67,9 @@ func encodeMessageFrame(seq uint64, subject string, payload []byte, headers map[
 	buf = append(buf, `,"time":"`...)
 	buf = now.UTC().AppendFormat(buf, time.RFC3339Nano)
 	buf = append(buf, `","data":"`...)
-	n := base64.StdEncoding.EncodedLen(len(payload))
 	start := len(buf)
 	buf = growSlice(buf, n)
-	base64.StdEncoding.Encode(buf[start:start+n], payload)
-	buf = buf[:start+n]
+	base64x.StdEncoding.Encode(buf[start:start+n], payload)
 	buf = append(buf, '"')
 
 	if len(headers) > 0 {
@@ -95,12 +77,71 @@ func encodeMessageFrame(seq uint64, subject string, payload []byte, headers map[
 		buf = appendJSONHeaders(buf, headers)
 	}
 
-	buf = append(buf, '}')
-	*scratch = buf
+	return append(buf, '}'), nil
+}
 
-	out := make([]byte, len(buf))
+// encodeMessageFrameFromNATS encodes without materializing a header map.
+func encodeMessageFrameFromNATS(seq uint64, subject string, payload []byte, headers nats.Header, now time.Time) ([]byte, error) {
+	n := base64x.StdEncoding.EncodedLen(len(payload))
+	buf := make([]byte, 0, messageFrameCap(subject, n, natsHeaderBytesHint(headers)))
+
+	buf = append(buf, `{"type":"message","seq":`...)
+	buf = strconv.AppendUint(buf, seq, 10)
+	buf = append(buf, `,"subject":`...)
+	buf = appendJSONString(buf, subject)
+	buf = append(buf, `,"time":"`...)
+	buf = now.UTC().AppendFormat(buf, time.RFC3339Nano)
+	buf = append(buf, `","data":"`...)
+	start := len(buf)
+	buf = growSlice(buf, n)
+	base64x.StdEncoding.Encode(buf[start:start+n], payload)
+	buf = append(buf, '"')
+
+	if len(headers) > 0 {
+		buf = append(buf, `,"headers":`...)
+		buf = appendJSONNATSHeaders(buf, headers)
+	}
+
+	return append(buf, '}'), nil
+}
+
+func growSlice(buf []byte, n int) []byte {
+	if cap(buf)-len(buf) >= n {
+		return buf[:len(buf)+n]
+	}
+	out := make([]byte, len(buf)+n, len(buf)+n+1024)
 	copy(out, buf)
-	return out, nil
+	return out
+}
+
+func messageFrameCap(subject string, b64Len, headersHint int) int {
+	// Fixed JSON keys + RFC3339Nano time + quotes/commas, with slack for escaping.
+	return 96 + len(subject)*2 + b64Len + headersHint
+}
+
+func headerMapBytesHint(headers map[string]string) int {
+	if len(headers) == 0 {
+		return 0
+	}
+	n := 16
+	for k, v := range headers {
+		n += len(k)*2 + len(v)*2 + 8
+	}
+	return n
+}
+
+func natsHeaderBytesHint(headers nats.Header) int {
+	if len(headers) == 0 {
+		return 0
+	}
+	n := 16
+	for k, vals := range headers {
+		if len(vals) == 0 {
+			continue
+		}
+		n += len(k)*2 + len(vals[0])*2 + 8
+	}
+	return n
 }
 
 func appendJSONHeaders(dst []byte, headers map[string]string) []byte {
@@ -118,13 +159,22 @@ func appendJSONHeaders(dst []byte, headers map[string]string) []byte {
 	return append(dst, '}')
 }
 
-func growSlice(buf []byte, n int) []byte {
-	if cap(buf)-len(buf) >= n {
-		return buf[:len(buf)+n]
+func appendJSONNATSHeaders(dst []byte, headers nats.Header) []byte {
+	dst = append(dst, '{')
+	first := true
+	for k, vals := range headers {
+		if len(vals) == 0 {
+			continue
+		}
+		if !first {
+			dst = append(dst, ',')
+		}
+		first = false
+		dst = appendJSONString(dst, k)
+		dst = append(dst, ':')
+		dst = appendJSONString(dst, vals[0])
 	}
-	out := make([]byte, len(buf)+n, len(buf)+n+1024)
-	copy(out, buf)
-	return out
+	return append(dst, '}')
 }
 
 func appendJSONString(dst []byte, s string) []byte {

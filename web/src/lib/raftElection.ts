@@ -1,10 +1,10 @@
-export type RaftVisualRole = "follower" | "hotStandby" | "candidate" | "leader" | "offline";
+export type RaftVisualRole = "follower" | "candidate" | "leader" | "offline";
 
 export type RaftElectionPeer = {
   name: string;
   online: boolean;
   leader?: boolean;
-  /** JetStream meta current flag; false means lagging (shown as follower, not hot standby). */
+  /** JetStream meta current flag; false means lagging (Status shows “not current”). */
   current?: boolean;
 };
 
@@ -26,6 +26,8 @@ export type ElectionOverlay = {
   fromLeader?: string;
   toLeader?: string;
   candidate?: string;
+  /** True while waiting for JetStream meta after leader went offline. */
+  optimistic?: boolean;
 };
 
 export type ElectionStep = {
@@ -35,6 +37,7 @@ export type ElectionStep = {
   fromLeader?: string;
   toLeader?: string;
   candidate?: string;
+  optimistic?: boolean;
 };
 
 /** Timings for a full live/simulate sequence (~1.5s). */
@@ -76,38 +79,88 @@ export function diffLeaderChange(
 }
 
 export function planElectionSequence(
-  peers: RaftElectionPeer[],
+  _peers: RaftElectionPeer[],
   fromLeader: string | undefined,
   toLeader: string,
 ): ElectionStep[] {
-  const candidate = pickCandidate(peers, fromLeader, toLeader) ?? toLeader;
+  // Always promote the meta winner — never a guessed online standby.
   return [
     {
       phase: "demoting",
       holdMs: ELECTION_HOLD_MS.demoting,
       fromLeader,
       toLeader,
-      candidate,
+      candidate: toLeader,
     },
     {
       phase: "candidate",
       holdMs: ELECTION_HOLD_MS.candidate,
       fromLeader,
       toLeader,
-      candidate,
+      candidate: toLeader,
     },
     {
       phase: "promoting",
       holdMs: ELECTION_HOLD_MS.promoting,
       fromLeader,
       toLeader,
-      candidate,
+      candidate: toLeader,
     },
     {
       phase: "settled",
       holdMs: 0,
       fromLeader,
-      toLeader: toLeader,
+      toLeader,
+      candidate: toLeader,
+    },
+  ];
+}
+
+/**
+ * Start election theater as soon as the leader goes offline.
+ * Do not invent a provisional winner — NATS may elect any online peer.
+ * Hold until JetStream meta reports the real leader (planSettleFromCandidate).
+ */
+export function planOptimisticElection(
+  peers: RaftElectionPeer[],
+  fromLeader: string | undefined,
+): ElectionStep[] | null {
+  const hasStandby = peers.some((p) => p.online && p.name !== fromLeader);
+  if (!hasStandby) return null;
+  return [
+    {
+      phase: "demoting",
+      holdMs: ELECTION_HOLD_MS.demoting,
+      fromLeader,
+      optimistic: true,
+    },
+    {
+      phase: "candidate",
+      holdMs: 0,
+      fromLeader,
+      optimistic: true,
+    },
+  ];
+}
+
+/** Finish an optimistic election once meta publishes the real leader. */
+export function planSettleFromCandidate(
+  fromLeader: string | undefined,
+  toLeader: string,
+): ElectionStep[] {
+  return [
+    {
+      phase: "promoting",
+      holdMs: ELECTION_HOLD_MS.promoting,
+      fromLeader,
+      toLeader,
+      candidate: toLeader,
+    },
+    {
+      phase: "settled",
+      holdMs: 0,
+      fromLeader,
+      toLeader,
       candidate: toLeader,
     },
   ];
@@ -126,11 +179,6 @@ export function pickSimulateTarget(
   return { from, to };
 }
 
-export function standbyRole(peer: RaftElectionPeer): Exclude<RaftVisualRole, "leader" | "candidate" | "offline"> {
-  // Caught-up (or unknown current) non-leaders are hot standbys; lagging peers stay followers.
-  return peer.current === false ? "follower" : "hotStandby";
-}
-
 export function applyVisualRoles(
   peers: RaftElectionPeer[],
   leader: string | undefined,
@@ -138,7 +186,6 @@ export function applyVisualRoles(
 ): Record<string, RaftVisualRole> {
   const roles: Record<string, RaftVisualRole> = {};
   const phase = overlay?.phase ?? "stable";
-  // leaderUnreachable: keep reported meta leader; do not invent a candidate.
   const effectiveLeader =
     phase === "demoting" || phase === "candidate"
       ? undefined
@@ -151,6 +198,11 @@ export function applyVisualRoles(
       roles[peer.name] = "offline";
       continue;
     }
+    // Optimistic wait: every online peer is campaigning — do not invent a winner.
+    if (phase === "candidate" && overlay?.optimistic) {
+      roles[peer.name] = "candidate";
+      continue;
+    }
     if (phase === "candidate" || phase === "promoting") {
       if (overlay?.candidate && peer.name === overlay.candidate) {
         roles[peer.name] = phase === "candidate" ? "candidate" : "leader";
@@ -161,11 +213,7 @@ export function applyVisualRoles(
       roles[peer.name] = "leader";
       continue;
     }
-    if (phase === "demoting" && overlay?.fromLeader && peer.name === overlay.fromLeader) {
-      roles[peer.name] = standbyRole(peer);
-      continue;
-    }
-    roles[peer.name] = standbyRole(peer);
+    roles[peer.name] = "follower";
   }
 
   // During promoting/settled ensure toLeader is leader even if not in overlay.candidate path.
@@ -182,7 +230,11 @@ export function electionCaptionKey(overlay: ElectionOverlay | null | undefined):
   if (!overlay || overlay.phase === "stable") return "replicas.election.captionStable";
   if (overlay.phase === "leaderUnreachable") return "replicas.election.captionLeaderUnreachable";
   if (overlay.phase === "demoting") return "replicas.election.captionDemoting";
-  if (overlay.phase === "candidate") return "replicas.election.captionCandidate";
+  if (overlay.phase === "candidate") {
+    return overlay.optimistic
+      ? "replicas.election.captionElecting"
+      : "replicas.election.captionCandidate";
+  }
   if (overlay.phase === "promoting") return "replicas.election.captionPromoting";
   return "replicas.election.captionSettled";
 }

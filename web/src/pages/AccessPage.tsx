@@ -1,10 +1,13 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
 import Alert from "../components/ui/Alert";
+import SelectMenu from "../components/ui/SelectMenu";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
+import { useAccount } from "../lib/account";
 import { api, clusterPath, UserRecord } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import "../styles/access.css";
 
 type AccessGrant = {
   id: string;
@@ -16,21 +19,34 @@ type AccessGrant = {
   role: string;
 };
 
-type Props = {
-  scope: "system" | "account";
-};
+type AccessScope = "system" | "account";
 
-export default function AccessPage({ scope }: Props) {
+function roleToneClass(role: string): string {
+  if (role === "admin") return "access-role-chip--admin";
+  if (role === "credential_downloader") return "access-role-chip--cred";
+  return "access-role-chip--observer";
+}
+
+/** Canonical Access lives at /systems/:clusterId/access — scope via ?scope=&account=. */
+export default function AccessPage() {
   const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { askConfirm, confirmDialog } = useConfirmDialog();
-  const { clusterId, accountName } = useParams();
+  const { clusterId } = useParams();
+  const { accounts, accountName: ctxAccount } = useAccount();
   const { canManageSystemAccess, canManageAccountAccess } = useAuth();
+
+  const scope: AccessScope = searchParams.get("scope") === "account" ? "account" : "system";
+  const selectedAccount = searchParams.get("account") || ctxAccount || "Default";
+
   const [grants, setGrants] = useState<AccessGrant[]>([]);
   const [people, setPeople] = useState<UserRecord[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ userId: "", role: scope === "system" ? "observer" : "observer" });
-  const [manualUserId, setManualUserId] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ userId: "", role: "observer" });
+
+  const account = scope === "account" ? selectedAccount : "";
 
   const roles = useMemo(
     () =>
@@ -46,37 +62,51 @@ export default function AccessPage({ scope }: Props) {
           ],
     [scope, t],
   );
-  const account = accountName || t("common.default");
+
   const canMutateAccess = Boolean(
     clusterId &&
       (scope === "system"
         ? canManageSystemAccess(clusterId)
-        : canManageAccountAccess(clusterId, account)),
+        : account && canManageAccountAccess(clusterId, account)),
   );
 
   const accessPath = useCallback(() => {
     if (!clusterId) return "";
     if (scope === "system") return clusterPath(clusterId, "/access");
+    if (!account) return "";
     return clusterPath(clusterId, `/accounts/${encodeURIComponent(account)}/access`);
   }, [clusterId, scope, account]);
 
   const loadGenRef = useRef(0);
 
   const load = useCallback(async () => {
-    if (!clusterId) return;
+    if (!clusterId || !accessPath()) return;
     const gen = ++loadGenRef.current;
     setError("");
+    setLoading(true);
     try {
-      const [grantRes, peopleRes] = await Promise.all([
+      const [grantRes, peopleOutcome] = await Promise.all([
         api<AccessGrant[]>(accessPath()),
-        api<UserRecord[]>("/api/v1/people").catch(() => ({ data: [] as UserRecord[] })),
+        api<UserRecord[]>("/api/v1/people").then(
+          (res) => ({ ok: true as const, res }),
+          (err: unknown) => ({ ok: false as const, err }),
+        ),
       ]);
       if (gen !== loadGenRef.current) return;
       setGrants(grantRes.data ?? []);
-      setPeople(peopleRes.data ?? []);
+      if (peopleOutcome.ok) {
+        setPeople(peopleOutcome.res.data ?? []);
+      } else {
+        setPeople([]);
+        const peopleErr =
+          peopleOutcome.err instanceof Error ? peopleOutcome.err.message : t("access.loadFailed");
+        setError(peopleErr);
+      }
     } catch (err) {
       if (gen !== loadGenRef.current) return;
       setError(err instanceof Error ? err.message : t("access.loadFailed"));
+    } finally {
+      if (gen === loadGenRef.current) setLoading(false);
     }
   }, [clusterId, accessPath, t]);
 
@@ -86,13 +116,25 @@ export default function AccessPage({ scope }: Props) {
     setPeople([]);
     setError("");
     setForm({ userId: "", role: "observer" });
-    setManualUserId(false);
     void load();
   }, [load]);
 
+  function goScope(next: AccessScope) {
+    if (next === "system") {
+      setSearchParams({}, { replace: true });
+      return;
+    }
+    const acct = selectedAccount || ctxAccount || "Default";
+    setSearchParams({ scope: "account", account: acct }, { replace: true });
+  }
+
+  function onAccountChange(name: string) {
+    setSearchParams({ scope: "account", account: name }, { replace: true });
+  }
+
   async function onAdd(event: FormEvent) {
     event.preventDefault();
-    if (!form.userId) return;
+    if (!form.userId || !accessPath()) return;
     setSaving(true);
     setError("");
     try {
@@ -119,9 +161,10 @@ export default function AccessPage({ scope }: Props) {
         setSaving(true);
         setError("");
         try {
-          await api(`${accessPath()}/${encodeURIComponent(grant.id)}?userId=${encodeURIComponent(grant.userId)}`, {
-            method: "DELETE",
-          });
+          await api(
+            `${accessPath()}/${encodeURIComponent(grant.id)}?userId=${encodeURIComponent(grant.userId)}`,
+            { method: "DELETE" },
+          );
           await load();
         } catch (err) {
           setError(err instanceof Error ? err.message : t("access.revokeFailed"));
@@ -150,150 +193,206 @@ export default function AccessPage({ scope }: Props) {
 
   const roleLabel = (role: string) => roles.find((r) => r.value === role)?.label ?? role;
 
+  const personOptions = useMemo(
+    () =>
+      people
+        .filter((p) => !p.isRoot)
+        .map((p) => ({
+          value: p.id,
+          label: p.username,
+          description: p.email || undefined,
+        })),
+    [people],
+  );
+
+  const accountOptions = useMemo(() => {
+    const opts = accounts.map((a) => ({ value: a.name, label: a.name }));
+    if (opts.every((o) => o.value !== selectedAccount)) {
+      opts.push({ value: selectedAccount, label: selectedAccount });
+    }
+    return opts;
+  }, [accounts, selectedAccount]);
+
+  const roleOptions = useMemo(
+    () => roles.map((r) => ({ value: r.value, label: r.label })),
+    [roles],
+  );
+
   return (
-    <div>
+    <div className="access-page">
       {confirmDialog}
       <div className="nc-page-header">
         <div className="nc-page-header__text">
           <h1 className="nc-page-title">{t("access.title")}</h1>
-          <p className="nc-page-sub">
-            {scope === "system"
-              ? t("access.subtitleSystem")
-              : t("access.subtitleAccount", { account })}
-          </p>
+          <p className="nc-page-sub">{t("access.subtitleUnified")}</p>
         </div>
       </div>
 
       {error && <Alert variant="error">{error}</Alert>}
 
-      {canMutateAccess && (
-      <form className="nc-settings-section" onSubmit={onAdd}>
-        <h4>{t("access.addUser")}</h4>
-        <div className="nc-form-row">
-          <label htmlFor="access-person">{t("access.person")}</label>
-          <div className="nc-form-actions">
-            {people.length > 0 && !manualUserId ? (
-              <select
-                id="access-person"
-                value={form.userId}
-                onChange={(e) => setForm({ ...form, userId: e.target.value })}
-                required
-              >
-                <option value="">{t("access.selectPerson")}</option>
-                {people
-                  .filter((p) => !p.isRoot)
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.username}
-                      {p.email ? ` (${p.email})` : ""}
-                    </option>
-                  ))}
-              </select>
-            ) : (
-              <input
-                id="access-person"
-                value={form.userId}
-                onChange={(e) => setForm({ ...form, userId: e.target.value })}
-                placeholder={t("access.userUuid")}
-                required
-              />
-            )}
-            {people.length > 0 && (
-              <button
-                type="button"
-                className="btn secondary btn--small"
-                onClick={() => setManualUserId((v) => !v)}
-              >
-                {manualUserId ? t("access.pickFromList") : t("access.enterUserId")}
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="nc-form-row">
-          <label htmlFor="access-role">{t("access.role")}</label>
-          <select
-            id="access-role"
-            value={form.role}
-            onChange={(e) => setForm({ ...form, role: e.target.value })}
+      <div className="nc-toolbar">
+        <h3 className="nc-section-title access-toolbar-title">
+          {t("access.grantsTitle")}
+          {!loading && (
+            <span className="access-count" aria-label={t("access.grantCount", { count: grants.length })}>
+              {grants.length}
+            </span>
+          )}
+        </h3>
+      </div>
+
+      <div className="access-scope-bar">
+        <div className="nc-subtabs" role="tablist" aria-label={t("access.scopeTabs")}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={scope === "system"}
+            className={`nc-subtab${scope === "system" ? " active" : ""}`}
+            onClick={() => goScope("system")}
           >
-            {roles.map((r) => (
-              <option key={r.value} value={r.value}>
-                {r.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="actions">
-          <button className="btn" type="submit" disabled={saving || !form.userId}>
-            {t("access.addUser")}
+            {t("access.tabCluster")}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={scope === "account"}
+            className={`nc-subtab${scope === "account" ? " active" : ""}`}
+            onClick={() => goScope("account")}
+          >
+            {t("access.tabAccount")}
           </button>
         </div>
-      </form>
+        {scope === "account" && (
+          <div className="access-account-inline">
+            <SelectMenu
+              id="access-account"
+              aria-label={t("access.account")}
+              value={selectedAccount}
+              options={accountOptions}
+              onChange={onAccountChange}
+              size="sm"
+            />
+          </div>
+        )}
+      </div>
+
+      <p className="access-scope-hint">
+        {scope === "system"
+          ? t("access.subtitleSystem")
+          : t("access.subtitleAccount", { account: selectedAccount })}
+      </p>
+
+      {canMutateAccess && (
+        <form className="nc-settings-section access-add-form" onSubmit={onAdd}>
+          <h4>{t("access.addUser")}</h4>
+          <div className="access-add-grid">
+            <div className="nc-form-row">
+              <label htmlFor="access-person">{t("access.person")}</label>
+              <SelectMenu
+                id="access-person"
+                value={form.userId}
+                options={personOptions}
+                placeholder={
+                  personOptions.length === 0 ? t("access.noPeople") : t("access.selectPerson")
+                }
+                disabled={personOptions.length === 0}
+                onChange={(userId) => setForm({ ...form, userId })}
+              />
+            </div>
+            <div className="nc-form-row access-add-role">
+              <label htmlFor="access-role">{t("access.role")}</label>
+              <SelectMenu
+                id="access-role"
+                value={form.role}
+                options={roleOptions}
+                onChange={(role) => setForm({ ...form, role })}
+              />
+            </div>
+          </div>
+          <div className="actions">
+            <button className="btn" type="submit" disabled={saving || !form.userId}>
+              {t("access.addUser")}
+            </button>
+          </div>
+        </form>
       )}
 
-      <div className="nc-settings-section">
-        <h4>{t("access.grantsTitle")}</h4>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>{t("access.person")}</th>
-                <th>{t("access.role")}</th>
-                {canMutateAccess && <th />}
-              </tr>
-            </thead>
-            <tbody>
-              {grants.length === 0 && (
+      <div className="nc-settings-section access-grants-section">
+        {loading ? (
+          <p className="nc-settings-section__empty">{t("common.loading")}</p>
+        ) : grants.length === 0 ? (
+          <div className="access-empty">
+            <p className="access-empty__title">{t("access.empty")}</p>
+            <p className="access-empty__hint">
+              {canMutateAccess ? t("access.emptyHint") : t("access.emptyHintReadonly")}
+            </p>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="access-grants-table">
+              <thead>
                 <tr>
-                  <td colSpan={canMutateAccess ? 3 : 2} className="text-muted">
-                    {t("access.empty")}
-                  </td>
+                  <th>{t("access.person")}</th>
+                  <th>{t("access.role")}</th>
+                  {canMutateAccess && <th className="access-col-actions" />}
                 </tr>
-              )}
-              {grants.map((grant) => (
-                <tr key={grant.id}>
-                  <td>
-                    <div>{grant.username ?? grant.userId}</div>
-                    {grant.email && <div className="text-muted text-sm">{grant.email}</div>}
-                  </td>
-                  <td>
-                    {canMutateAccess ? (
-                      <select
-                        value={grant.role}
-                        disabled={saving}
-                        onChange={(e) => void onUpdateRole(grant, e.target.value)}
-                        aria-label={t("access.roleFor", { name: grant.username ?? grant.userId })}
-                      >
-                        {roles.map((r) => (
-                          <option key={r.value} value={r.value}>
-                            {r.label}
-                          </option>
-                        ))}
-                        {!roles.some((r) => r.value === grant.role) && (
-                          <option value={grant.role}>{roleLabel(grant.role)}</option>
+              </thead>
+              <tbody>
+                {grants.map((grant) => {
+                  const label = roleLabel(grant.role);
+                  const grantRoleOptions = roleOptions.some((r) => r.value === grant.role)
+                    ? roleOptions
+                    : [...roleOptions, { value: grant.role, label }];
+                  return (
+                    <tr key={grant.id}>
+                      <td>
+                        <div className="access-person">
+                          <span className="access-person__name">
+                            {grant.username ?? grant.userId}
+                          </span>
+                          {grant.email && (
+                            <span className="access-person__meta">{grant.email}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        {canMutateAccess ? (
+                          <SelectMenu
+                            className="access-role-select"
+                            size="sm"
+                            value={grant.role}
+                            options={grantRoleOptions}
+                            disabled={saving}
+                            aria-label={t("access.roleFor", {
+                              name: grant.username ?? grant.userId,
+                            })}
+                            onChange={(role) => void onUpdateRole(grant, role)}
+                          />
+                        ) : (
+                          <span className={`access-role-chip ${roleToneClass(grant.role)}`}>
+                            {label}
+                          </span>
                         )}
-                      </select>
-                    ) : (
-                      roleLabel(grant.role)
-                    )}
-                  </td>
-                  {canMutateAccess && (
-                    <td>
-                      <button
-                        className="btn secondary btn--small"
-                        type="button"
-                        disabled={saving}
-                        onClick={() => void onRevoke(grant)}
-                      >
-                        {t("common.revoke")}
-                      </button>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                      {canMutateAccess && (
+                        <td className="access-col-actions">
+                          <button
+                            className="btn danger btn--small"
+                            type="button"
+                            disabled={saving}
+                            onClick={() => void onRevoke(grant)}
+                          >
+                            {t("common.revoke")}
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

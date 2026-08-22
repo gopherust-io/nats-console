@@ -14,8 +14,7 @@ import {
 } from "../lib/architectureRefactor";
 import { fetchAssistantConfig } from "../lib/assistant";
 import { useCluster } from "../lib/cluster";
-import { MONITORING_POLL_MS } from "../lib/constants";
-import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
+import { clusterQueryKey } from "../lib/query";
 
 export default function ArchitectureRefactorPage() {
   const { t } = useTranslation();
@@ -42,9 +41,10 @@ export default function ArchitectureRefactorPage() {
       seed.subject ?? "",
     ],
     queryFn: () =>
-      fetchArchitectureRefactor(clusterId!, { fresh: true, ...seed }),
+      fetchArchitectureRefactor(clusterId!, { ...seed }),
     enabled: Boolean(clusterId) && !forceSample,
-    refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
+    staleTime: 5 * 60_000,
+    refetchInterval: false,
   });
 
   const assistantConfigQuery = useQuery({
@@ -54,7 +54,7 @@ export default function ArchitectureRefactorPage() {
   });
 
   const demo = useMemo(() => demoArchitectureRefactor(), []);
-  const useDemo = forceSample || !clusterId || planQuery.isError;
+  const useDemo = forceSample || !clusterId;
   const plan: ArchitectureRefactorPlan = useDemo ? demo : (planQuery.data ?? demo);
   const sample = useDemo;
   const aiEnabled = Boolean(assistantConfigQuery.data?.aiEnabled) && Boolean(clusterId) && !sample;
@@ -105,7 +105,7 @@ export default function ArchitectureRefactorPage() {
       {clusterId && planQuery.isLoading && !forceSample && !planQuery.data && (
         <div className="skeleton skeleton--panel" />
       )}
-      {(forceSample || !planQuery.isLoading || planQuery.data || !clusterId) && (
+      {(forceSample || (!planQuery.isError && (!planQuery.isLoading || planQuery.data)) || !clusterId) && (
         <ArchitectureRefactorPanel
           plan={plan}
           reply={aiReply}

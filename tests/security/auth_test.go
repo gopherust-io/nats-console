@@ -10,10 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/stretchr/testify/require"
+
+	"github.com/gopherust-io/nats-consol/internal/repo"
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/nats-consol/tests/testutil"
-	"github.com/stretchr/testify/require"
 )
 
 func TestProtectedRoutesRequireAuth(t *testing.T) {
@@ -63,11 +64,11 @@ func TestViewerCannotMutateStreams(t *testing.T) {
 	stack := testutil.SetupStack(t)
 	ctx := context.Background()
 
-	viewer, err := stack.Store.CreateUser(ctx, store.UserCreate{
+	viewer, err := stack.Store.CreateUser(ctx, repo.UserCreate{
 		Username:    "viewer-user",
 		Email:       "viewer@example.com",
 		Password:    "viewer-pass",
-		Roles:       []string{store.RoleViewer},
+		Roles:       []string{repo.RoleViewer},
 		AccessRules: stack.ClusterAccessRules(t),
 	})
 	require.NoError(t, err)
@@ -93,11 +94,11 @@ func TestOperatorCannotMutateJetStream(t *testing.T) {
 	stack := testutil.SetupStack(t)
 	ctx := context.Background()
 
-	_, err := stack.Store.CreateUser(ctx, store.UserCreate{
+	_, err := stack.Store.CreateUser(ctx, repo.UserCreate{
 		Username:    "op-js",
 		Email:       "op-js@example.com",
 		Password:    "op-pass",
-		Roles:       []string{store.RoleOperator},
+		Roles:       []string{repo.RoleOperator},
 		AccessRules: stack.ClusterAccessRules(t),
 	})
 	require.NoError(t, err)
@@ -159,20 +160,20 @@ func TestOperatorCannotManageUsers(t *testing.T) {
 	stack := testutil.SetupStack(t)
 	ctx := context.Background()
 
-	op, err := stack.Store.CreateUser(ctx, store.UserCreate{
+	op, err := stack.Store.CreateUser(ctx, repo.UserCreate{
 		Username:    "operator-user",
 		Email:       "op@example.com",
 		Password:    "op-pass",
-		Roles:       []string{store.RoleOperator},
+		Roles:       []string{repo.RoleOperator},
 		AccessRules: stack.ClusterAccessRules(t),
 	})
 	require.NoError(t, err)
 
-	viewer, err := stack.Store.CreateUser(ctx, store.UserCreate{
+	viewer, err := stack.Store.CreateUser(ctx, repo.UserCreate{
 		Username:    "target-viewer",
 		Email:       "target@example.com",
 		Password:    "v-pass",
-		Roles:       []string{store.RoleViewer},
+		Roles:       []string{repo.RoleViewer},
 		AccessRules: stack.ClusterAccessRules(t),
 	})
 	require.NoError(t, err)

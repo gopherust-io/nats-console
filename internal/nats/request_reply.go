@@ -1,6 +1,7 @@
 package natsclient
 
 import (
+	"encoding/json"
 	"math"
 	"sort"
 	"strings"
@@ -11,24 +12,73 @@ import (
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
-const RequestReplyConnzPath = "/connz?limit=1024&subs=1"
+// RequestReplyConnzPath scrapes connz with subscription detail so queue groups
+// (qgroup) are available. NATS keeps the subscription *count* in
+// "subscriptions" and puts subjects in subscriptions_list(_detail).
+const RequestReplyConnzPath = "/connz?limit=1024&subs=detail"
 
 type connzPayload struct {
 	Connections []connzConnection `json:"connections"`
 }
 
 type connzConnection struct {
-	Name          string              `json:"name"`
-	Account       string              `json:"account"`
-	Rtt           string              `json:"rtt"`
-	Subscriptions []connzSubscription `json:"subscriptions"`
-	CID           int                 `json:"cid"`
-	PendingBytes  int                 `json:"pending_bytes"`
+	Name                    string           `json:"name"`
+	Account                 string           `json:"account"`
+	Rtt                     string           `json:"rtt"`
+	SubscriptionsRaw        json.RawMessage  `json:"subscriptions"`
+	SubscriptionsList       []string         `json:"subscriptions_list"`
+	SubscriptionsListDetail []connzSubDetail `json:"subscriptions_list_detail"`
+	CID                     int              `json:"cid"`
+	PendingBytes            int              `json:"pending_bytes"`
+}
+
+type connzSubDetail struct {
+	Subject string `json:"subject"`
+	Queue   string `json:"queue"`
+	QGroup  string `json:"qgroup"`
 }
 
 type connzSubscription struct {
 	Subject string `json:"subject"`
 	Queue   string `json:"queue"`
+}
+
+// subscriptions resolves the several shapes NATS /connz has used over time:
+//   - legacy: "subscriptions": [{subject, queue}]
+//   - subs=1: "subscriptions": <count>, "subscriptions_list": ["subj", ...]
+//   - subs=detail: "subscriptions": <count>, "subscriptions_list_detail": [{subject, qgroup}]
+func (c connzConnection) subscriptions() []connzSubscription {
+	if len(c.SubscriptionsListDetail) > 0 {
+		out := make([]connzSubscription, 0, len(c.SubscriptionsListDetail))
+		for _, d := range c.SubscriptionsListDetail {
+			queue := d.QGroup
+			if commonstrings.IsEmpty(queue) {
+				queue = d.Queue
+			}
+			out = append(out, connzSubscription{Subject: d.Subject, Queue: queue})
+		}
+		return out
+	}
+	if len(c.SubscriptionsList) > 0 {
+		out := make([]connzSubscription, 0, len(c.SubscriptionsList))
+		for _, subject := range c.SubscriptionsList {
+			out = append(out, connzSubscription{Subject: subject})
+		}
+		return out
+	}
+	raw := c.SubscriptionsRaw
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	// Count-only form ("subscriptions": 2) — ignore; lists above carry subjects.
+	if raw[0] != '[' {
+		return nil
+	}
+	var legacy []connzSubscription
+	if err := serializer.Unmarshal(raw, &legacy); err != nil {
+		return nil
+	}
+	return legacy
 }
 
 type patternKey struct {
@@ -37,14 +87,14 @@ type patternKey struct {
 }
 
 // ptrSlab batches optional JSON pointer values so addresses stay valid
-// when capacity is reserved up front (no realloc during take*).
+// when capacity is reserved up front (no realloc during take*)
 type ptrSlab struct {
 	floats []float64
 	bools  []bool
 }
 
 func (s *ptrSlab) f64(v float64) *float64 {
-	// Never grow past reserved capacity: append realloc would invalidate prior pointers.
+	// Never grow past reserved capacity: append realloc would invalidate prior pointers
 	if len(s.floats) == cap(s.floats) {
 		p := new(float64)
 		*p = v
@@ -64,7 +114,7 @@ func (s *ptrSlab) boolean(v bool) *bool {
 	return &s.bools[len(s.bools)-1]
 }
 
-// BuildRequestReplySnapshot aggregates connz subscriptions into request/reply patterns.
+// BuildRequestReplySnapshot aggregates connz subscriptions into request/reply patterns
 func BuildRequestReplySnapshot(raw []byte, probeResults []domain.RequestReplyProbeResult) domain.RequestReplySnapshot {
 	var payload connzPayload
 	if err := serializer.Unmarshal(raw, &payload); err != nil {
@@ -74,11 +124,14 @@ func BuildRequestReplySnapshot(raw []byte, probeResults []domain.RequestReplyPro
 		}
 	}
 
+	resolved := make([][]connzSubscription, len(payload.Connections))
 	subCount := 0
-	for _, conn := range payload.Connections {
-		subCount += len(conn.Subscriptions)
+	for i, conn := range payload.Connections {
+		subs := conn.subscriptions()
+		resolved[i] = subs
+		subCount += len(subs)
 	}
-	// Cap covers: per-conn RTT, per-pattern min/med/max/probe latency, snapshot median/maxProbe.
+	// Cap covers: per-conn RTT, per-pattern min/med/max/probe latency, snapshot median/maxProbe
 	slab := ptrSlab{
 		floats: make([]float64, 0, len(payload.Connections)+subCount*4+2),
 		bools:  make([]bool, 0, subCount),
@@ -89,15 +142,18 @@ func BuildRequestReplySnapshot(raw []byte, probeResults []domain.RequestReplyPro
 		probeBySubject[result.Subject] = result
 	}
 
-	requesterCIDs := make(map[int]struct{})
-	responderCIDs := make(map[int]struct{})
-	patternResponders := make(map[patternKey]map[int]struct{})
-	patternRtts := make(map[patternKey][]float64)
-	var connections []domain.RequestReplyConnection
-	var participantRtts []float64
+	var (
+		requesterCIDs     = make(map[int]struct{})
+		responderCIDs     = make(map[int]struct{})
+		patternResponders = make(map[patternKey]map[int]struct{})
+		patternRtts       = make(map[patternKey][]float64)
+		connections       []domain.RequestReplyConnection
+		participantRtts   []float64
+	)
 
-	for _, conn := range payload.Connections {
-		inboxSubs, serviceSubs := classifySubscriptions(conn.Subscriptions)
+	for i, conn := range payload.Connections {
+		subs := resolved[i]
+		inboxSubs, serviceSubs := classifySubscriptions(subs)
 		isRequester := len(inboxSubs) > 0
 		isResponder := len(serviceSubs) > 0
 		if !isRequester && !isResponder {
@@ -115,7 +171,7 @@ func BuildRequestReplySnapshot(raw []byte, probeResults []domain.RequestReplyPro
 			participantRtts = append(participantRtts, rttMs)
 		}
 
-		for _, sub := range conn.Subscriptions {
+		for _, sub := range subs {
 			if isInternalSubject(sub.Subject) || isInboxSubject(sub.Subject) {
 				continue
 			}
@@ -227,7 +283,7 @@ func isInternalSubject(subject string) bool {
 		isInboxSubject(subject)
 }
 
-// ParseRttMs converts NATS connz RTT strings (e.g. "1.23ms") to milliseconds.
+// ParseRttMs converts NATS connz RTT strings (e.g. "1.23ms") to milliseconds
 func ParseRttMs(rtt string) (float64, bool) {
 	rtt = strings.TrimSpace(rtt)
 	if commonstrings.IsEmpty(rtt) {

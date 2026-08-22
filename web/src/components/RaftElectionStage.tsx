@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { motion, useReducedMotion } from "motion/react";
 import ClockNumber from "./ui/ClockNumber";
@@ -23,7 +24,6 @@ type Props = {
 const ROLE_CLASS: Record<RaftVisualRole, string> = {
   leader: "raft-node--leader",
   candidate: "raft-node--candidate",
-  hotStandby: "raft-node--hot-standby",
   follower: "raft-node--follower",
   offline: "raft-node--offline",
 };
@@ -45,14 +45,20 @@ export default function RaftElectionStage({
 }: Props) {
   const { t } = useTranslation();
   const reduceMotion = Boolean(useReducedMotion());
+
+  useEffect(() => {
+    if (selectedName && !peers.some((p) => p.name === selectedName)) {
+      onSelect(null);
+    }
+  }, [peers, selectedName, onSelect]);
+
   const selected = selectedName ? peers.find((p) => p.name === selectedName) : undefined;
-  // Offline is Status only — RAFT column stays empty when the peer is down.
-  // Prefer stage visualRoles so candidate/overlay matches the table.
   const selectedVisual = selectedName ? visualRoles[selectedName] : undefined;
   const selectedRaftRole: RaftVisualRole | undefined =
     selected && selected.online && selectedVisual && selectedVisual !== "offline"
       ? selectedVisual
       : undefined;
+  const reconstructed = phase !== "stable";
 
   return (
     <section className="raft-election" aria-label={t("replicas.election.title")}>
@@ -62,9 +68,12 @@ export default function RaftElectionStage({
       <p className="raft-election__caption" aria-live="polite">
         {caption}
       </p>
+      {reconstructed ? (
+        <p className="raft-election__hint">{t("replicas.election.reconstructedHint")}</p>
+      ) : null}
       <div className="raft-election__stage" data-phase={phase}>
         {nodes.map((node) => {
-          const role = visualRoles[node.name] ?? (node.online ? "hotStandby" : "offline");
+          const role = visualRoles[node.name] ?? (node.online ? "follower" : "offline");
           const isSelected = selectedName === node.name;
           const animate = reduceMotion
             ? { scale: 1 }
@@ -137,7 +146,9 @@ export default function RaftElectionStage({
               <dd>
                 {selected.online ? t("replicas.onlineLabel") : t("replicas.offlineLabel")}
                 {selected.current === false && selected.online
-                  ? ` · ${t("replicas.notCurrent")}`
+                  ? selected.lag != null
+                    ? ` · ${t("replicas.laggingWithLag", { lag: selected.lag })}`
+                    : ` · ${t("replicas.lagging")}`
                   : ""}
               </dd>
             </div>

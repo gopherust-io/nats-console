@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog"
 
 	libnats "github.com/gopherust-io/nats"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 type fleetService struct {
@@ -70,7 +71,7 @@ func startSelectedServices(ctx context.Context, client libnats.Client, want stri
 		return nil
 	}
 
-	if want == "" || want == "all" {
+	if commonstrings.IsEmpty(want) || want == "all" {
 		for _, s := range services {
 			if err := startOne(s); err != nil {
 				return err

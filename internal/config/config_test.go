@@ -30,6 +30,7 @@ func requiredEnv(t *testing.T, overrides map[string]string) map[string]string {
 	t.Helper()
 	priv, pub := mustSessionPEMs(t)
 	m := map[string]string{
+		"PROJECT_NAME":        "nats-console",
 		"DATABASE_URL":        "postgres://u:p@db.example:5432/natsconsol?sslmode=verify-full",
 		"ADMIN_PASSWORD":      "not-admin",
 		"ENCRYPTION_KEY":      "long-enough-secret-key",
@@ -38,6 +39,8 @@ func requiredEnv(t *testing.T, overrides map[string]string) map[string]string {
 		"NATS_URL":            "tls://nats.example:4222",
 		"NATS_TOKEN":          "secret-token",
 		"NATS_MONITORING_URL": "https://nats.example:8222",
+		"SMTP_HOST":           "smtp.example.com",
+		"SMTP_PORT":           "587",
 	}
 	maps.Copy(m, overrides)
 	return m
@@ -122,6 +125,14 @@ func TestValidateAcceptsSecureConfig(t *testing.T) {
 	cfg.PublicBaseURL = "https://example.com"
 	cfg.AdminPassword = "admin"
 	require.Error(t, cfg.Validate(), "default admin password should fail")
+}
+
+func TestValidateRejectsDefaultAdminInProduction(t *testing.T) {
+	t.Setenv("ENV", "production")
+	cfg := validConfig(t)
+	cfg.PublicBaseURL = "http://localhost:8080"
+	cfg.AdminPassword = "admin"
+	require.Error(t, cfg.Validate(), "default admin password should fail in production even without HTTPS")
 }
 
 func TestTLSEnabled(t *testing.T) {

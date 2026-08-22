@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useParams } from "react-router";
@@ -6,8 +6,6 @@ import Alert from "../components/ui/Alert";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import QueryErrorState from "../components/ui/QueryErrorState";
 import CreateConsumerPanel, { ConsumerConfigPayload } from "../components/CreateConsumerPanel";
-import ReplayDryRunPanel from "../components/ReplayDryRunPanel";
-import BehaviorFingerprintPanel from "../components/BehaviorFingerprintPanel";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { Seg, SegBtn } from "../components/Seg";
 import {
@@ -35,6 +33,10 @@ import {
   findingMatchesConsumer,
   HIDDEN_BOTTLENECKS_HREF,
 } from "../lib/hiddenBottlenecks";
+
+const ReplayDryRunPanel = lazy(() => import("../components/ReplayDryRunPanel"));
+const BehaviorFingerprintPanel = lazy(() => import("../components/BehaviorFingerprintPanel"));
+const IncidentCapsulePanel = lazy(() => import("../components/IncidentCapsulePanel"));
 
 type ConsumerDetailData = {
   info: ConsumerInfo;
@@ -200,12 +202,6 @@ export default function ConsumerDetailPage() {
       setReplaySeq(String(hint));
     }
   }, [info]);
-
-  useEffect(() => {
-    if (detailQuery.isError && !detailQuery.data) {
-      setError("");
-    }
-  }, [detailQuery.isError, detailQuery.data]);
 
   function deleteConsumer() {
     if (!id) return;
@@ -384,7 +380,12 @@ export default function ConsumerDetailPage() {
   }
 
   if (!info) {
-    return <div>{error || "Loading..."}</div>;
+    if (detailQuery.isError) {
+      return (
+        <QueryErrorState error={detailQuery.error} onRetry={() => void detailQuery.refetch()} />
+      );
+    }
+    return <div>{error || t("common.loading")}</div>;
   }
 
   const replayConfirmOpen = Boolean(replayConfirmBody);
@@ -407,17 +408,19 @@ export default function ConsumerDetailPage() {
                 ? t("streams.confirmSidecarReplay", { name: consumer })
                 : t("streams.confirmResetConsumer", { name: consumer })}
             </p>
-            <ReplayDryRunPanel
-              data={dryRunQuery.data}
-              loading={dryRunQuery.isFetching}
-              error={
-                dryRunQuery.error instanceof Error
-                  ? dryRunQuery.error.message
-                  : dryRunQuery.isError
-                    ? "error"
-                    : null
-              }
-            />
+            <Suspense fallback={null}>
+              <ReplayDryRunPanel
+                data={dryRunQuery.data}
+                loading={dryRunQuery.isFetching}
+                error={
+                  dryRunQuery.error instanceof Error
+                    ? dryRunQuery.error.message
+                    : dryRunQuery.isError
+                      ? "error"
+                      : null
+                }
+              />
+            </Suspense>
           </>
         }
         confirmLabel={replayConfirmIsSidecar ? t("consumer.replay") : t("streams.reset")}
@@ -558,18 +561,31 @@ export default function ConsumerDetailPage() {
       </div>
 
       <div className="mt-32">
-        <BehaviorFingerprintPanel
-          durable={info.name}
-          data={fingerprint}
-          loading={fingerprintQuery.isLoading}
-          error={
-            fingerprintQuery.isError
-              ? fingerprintQuery.error instanceof Error
-                ? fingerprintQuery.error.message
-                : "error"
-              : null
-          }
-        />
+        <Suspense fallback={null}>
+          <BehaviorFingerprintPanel
+            durable={info.name}
+            data={fingerprint}
+            loading={fingerprintQuery.isLoading}
+            error={
+              fingerprintQuery.isError
+                ? fingerprintQuery.error instanceof Error
+                  ? fingerprintQuery.error.message
+                  : "error"
+                : null
+            }
+          />
+        </Suspense>
+      </div>
+
+      <div className="mt-32">
+        <Suspense fallback={null}>
+          <IncidentCapsulePanel
+            clusterId={id!}
+            streamName={name}
+            consumer={info.name}
+            canManage={canManageJS}
+          />
+        </Suspense>
       </div>
 
       <div

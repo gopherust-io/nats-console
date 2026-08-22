@@ -16,7 +16,7 @@ import (
 
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/domain"
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
@@ -110,10 +110,10 @@ func TestAuthenticateAcceptsBearerRS256(t *testing.T) {
 	ctx.Request.Header.Set("Authorization", "Bearer placeholder")
 
 	fph := mw.requestFingerprint(ctx)
-	token, err := svc.CreateSession(context.Background(), store.User{
+	token, err := svc.CreateSession(context.Background(), domain.User{
 		ID:       "user-1",
 		Username: "alice",
-		Roles:    []string{store.RoleAdmin},
+		Roles:    []string{domain.RoleAdmin},
 	}, fph)
 	require.NoError(t, err)
 	ctx.Request.Header.Set("Authorization", "Bearer "+token)

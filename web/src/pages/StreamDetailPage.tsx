@@ -2,10 +2,9 @@ import { FormEvent, KeyboardEvent, lazy, Suspense, useCallback, useEffect, useMe
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
-import CreateConsumerPanel, { ConsumerConfigPayload } from "../components/CreateConsumerPanel";
-import CreateStreamPanel, { StreamConfigPayload } from "../components/CreateStreamPanel";
+import type { ConsumerConfigPayload } from "../components/CreateConsumerPanel";
+import type { StreamConfigPayload } from "../components/CreateStreamPanel";
 import BlastRadiusPanel from "../components/BlastRadiusPanel";
-import DlqPanel from "../components/DlqPanel";
 import LinedTextarea from "../components/LinedTextarea";
 import MessageDownloadMenu from "../components/MessageDownloadMenu";
 import MessageImportButton from "../components/MessageImportButton";
@@ -65,6 +64,9 @@ import { isFromNaming, NAMING_LOCATION_STATE, NAMING_TOPOLOGY_HREF } from "../li
 import { GENOME_LOCATION_STATE, GENOME_TOPOLOGY_HREF, isFromGenome } from "../lib/eventGenome";
 
 const MetricsTimeSeriesChart = lazy(() => import("../components/metrics/MetricsTimeSeriesChart"));
+const DlqPanel = lazy(() => import("../components/DlqPanel"));
+const CreateStreamPanel = lazy(() => import("../components/CreateStreamPanel"));
+const CreateConsumerPanel = lazy(() => import("../components/CreateConsumerPanel"));
 
 type StreamTab = "overview" | "consumers" | "messages" | "dlq";
 
@@ -282,8 +284,8 @@ export default function StreamDetailPage() {
       );
       return { consumers: r.data ?? [], total: r.meta?.total ?? 0 };
     },
-    enabled: Boolean(id && name),
-    refetchInterval: visibilityAwareInterval(STREAM_STATE_POLL_MS),
+    enabled: Boolean(id && name) && tab === "consumers",
+    refetchInterval: tab === "consumers" ? visibilityAwareInterval(STREAM_STATE_POLL_MS) : false,
   });
 
   const consumers = consumersQuery.data?.consumers ?? [];
@@ -731,29 +733,33 @@ export default function StreamDetailPage() {
         }
       />
 
-      {(streamQuery.isError || consumersQuery.isError) && (
+      {(streamQuery.isError || (tab === "consumers" && consumersQuery.isError)) && (
         <QueryErrorState
           error={streamQuery.error ?? consumersQuery.error}
           onRetry={() => {
             void streamQuery.refetch();
-            void consumersQuery.refetch();
+            if (tab === "consumers") void consumersQuery.refetch();
           }}
         />
       )}
       {error && <Alert variant="error">{error}</Alert>}
 
-      <CreateStreamPanel
-        mode="edit"
-        open={editOpen}
-        initial={stream.config}
-        busy={editBusy}
-        error={editError}
-        onClose={() => {
-          setEditOpen(false);
-          setEditError("");
-        }}
-        onSubmit={saveStreamConfig}
-      />
+      {editOpen && (
+        <Suspense fallback={null}>
+          <CreateStreamPanel
+            mode="edit"
+            open={editOpen}
+            initial={stream.config}
+            busy={editBusy}
+            error={editError}
+            onClose={() => {
+              setEditOpen(false);
+              setEditError("");
+            }}
+            onSubmit={saveStreamConfig}
+          />
+        </Suspense>
+      )}
 
       <ConfirmDialog
         open={confirmAction === "delete"}
@@ -915,18 +921,22 @@ export default function StreamDetailPage() {
           </div>
           <p className="text-muted mb-12">{t("consumer.clientRecommend")}</p>
 
-          <CreateConsumerPanel
-            mode="create"
-            open={consumerPanelOpen}
-            stream={stream.config}
-            busy={consumerPanelBusy}
-            error={consumerPanelError}
-            onClose={() => {
-              setConsumerPanelOpen(false);
-              setConsumerPanelError("");
-            }}
-            onSubmit={createConsumer}
-          />
+          {consumerPanelOpen && (
+            <Suspense fallback={null}>
+              <CreateConsumerPanel
+                mode="create"
+                open={consumerPanelOpen}
+                stream={stream.config}
+                busy={consumerPanelBusy}
+                error={consumerPanelError}
+                onClose={() => {
+                  setConsumerPanelOpen(false);
+                  setConsumerPanelError("");
+                }}
+                onSubmit={createConsumer}
+              />
+            </Suspense>
+          )}
 
           <div className="table-wrap">
             <VirtualTable
@@ -1301,7 +1311,9 @@ export default function StreamDetailPage() {
       )}
 
       {tab === "dlq" && showDlqTab && id && (
-        <DlqPanel clusterId={id} streamName={name} canManage={canManageJS} />
+        <Suspense fallback={<PageLoader />}>
+          <DlqPanel clusterId={id} streamName={name} canManage={canManageJS} />
+        </Suspense>
       )}
     </div>
   );

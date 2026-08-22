@@ -1,4 +1,4 @@
-import { clusterPath, getCSRFToken } from "./api";
+import { api, ApiError, clusterPath, UnauthorizedError } from "./api";
 import { safeDecodeURIComponent } from "./safeDecode";
 
 export type AssistantMessage = {
@@ -54,15 +54,6 @@ export class AssistantRequestError extends Error {
   }
 }
 
-type AssistantErrorResponse = {
-  error?: {
-    message?: string;
-    code?: AssistantErrorCode;
-    retryable?: boolean;
-    retryAfterSeconds?: number;
-  };
-};
-
 function inferErrorCode(status: number): AssistantErrorCode {
   if (status === 401 || status === 403) return "auth";
   if (status === 404) return "not_enabled";
@@ -73,14 +64,22 @@ function inferErrorCode(status: number): AssistantErrorCode {
   return "validation";
 }
 
-function parseAssistantError(response: Response, body: AssistantErrorResponse): AssistantRequestError {
-  const nested = body.error;
-  const message = nested?.message ?? `Assistant request failed (${response.status})`;
-  return new AssistantRequestError(message, {
-    code: nested?.code ?? inferErrorCode(response.status),
-    retryable: nested?.retryable ?? (response.status === 429 || response.status >= 500),
-    retryAfterSeconds: nested?.retryAfterSeconds,
-  });
+function toAssistantError(err: unknown): AssistantRequestError {
+  if (err instanceof AssistantRequestError) return err;
+  if (err instanceof UnauthorizedError) {
+    return new AssistantRequestError(err.message || "Unauthorized", { code: "auth", retryable: false });
+  }
+  if (err instanceof ApiError) {
+    return new AssistantRequestError(err.message, {
+      code: inferErrorCode(err.status),
+      retryable: err.retryable,
+      retryAfterSeconds: err.retryAfterSeconds,
+    });
+  }
+  if (err instanceof Error) {
+    return new AssistantRequestError(err.message, { code: "provider", retryable: true });
+  }
+  return new AssistantRequestError("Assistant request failed", { code: "provider", retryable: true });
 }
 
 export function assistantErrorTitle(code: AssistantErrorCode): string {
@@ -109,14 +108,14 @@ export function assistantErrorTitle(code: AssistantErrorCode): string {
 
 export async function fetchAssistantConfig(): Promise<AssistantConfig> {
   try {
-    const response = await fetch("/api/v1/assistant/config", { credentials: "include" });
-    if (!response.ok) {
+    const res = await api<AssistantConfig>("/api/v1/assistant/config");
+    return res.data ?? { aiEnabled: false };
+  } catch (err) {
+    // 404 / not configured → disabled. Network/5xx must not look like "AI off".
+    if (err instanceof ApiError && (err.status === 404 || err.code === "not_found")) {
       return { aiEnabled: false };
     }
-    const body = (await response.json().catch(() => ({}))) as { data?: AssistantConfig };
-    return body.data ?? { aiEnabled: false };
-  } catch {
-    return { aiEnabled: false };
+    throw toAssistantError(err);
   }
 }
 
@@ -126,40 +125,22 @@ export async function sendAssistantMessage(
   history: AssistantMessage[],
   page: AssistantPageContext,
 ): Promise<string> {
-  let response: Response;
   try {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    const csrf = getCSRFToken();
-    if (csrf) {
-      headers["X-CSRF-Token"] = csrf;
-    }
-    response = await fetch(clusterPath(clusterId, "/assistant/chat"), {
+    const res = await api<{ reply?: string }>(clusterPath(clusterId, "/assistant/chat"), {
       method: "POST",
-      credentials: "include",
-      headers,
       body: JSON.stringify({ message, history, page }),
     });
-  } catch {
-    throw new AssistantRequestError("Network error. Check your connection and try again.", {
-      code: "network",
-      retryable: true,
-    });
+    const reply = res.data?.reply;
+    if (!reply) {
+      throw new AssistantRequestError("Assistant returned an empty response.", {
+        code: "provider",
+        retryable: true,
+      });
+    }
+    return reply;
+  } catch (err) {
+    throw toAssistantError(err);
   }
-
-  const body = (await response.json().catch(() => ({}))) as AssistantErrorResponse & {
-    data?: { reply?: string };
-  };
-  if (!response.ok) {
-    throw parseAssistantError(response, body);
-  }
-  const reply = body.data?.reply;
-  if (!reply) {
-    throw new AssistantRequestError("Assistant returned an empty response.", {
-      code: "provider",
-      retryable: true,
-    });
-  }
-  return reply;
 }
 
 export function pageContextFromLocation(pathname: string): AssistantPageContext {

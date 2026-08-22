@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/bytedance/sonic"
 	"github.com/fasthttp/websocket"
 	"github.com/valyala/fasthttp"
 
@@ -19,8 +18,8 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/metrics"
 	"github.com/gopherust-io/nats-consol/internal/port"
-	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/gopherust-io/nats-consol/pkg/common/safe"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 const (
@@ -89,9 +88,6 @@ func (h *Hub) checkOrigin(ctx *fasthttp.RequestCtx) bool {
 }
 
 type FrameAction string
-type controlFrame struct {
-	Action FrameAction `json:"action"`
-}
 
 const (
 	Pause  FrameAction = "pause"
@@ -123,6 +119,20 @@ type liveFrame struct {
 	Seq     uint64            `json:"seq,omitempty"`
 }
 
+// Handle godoc
+//
+// @Summary Handle
+// @Tags Live
+// @Param clusterId path string true "clusterId"
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Security BasicAuth
+// @Security BearerAuth
+// @Security SessionCookie
+// @Router /api/v1/clusters/{clusterId}/live/ws [get]
 func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 	clusterID, ok := ctx.UserValue("clusterId").(string)
 	if !ok || strings.IsEmpty(clusterID) {
@@ -158,7 +168,8 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 			ctx.Error("cluster not found", fasthttp.StatusNotFound)
 			return
 		}
-		ctx.Error(err.Error(), fasthttp.StatusBadGateway)
+		tel.Error().Err(err).Str("component", "live").Msg("live websocket gateway failed")
+		ctx.Error("NATS is unavailable", fasthttp.StatusBadGateway)
 		return
 	}
 
@@ -169,19 +180,29 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 	}
 
 	err = upgrader.Upgrade(ctx, func(conn *websocket.Conn) {
-		h.serveConn(conn, client, clusterID, stream, subjectFilter, fromSeq)
+		// Never retain *fasthttp.RequestCtx after Upgrade — it is pooled/reset
+		// and races under -race. Long-lived session uses an independent context.
+		h.serveConn(context.Background(), conn, client, clusterID, stream, subjectFilter, fromSeq)
 	})
 	if err != nil {
 		tel.Error().Err(err).Str("component", "live").Msg("websocket upgrade failed")
 	}
 }
 
-func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clusterID, stream, subjectFilter string, fromSeq uint64) {
+func (h *Hub) serveConn(
+	ctx context.Context,
+	conn *websocket.Conn,
+	client port.JetStreamExecutor,
+	clusterID,
+	stream,
+	subjectFilter string,
+	fromSeq uint64) {
+
 	defer func() { _ = conn.Close() }()
 	metrics.IncWS()
 	defer metrics.DecWS()
 
-	sessionCtx, cancel := context.WithCancel(context.Background())
+	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	var (
@@ -331,11 +352,7 @@ func (h *Hub) serveConn(conn *websocket.Conn, client port.JetStreamExecutor, clu
 			resetIdle()
 			touchGateway()
 
-			var ctrl controlFrame
-			if err := sonic.Unmarshal(data, &ctrl); err != nil {
-				continue
-			}
-			switch ctrl.Action {
+			switch parseControlAction(data) {
 			case Pause:
 				paused.Store(true)
 				send(liveFrame{Type: Paused})

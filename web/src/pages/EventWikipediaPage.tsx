@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import EmptyState from "../components/ui/EmptyState";
 import PageHeader from "../components/ui/PageHeader";
 import QueryErrorState from "../components/ui/QueryErrorState";
+import VirtualCatalogList from "../components/VirtualCatalogList";
 import { useAccount } from "../lib/account";
 import { useCluster } from "../lib/cluster";
-import { MONITORING_POLL_MS } from "../lib/constants";
 import {
   eventCatalogConsumerHref,
   eventCatalogStreamHref,
@@ -22,7 +22,7 @@ import {
   sortEventWikipediaPages,
   type EventWikipediaPage,
 } from "../lib/eventWikipedia";
-import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
+import { clusterQueryKey } from "../lib/query";
 
 function formatWhen(iso?: string): string {
   if (!iso) return "";
@@ -37,22 +37,24 @@ export default function EventWikipediaPage() {
   const { accountName } = useAccount();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState(searchParams.get("q") ?? "");
+  const deferredSearch = useDeferredValue(search);
   const [selectedSubject, setSelectedSubject] = useState<string | null>(
     searchParams.get("subject"),
   );
 
   const wikiQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "event-wikipedia"),
-    queryFn: () => fetchEventWikipedia(clusterId!, { fresh: true }),
+    queryFn: () => fetchEventWikipedia(clusterId!),
     enabled: Boolean(clusterId),
-    refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
+    staleTime: 5 * 60_000,
+    refetchInterval: false,
   });
 
   const pages = useMemo(
     () => sortEventWikipediaPages(wikiQuery.data?.pages ?? []),
     [wikiQuery.data?.pages],
   );
-  const filtered = useMemo(() => filterEventWikipediaPages(pages, search), [pages, search]);
+  const filtered = useMemo(() => filterEventWikipediaPages(pages, deferredSearch), [pages, deferredSearch]);
   const totals = wikiQuery.data?.totals;
 
   const selected: EventWikipediaPage | null = useMemo(() => {
@@ -140,36 +142,35 @@ export default function EventWikipediaPage() {
           {filtered.length === 0 ? (
             <EmptyState title={t("wikipedia.empty")} />
           ) : (
-            <ul className="nc-catalog-entries">
-              {filtered.map((page) => {
-                const active = selected?.subject === page.subject;
-                return (
-                  <li key={page.subject}>
-                    <button
-                      type="button"
-                      className={`nc-catalog-entry${active ? " is-active" : ""}`}
-                      onClick={() => selectSubject(page.subject)}
-                    >
-                      <span className="nc-catalog-entry__subject">{page.subject}</span>
-                      <span className="nc-catalog-entry__meta">
-                        {page.owner || t("wikipedia.noOwner")}
-                      </span>
-                      <span className="nc-catalog-entry__badges">
-                        {page.deprecation.deprecated && (
-                          <span className="badge">{t("wikipedia.badgeDeprecated")}</span>
-                        )}
-                        {!page.documented && (
-                          <span className="badge">{t("wikipedia.badgeUndocumented")}</span>
-                        )}
-                        {page.orphan && (
-                          <span className="badge badge--muted">{t("wikipedia.badgeOrphan")}</span>
-                        )}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <VirtualCatalogList
+              items={filtered}
+              empty={t("wikipedia.empty")}
+              getKey={(page) => page.subject}
+              isActive={(page) => selected?.subject === page.subject}
+              renderItem={(page, active) => (
+                <button
+                  type="button"
+                  className={`nc-catalog-entry${active ? " is-active" : ""}`}
+                  onClick={() => selectSubject(page.subject)}
+                >
+                  <span className="nc-catalog-entry__subject">{page.subject}</span>
+                  <span className="nc-catalog-entry__meta">
+                    {page.owner || t("wikipedia.noOwner")}
+                  </span>
+                  <span className="nc-catalog-entry__badges">
+                    {page.deprecation.deprecated && (
+                      <span className="badge">{t("wikipedia.badgeDeprecated")}</span>
+                    )}
+                    {!page.documented && (
+                      <span className="badge">{t("wikipedia.badgeUndocumented")}</span>
+                    )}
+                    {page.orphan && (
+                      <span className="badge badge--muted">{t("wikipedia.badgeOrphan")}</span>
+                    )}
+                  </span>
+                </button>
+              )}
+            />
           )}
         </aside>
 

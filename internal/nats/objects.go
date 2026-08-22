@@ -6,20 +6,20 @@ import (
 	"fmt"
 
 	libnats "github.com/gopherust-io/nats"
+	"github.com/nats-io/nats.go"
+
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/pkg/common/b64util"
 	"github.com/gopherust-io/nats-consol/pkg/common/strings"
-	"github.com/nats-io/nats.go"
 )
 
 func (c *Client) ListObjectBuckets(ctx context.Context) ([]domain.ObjectBucketInfo, error) {
-	buckets, err := c.inner.Objects().ListBuckets(ctx)
+	buckets, err := c.natsCl.Objects().ListBuckets(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]domain.ObjectBucketInfo, 0, len(buckets))
 	for _, b := range buckets {
-		// List metadata only — avoid N+1 GetObjectBucket/StreamInfo calls.
 		out = append(out, domain.ObjectBucketInfo{
 			Bucket:      b.Bucket,
 			Description: b.Description,
@@ -30,7 +30,7 @@ func (c *Client) ListObjectBuckets(ctx context.Context) ([]domain.ObjectBucketIn
 }
 
 func (c *Client) CreateObjectBucket(ctx context.Context, cfg *nats.ObjectStoreConfig) (*domain.ObjectBucketInfo, error) {
-	if _, err := c.inner.Objects().CreateRaw(ctx, cfg); err != nil {
+	if _, err := c.natsCl.Objects().CreateRaw(ctx, cfg); err != nil {
 		return nil, err
 	}
 	return c.GetObjectBucket(ctx, cfg.Bucket)
@@ -82,7 +82,6 @@ func (c *Client) applyObjectStreamConfig(ctx context.Context, cfg *nats.ObjectSt
 		sc.Placement = nil
 	}
 	sc.Metadata = cloneStringMap(cfg.Metadata)
-	// Preserve Object Store stream semantics.
 	sc.Discard = nats.DiscardNew
 	sc.AllowRollup = true
 	sc.AllowDirect = true
@@ -93,7 +92,7 @@ func (c *Client) applyObjectStreamConfig(ctx context.Context, cfg *nats.ObjectSt
 }
 
 func (c *Client) GetObjectBucket(ctx context.Context, bucket string) (*domain.ObjectBucketInfo, error) {
-	status, err := c.inner.Objects().BucketInfo(ctx, bucket)
+	status, err := c.natsCl.Objects().BucketInfo(ctx, bucket)
 	if err != nil {
 		return nil, err
 	}
@@ -102,12 +101,13 @@ func (c *Client) GetObjectBucket(ctx context.Context, bucket string) (*domain.Ob
 		Description: status.Description,
 		Size:        status.Size,
 	}
-	streamName := "OBJ_" + bucket
-	si, serr := c.StreamInfo(ctx, streamName)
-	if serr != nil {
+	const objPrefix = "OBJ_"
+	streamName := objPrefix + bucket
+	streamInfo, sErr := c.StreamInfo(ctx, streamName)
+	if sErr != nil {
 		return &info, nil
 	}
-	sc := si.Config
+	sc := streamInfo.Config
 	info.Description = sc.Description
 	info.TTLNs = int64(sc.MaxAge)
 	info.MaxBytes = sc.MaxBytes
@@ -129,15 +129,15 @@ func (c *Client) GetObjectBucket(ctx context.Context, bucket string) (*domain.Ob
 }
 
 func (c *Client) DeleteObjectBucket(ctx context.Context, bucket string) error {
-	return c.inner.Objects().Delete(ctx, bucket)
+	return c.natsCl.Objects().Delete(ctx, bucket)
 }
 
 func (c *Client) ListObjects(ctx context.Context, bucket string, offset, limit int) ([]string, int, error) {
-	return c.inner.Objects().ListObjects(ctx, bucket, offset, limit)
+	return c.natsCl.Objects().ListObjects(ctx, bucket, offset, limit)
 }
 
 func (c *Client) GetObject(ctx context.Context, bucket, name string) (*domain.ObjectInfo, error) {
-	entry, err := c.inner.Objects().Get(ctx, bucket, name)
+	entry, err := c.natsCl.Objects().Get(ctx, bucket, name)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,7 @@ func (c *Client) GetObject(ctx context.Context, bucket, name string) (*domain.Ob
 }
 
 func (c *Client) PutObject(ctx context.Context, bucket, name string, data []byte) (*domain.ObjectInfo, error) {
-	entry, err := c.inner.Objects().Put(ctx, bucket, name, data)
+	entry, err := c.natsCl.Objects().Put(ctx, bucket, name, data)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func (c *Client) PutObject(ctx context.Context, bucket, name string, data []byte
 }
 
 func (c *Client) DeleteObject(ctx context.Context, bucket, name string) error {
-	return c.inner.Objects().DeleteObject(ctx, bucket, name)
+	return c.natsCl.Objects().DeleteObject(ctx, bucket, name)
 }
 
 func objectInfoFromLib(entry *libnats.ObjectEntry) *domain.ObjectInfo {

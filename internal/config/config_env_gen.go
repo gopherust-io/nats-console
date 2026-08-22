@@ -58,6 +58,7 @@ func (c Config) Masked() Config {
 }
 
 var configAuditSchema = []env.SchemaField{
+	{Key: "PROJECT_NAME", FieldPath: "ProjectName", Required: true},
 	{Key: "HTTP_ADDR", FieldPath: "HTTP.Addr", Default: ":8080", HasDefault: true},
 	{Key: "HTTP_WRITE_TIMEOUT", FieldPath: "HTTP.WriteTimeout", Default: "30s", HasDefault: true},
 	{Key: "HTTP_READ_TIMEOUT", FieldPath: "HTTP.ReadTimeout", Default: "10s", HasDefault: true},
@@ -80,7 +81,14 @@ var configAuditSchema = []env.SchemaField{
 	{Key: "NATS_TLS_KEY_FILE", FieldPath: "NATS.TlsKeyFile", Prefix: "NATS_"},
 	{Key: "NATS_TLS_SERVER_NAME", FieldPath: "NATS.TlsServerName", Prefix: "NATS_"},
 	{Key: "NATS_CLIENT_CACHE_TTL", FieldPath: "NATS.ClientCacheTTL", Default: "5m", Prefix: "NATS_", HasDefault: true},
+	{Key: "NATS_INITIAL_RETRY_ATTEMPTS", FieldPath: "NATS.InitialRetryAttempts", Default: "0", Prefix: "NATS_", HasDefault: true},
+	{Key: "NATS_MAX_RECONNECT", FieldPath: "NATS.MaxReconnect", Default: "-1", Prefix: "NATS_", HasDefault: true},
+	{Key: "NATS_RECONNECT_WAIT", FieldPath: "NATS.ReconnectWait", Default: "2s", Prefix: "NATS_", HasDefault: true},
+	{Key: "NATS_ALLOW_RECONNECT", FieldPath: "NATS.AllowReconnect", Default: "true", Prefix: "NATS_", HasDefault: true},
 	{Key: "NATS_TLS_INSECURE_SKIP_VERIFY", FieldPath: "NATS.TlsInsecureSkipVerify", Default: "false", Prefix: "NATS_", HasDefault: true},
+	{Key: "NATS_DONT_RANDOMIZE", FieldPath: "NATS.DontRandomize", Default: "false", Prefix: "NATS_", HasDefault: true},
+	{Key: "NATS_ALLOW_METRICS", FieldPath: "NATS.AllowMetrics", Default: "true", Prefix: "NATS_", HasDefault: true},
+	{Key: "NATS_ALLOW_TRACING", FieldPath: "NATS.AllowTracing", Default: "true", Prefix: "NATS_", HasDefault: true},
 	{Key: "AI_GEMINI_API_BASE", FieldPath: "AI.GeminiAPIBase", Default: "https://generativelanguage.googleapis.com/v1beta", Prefix: "AI_", HasDefault: true},
 	{Key: "AI_MODEL", FieldPath: "AI.Model", Default: "gemini-2.5-flash", Prefix: "AI_", HasDefault: true},
 	{Key: "AI_API_KEY", FieldPath: "AI.APIKey", Prefix: "AI_", Sensitive: true},
@@ -91,8 +99,9 @@ var configAuditSchema = []env.SchemaField{
 	{Key: "SMTP_FROM", FieldPath: "SMTP.From", Prefix: "SMTP_"},
 	{Key: "SMTP_PASSWORD", FieldPath: "SMTP.Password", Prefix: "SMTP_", Sensitive: true},
 	{Key: "SMTP_USERNAME", FieldPath: "SMTP.Username", Prefix: "SMTP_"},
-	{Key: "SMTP_HOST", FieldPath: "SMTP.Host", Prefix: "SMTP_"},
-	{Key: "SMTP_PORT", FieldPath: "SMTP.Port", Default: "587", Prefix: "SMTP_", HasDefault: true},
+	{Key: "SMTP_HOST", FieldPath: "SMTP.Host", Prefix: "SMTP_", Required: true},
+	{Key: "SMTP_PORT", FieldPath: "SMTP.Port", Prefix: "SMTP_", Required: true},
+	{Key: "SMTP_TIMEOUT", FieldPath: "SMTP.Timeout", Default: "15s", Prefix: "SMTP_", HasDefault: true},
 	{Key: "SMTP_ENABLED", FieldPath: "SMTP.Enabled", Default: "false", Prefix: "SMTP_", HasDefault: true},
 	{Key: "SMTP_TLS", FieldPath: "SMTP.TLS", Default: "true", Prefix: "SMTP_", HasDefault: true},
 	{Key: "SESSION_PRIVATE_KEY", FieldPath: "Auth.SessionPrivateKey", Required: true, Sensitive: true},
@@ -109,7 +118,6 @@ var configAuditSchema = []env.SchemaField{
 	{Key: "METRICS_SNAPSHOT_RETENTION", FieldPath: "MetricsSnapshot.Retention", Default: "168h", Prefix: "METRICS_SNAPSHOT_", HasDefault: true},
 	{Key: "METRICS_SNAPSHOT_BOTTLENECK_RETENTION", FieldPath: "MetricsSnapshot.BottleneckRetention", Default: "672h", Prefix: "METRICS_SNAPSHOT_", HasDefault: true},
 	{Key: "METRICS_SNAPSHOT_CLEANUP_INTERVAL", FieldPath: "MetricsSnapshot.CleanupInterval", Default: "1h", Prefix: "METRICS_SNAPSHOT_", HasDefault: true},
-	{Key: "METRICS_SNAPSHOT_ENABLED", FieldPath: "MetricsSnapshot.Enabled", Default: "true", Prefix: "METRICS_SNAPSHOT_", HasDefault: true},
 	{Key: "PPROF_CPU_MAX_SECONDS", FieldPath: "Pprof.CPUMaxSeconds", Default: "120", Prefix: "PPROF_", HasDefault: true},
 	{Key: "PPROF_AUTH_ENABLED", FieldPath: "Pprof.AuthEnabled", Default: "true", Prefix: "PPROF_", HasDefault: true},
 	{Key: "PPROF_ENABLED", FieldPath: "Pprof.Enabled", Default: "false", Prefix: "PPROF_", HasDefault: true},
@@ -118,7 +126,6 @@ var configAuditSchema = []env.SchemaField{
 	{Key: "SLOW_CONSUMER_ACK_PENDING_RATIO", FieldPath: "SlowConsumer.AckPendingRatio", Default: "0.9", Prefix: "SLOW_CONSUMER_", HasDefault: true},
 	{Key: "PAGINATION_MAX_LIMIT", FieldPath: "Pagination.MaxLimit", Default: "500", Prefix: "PAGINATION_", HasDefault: true},
 	{Key: "PAGINATION_DEFAULT_LIMIT", FieldPath: "Pagination.DefaultLimit", Default: "100", Prefix: "PAGINATION_", HasDefault: true},
-	{Key: "OPENAPI_PATH", FieldPath: "OpenAPIPath", Default: "api/openapi.yaml", HasDefault: true},
 	{Key: "ENCRYPTION_KEY", FieldPath: "EncryptionKey", Required: true, Sensitive: true},
 	{Key: "STATIC_DIR", FieldPath: "StaticDir"},
 	{Key: "ADMIN_USERNAME", FieldPath: "AdminUsername", Default: "admin", HasDefault: true},
@@ -129,8 +136,10 @@ var configAuditSchema = []env.SchemaField{
 	{Key: "TRUSTED_PROXIES", FieldPath: "TrustedProxies"},
 	{Key: "BEHAVIOR_FINGERPRINT_KV_BUCKET", FieldPath: "BehaviorFingerprintKVBucket", Default: "nats_consol_fingerprints", HasDefault: true},
 	{Key: "REQUEST_TIMEOUT", FieldPath: "RequestTimeout", Default: "10s", HasDefault: true},
+	{Key: "LOOKBACK_DURATION", FieldPath: "LookBackDuration"},
 	{Key: "HEALTH_CHECK_TIMEOUT", FieldPath: "HealthCheckTimeout", Default: "2s", HasDefault: true},
 	{Key: "JETSTREAM_VIEW_CACHE_TTL", FieldPath: "JetStreamViewCacheTTL", Default: "3s", HasDefault: true},
+	{Key: "INVITE_TTL", FieldPath: "InviteTTL", Default: "24h", HasDefault: true},
 	{Key: "MAX_MONITORING_BODY_BYTES", FieldPath: "MaxMonitoringBodyBytes", Default: "8388608", HasDefault: true},
 	{Key: "AUDIT_DEFAULT_LIMIT", FieldPath: "AuditDefaultLimit", Default: "50", HasDefault: true},
 	{Key: "METRICS_AUTH_ENABLED", FieldPath: "MetricsAuthEnabled", Default: "false", HasDefault: true},
@@ -150,6 +159,15 @@ func AuditConfigFromEnviron() env.AuditReport {
 
 func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 	var errs []env.FieldError
+	{
+		key := "PROJECT_NAME"
+		raw, ok := snap.Lookup(key)
+		if !ok || env.IsEmpty(raw) {
+			env.AppendRequired(&errs, "ProjectName", key)
+		} else {
+			cfg.ProjectName = raw
+		}
+	}
 	{
 		key := "HTTP_ADDR"
 		raw, ok := snap.Lookup(key)
@@ -221,14 +239,14 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		key := "MAX_REQUEST_BODY_SIZE"
 		raw, ok := snap.Lookup(key)
 		if !ok || env.IsEmpty(raw) {
-			v, err := env.ParseInt64("1048576")
+			v, err := env.ParseInt("1048576")
 			if err != nil {
 				env.AppendParse(&errs, "HTTP.MaxRequestBodySize", key, "1048576", err)
 			} else {
 				cfg.HTTP.MaxRequestBodySize = v
 			}
 		} else {
-			v, err := env.ParseInt64(raw)
+			v, err := env.ParseInt(raw)
 			if err != nil {
 				env.AppendParse(&errs, "HTTP.MaxRequestBodySize", key, raw, err)
 			} else {
@@ -451,6 +469,82 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		}
 	}
 	{
+		key := "NATS_INITIAL_RETRY_ATTEMPTS"
+		raw, ok := snap.Lookup(key)
+		if !ok || env.IsEmpty(raw) {
+			v, err := env.ParseInt("0")
+			if err != nil {
+				env.AppendParse(&errs, "NATS.InitialRetryAttempts", key, "0", err)
+			} else {
+				cfg.NATS.InitialRetryAttempts = v
+			}
+		} else {
+			v, err := env.ParseInt(raw)
+			if err != nil {
+				env.AppendParse(&errs, "NATS.InitialRetryAttempts", key, raw, err)
+			} else {
+				cfg.NATS.InitialRetryAttempts = v
+			}
+		}
+	}
+	{
+		key := "NATS_MAX_RECONNECT"
+		raw, ok := snap.Lookup(key)
+		if !ok || env.IsEmpty(raw) {
+			v, err := env.ParseInt("-1")
+			if err != nil {
+				env.AppendParse(&errs, "NATS.MaxReconnect", key, "-1", err)
+			} else {
+				cfg.NATS.MaxReconnect = v
+			}
+		} else {
+			v, err := env.ParseInt(raw)
+			if err != nil {
+				env.AppendParse(&errs, "NATS.MaxReconnect", key, raw, err)
+			} else {
+				cfg.NATS.MaxReconnect = v
+			}
+		}
+	}
+	{
+		key := "NATS_RECONNECT_WAIT"
+		raw, ok := snap.Lookup(key)
+		if !ok || env.IsEmpty(raw) {
+			v, err := env.ParseDuration("2s")
+			if err != nil {
+				env.AppendParse(&errs, "NATS.ReconnectWait", key, "2s", err)
+			} else {
+				cfg.NATS.ReconnectWait = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "NATS.ReconnectWait", key, raw, err)
+			} else {
+				cfg.NATS.ReconnectWait = v
+			}
+		}
+	}
+	{
+		key := "NATS_ALLOW_RECONNECT"
+		raw, ok := snap.Lookup(key)
+		if !ok || env.IsEmpty(raw) {
+			v, err := env.ParseBool("true")
+			if err != nil {
+				env.AppendParse(&errs, "NATS.AllowReconnect", key, "true", err)
+			} else {
+				cfg.NATS.AllowReconnect = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "NATS.AllowReconnect", key, raw, err)
+			} else {
+				cfg.NATS.AllowReconnect = v
+			}
+		}
+	}
+	{
 		key := "NATS_TLS_INSECURE_SKIP_VERIFY"
 		raw, ok := snap.Lookup(key)
 		if !ok || env.IsEmpty(raw) {
@@ -466,6 +560,67 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 				env.AppendParse(&errs, "NATS.TlsInsecureSkipVerify", key, raw, err)
 			} else {
 				cfg.NATS.TlsInsecureSkipVerify = v
+			}
+		}
+	}
+	{
+		key := "NATS_DONT_RANDOMIZE"
+		raw, ok := snap.Lookup(key)
+		if !ok || env.IsEmpty(raw) {
+			// Legacy typo key (prefer DONT above).
+			raw, ok = snap.Lookup("NATS_DDNT_RANDOMIZE")
+		}
+		if !ok || env.IsEmpty(raw) {
+			v, err := env.ParseBool("false")
+			if err != nil {
+				env.AppendParse(&errs, "NATS.DontRandomize", key, "false", err)
+			} else {
+				cfg.NATS.DontRandomize = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "NATS.DontRandomize", key, raw, err)
+			} else {
+				cfg.NATS.DontRandomize = v
+			}
+		}
+	}
+	{
+		key := "NATS_ALLOW_METRICS"
+		raw, ok := snap.Lookup(key)
+		if !ok || env.IsEmpty(raw) {
+			v, err := env.ParseBool("true")
+			if err != nil {
+				env.AppendParse(&errs, "NATS.AllowMetrics", key, "true", err)
+			} else {
+				cfg.NATS.AllowMetrics = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "NATS.AllowMetrics", key, raw, err)
+			} else {
+				cfg.NATS.AllowMetrics = v
+			}
+		}
+	}
+	{
+		key := "NATS_ALLOW_TRACING"
+		raw, ok := snap.Lookup(key)
+		if !ok || env.IsEmpty(raw) {
+			v, err := env.ParseBool("true")
+			if err != nil {
+				env.AppendParse(&errs, "NATS.AllowTracing", key, "true", err)
+			} else {
+				cfg.NATS.AllowTracing = v
+			}
+		} else {
+			v, err := env.ParseBool(raw)
+			if err != nil {
+				env.AppendParse(&errs, "NATS.AllowTracing", key, raw, err)
+			} else {
+				cfg.NATS.AllowTracing = v
 			}
 		}
 	}
@@ -601,6 +756,7 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		key := "SMTP_HOST"
 		raw, ok := snap.Lookup(key)
 		if !ok || env.IsEmpty(raw) {
+			env.AppendRequired(&errs, "SMTP.Host", key)
 		} else {
 			cfg.SMTP.Host = raw
 		}
@@ -609,18 +765,32 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		key := "SMTP_PORT"
 		raw, ok := snap.Lookup(key)
 		if !ok || env.IsEmpty(raw) {
-			v, err := env.ParseInt("587")
-			if err != nil {
-				env.AppendParse(&errs, "SMTP.Port", key, "587", err)
-			} else {
-				cfg.SMTP.Port = v
-			}
+			env.AppendRequired(&errs, "SMTP.Port", key)
 		} else {
 			v, err := env.ParseInt(raw)
 			if err != nil {
 				env.AppendParse(&errs, "SMTP.Port", key, raw, err)
 			} else {
 				cfg.SMTP.Port = v
+			}
+		}
+	}
+	{
+		key := "SMTP_TIMEOUT"
+		raw, ok := snap.Lookup(key)
+		if !ok || env.IsEmpty(raw) {
+			v, err := env.ParseDuration("15s")
+			if err != nil {
+				env.AppendParse(&errs, "SMTP.Timeout", key, "15s", err)
+			} else {
+				cfg.SMTP.Timeout = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "SMTP.Timeout", key, raw, err)
+			} else {
+				cfg.SMTP.Timeout = v
 			}
 		}
 	}
@@ -909,25 +1079,6 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		}
 	}
 	{
-		key := "METRICS_SNAPSHOT_ENABLED"
-		raw, ok := snap.Lookup(key)
-		if !ok || env.IsEmpty(raw) {
-			v, err := env.ParseBool("true")
-			if err != nil {
-				env.AppendParse(&errs, "MetricsSnapshot.Enabled", key, "true", err)
-			} else {
-				cfg.MetricsSnapshot.Enabled = v
-			}
-		} else {
-			v, err := env.ParseBool(raw)
-			if err != nil {
-				env.AppendParse(&errs, "MetricsSnapshot.Enabled", key, raw, err)
-			} else {
-				cfg.MetricsSnapshot.Enabled = v
-			}
-		}
-	}
-	{
 		key := "PPROF_CPU_MAX_SECONDS"
 		raw, ok := snap.Lookup(key)
 		if !ok || env.IsEmpty(raw) {
@@ -1080,16 +1231,6 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		}
 	}
 	{
-		key := "OPENAPI_PATH"
-		raw, ok := snap.Lookup(key)
-		if !ok || env.IsEmpty(raw) {
-			v := "api/openapi.yaml"
-			cfg.OpenAPIPath = v
-		} else {
-			cfg.OpenAPIPath = raw
-		}
-	}
-	{
 		key := "ENCRYPTION_KEY"
 		raw, ok := snap.Lookup(key)
 		if !ok || env.IsEmpty(raw) {
@@ -1191,6 +1332,19 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 		}
 	}
 	{
+		key := "LOOKBACK_DURATION"
+		raw, ok := snap.Lookup(key)
+		if !ok || env.IsEmpty(raw) {
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "LookBackDuration", key, raw, err)
+			} else {
+				cfg.LookBackDuration = v
+			}
+		}
+	}
+	{
 		key := "HEALTH_CHECK_TIMEOUT"
 		raw, ok := snap.Lookup(key)
 		if !ok || env.IsEmpty(raw) {
@@ -1225,6 +1379,25 @@ func loadConfig(cfg *Config, snap *env.EnvSnapshot) error {
 				env.AppendParse(&errs, "JetStreamViewCacheTTL", key, raw, err)
 			} else {
 				cfg.JetStreamViewCacheTTL = v
+			}
+		}
+	}
+	{
+		key := "INVITE_TTL"
+		raw, ok := snap.Lookup(key)
+		if !ok || env.IsEmpty(raw) {
+			v, err := env.ParseDuration("24h")
+			if err != nil {
+				env.AppendParse(&errs, "InviteTTL", key, "24h", err)
+			} else {
+				cfg.InviteTTL = v
+			}
+		} else {
+			v, err := env.ParseDuration(raw)
+			if err != nil {
+				env.AppendParse(&errs, "InviteTTL", key, raw, err)
+			} else {
+				cfg.InviteTTL = v
 			}
 		}
 	}

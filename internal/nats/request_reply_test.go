@@ -100,6 +100,67 @@ func TestBuildRequestReplySnapshot(t *testing.T) {
 	assert.Equal(t, "orders.status (queue:workers)", snap.Connections[1].ServiceSubs[0])
 }
 
+func TestBuildRequestReplySnapshotSubscriptionsList(t *testing.T) {
+	t.Parallel()
+
+	// Modern NATS /connz?subs=1: count in "subscriptions", subjects in subscriptions_list.
+	raw := strings.StringToBytes(`{
+		"connections": [
+			{
+				"cid": 10,
+				"name": "requester",
+				"rtt": "1ms",
+				"subscriptions": 1,
+				"subscriptions_list": ["_INBOX.abc123"]
+			},
+			{
+				"cid": 11,
+				"name": "responder",
+				"rtt": "2ms",
+				"subscriptions": 1,
+				"subscriptions_list": ["orders.status"]
+			}
+		]
+	}`)
+
+	snap := natsclient.BuildRequestReplySnapshot(raw, nil)
+	assert.Equal(t, 1, snap.Requesters)
+	assert.Equal(t, 1, snap.Responders)
+	require.Len(t, snap.Patterns, 1)
+	assert.Equal(t, "orders.status", snap.Patterns[0].Subject)
+	require.Len(t, snap.Connections, 2)
+}
+
+func TestBuildRequestReplySnapshotSubscriptionsListDetail(t *testing.T) {
+	t.Parallel()
+
+	// Modern NATS /connz?subs=detail: subjects + qgroup in subscriptions_list_detail.
+	raw := strings.StringToBytes(`{
+		"connections": [
+			{
+				"cid": 20,
+				"name": "worker",
+				"rtt": "3ms",
+				"subscriptions": 2,
+				"subscriptions_list_detail": [
+					{"subject": "_INBOX.xyz", "sid": "1"},
+					{"subject": "orders.status", "qgroup": "workers", "sid": "2"}
+				]
+			}
+		]
+	}`)
+
+	snap := natsclient.BuildRequestReplySnapshot(raw, nil)
+	assert.Equal(t, 1, snap.Requesters)
+	assert.Equal(t, 1, snap.Responders)
+	require.Len(t, snap.Patterns, 1)
+	assert.Equal(t, "orders.status", snap.Patterns[0].Subject)
+	assert.Equal(t, "workers", snap.Patterns[0].Queue)
+	require.Len(t, snap.Connections, 1)
+	require.Len(t, snap.Connections[0].ServiceSubs, 1)
+	assert.Equal(t, "orders.status (queue:workers)", snap.Connections[0].ServiceSubs[0])
+}
+
 func TestBuildRequestReplySnapshotJSONPointersStable(t *testing.T) {
 	t.Parallel()
 
@@ -149,5 +210,5 @@ func TestBuildRequestReplySnapshotJSONPointersStable(t *testing.T) {
 	}
 	require.NotNil(t, snap.MedianRttMs)
 	require.NotNil(t, snap.MaxProbeMs)
-	assert.InDelta(t, 10, *snap.MaxProbeMs, 0.001) // max of OK probes (10 and 7.5)
+	assert.InDelta(t, 10, *snap.MaxProbeMs, 0.001)
 }

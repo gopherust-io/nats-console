@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import CreateKVBucketPanel, { KVBucketConfigPayload } from "../components/CreateKVBucketPanel";
-import CreateObjectBucketPanel, { ObjectBucketConfigPayload } from "../components/CreateObjectBucketPanel";
-import CreateStreamPanel, { StreamConfigPayload } from "../components/CreateStreamPanel";
+import type { KVBucketConfigPayload } from "../components/CreateKVBucketPanel";
+import type { ObjectBucketConfigPayload } from "../components/CreateObjectBucketPanel";
+import type { StreamConfigPayload } from "../components/CreateStreamPanel";
 import BlastRadiusPanel from "../components/BlastRadiusPanel";
 import JetStreamSectionTabs, { parseJetStreamSection } from "../components/JetStreamSectionTabs";
 import Alert from "../components/ui/Alert";
@@ -18,6 +18,11 @@ import { useCluster } from "../lib/cluster";
 import { HUB_LIST_POLL_MS } from "../lib/constants";
 import { isFavoriteStream, sortStreamsFavoritesFirst } from "../lib/favoriteStreams";
 import { clusterQueryKey, invalidateJetStreamTopology, visibilityAwareInterval } from "../lib/query";
+import { fetchAllStreams } from "../lib/streams";
+
+const CreateStreamPanel = lazy(() => import("../components/CreateStreamPanel"));
+const CreateKVBucketPanel = lazy(() => import("../components/CreateKVBucketPanel"));
+const CreateObjectBucketPanel = lazy(() => import("../components/CreateObjectBucketPanel"));
 
 type KVBucketSummary = { bucket: string; values: number };
 type ObjBucketSummary = { bucket: string; size: number };
@@ -94,32 +99,41 @@ export default function JetStreamHubPage() {
     }
   }, [searchParams, setSearchParams]);
 
+  const streamsSection =
+    section === "streams" || section === "consumers" || section === "messages";
+
   const accountQuery = useQuery({
     queryKey: clusterQueryKey(id, "account"),
     queryFn: async () => (await api<AccountInfo>(clusterPath(id!, "/account"))).data,
     enabled: Boolean(id),
-    refetchInterval: visibilityAwareInterval(HUB_LIST_POLL_MS),
+    staleTime: HUB_LIST_POLL_MS,
+    // Overview gauges need account; elsewhere keep warm without aggressive polling.
+    refetchInterval:
+      section === "overview" ? visibilityAwareInterval(HUB_LIST_POLL_MS) : false,
   });
 
   const streamsQuery = useQuery({
     queryKey: clusterQueryKey(id, "streams"),
-    queryFn: async () => (await api<StreamInfo[]>(clusterPath(id!, "/streams?offset=0&limit=100"))).data ?? [],
-    enabled: Boolean(id),
-    refetchInterval: visibilityAwareInterval(HUB_LIST_POLL_MS),
+    queryFn: async () => fetchAllStreams(id!),
+    enabled: Boolean(id) && streamsSection,
+    staleTime: HUB_LIST_POLL_MS,
+    refetchInterval: streamsSection ? visibilityAwareInterval(HUB_LIST_POLL_MS) : false,
   });
 
   const kvQuery = useQuery({
     queryKey: clusterQueryKey(id, "kv"),
     queryFn: async () => (await api<KVBucketSummary[]>(clusterPath(id!, "/kv/buckets"))).data ?? [],
     enabled: Boolean(id) && section === "overview",
-    refetchInterval: visibilityAwareInterval(HUB_LIST_POLL_MS),
+    staleTime: HUB_LIST_POLL_MS,
+    refetchInterval: section === "overview" ? visibilityAwareInterval(HUB_LIST_POLL_MS) : false,
   });
 
   const objQuery = useQuery({
     queryKey: clusterQueryKey(id, "objects"),
     queryFn: async () => (await api<ObjBucketSummary[]>(clusterPath(id!, "/objects/buckets"))).data ?? [],
     enabled: Boolean(id) && section === "overview",
-    refetchInterval: visibilityAwareInterval(HUB_LIST_POLL_MS),
+    staleTime: HUB_LIST_POLL_MS,
+    refetchInterval: section === "overview" ? visibilityAwareInterval(HUB_LIST_POLL_MS) : false,
   });
 
   const impactQuery = useQuery({
@@ -446,51 +460,63 @@ export default function JetStreamHubPage() {
         <QueryErrorState error={objQuery.error} onRetry={() => void objQuery.refetch()} />
       )}
 
-      <CreateStreamPanel
-        mode="create"
-        variant={createMode === "mirror" ? "mirror" : "stream"}
-        open={createMode === "stream" || createMode === "mirror"}
-        busy={streamPanelMutation.isPending}
-        error={panelError}
-        onClose={() => {
-          setCreateMode(null);
-          setPanelError("");
-        }}
-        onSubmit={async (body) => {
-          setPanelError("");
-          await streamPanelMutation.mutateAsync(body);
-        }}
-      />
+      {(createMode === "stream" || createMode === "mirror") && (
+        <Suspense fallback={null}>
+          <CreateStreamPanel
+            mode="create"
+            variant={createMode === "mirror" ? "mirror" : "stream"}
+            open
+            busy={streamPanelMutation.isPending}
+            error={panelError}
+            onClose={() => {
+              setCreateMode(null);
+              setPanelError("");
+            }}
+            onSubmit={async (body) => {
+              setPanelError("");
+              await streamPanelMutation.mutateAsync(body);
+            }}
+          />
+        </Suspense>
+      )}
 
-      <CreateKVBucketPanel
-        mode="create"
-        open={createMode === "kv"}
-        busy={kvPanelMutation.isPending}
-        error={panelError}
-        onClose={() => {
-          setCreateMode(null);
-          setPanelError("");
-        }}
-        onSubmit={async (body) => {
-          setPanelError("");
-          await kvPanelMutation.mutateAsync(body);
-        }}
-      />
+      {createMode === "kv" && (
+        <Suspense fallback={null}>
+          <CreateKVBucketPanel
+            mode="create"
+            open
+            busy={kvPanelMutation.isPending}
+            error={panelError}
+            onClose={() => {
+              setCreateMode(null);
+              setPanelError("");
+            }}
+            onSubmit={async (body) => {
+              setPanelError("");
+              await kvPanelMutation.mutateAsync(body);
+            }}
+          />
+        </Suspense>
+      )}
 
-      <CreateObjectBucketPanel
-        mode="create"
-        open={createMode === "object"}
-        busy={objectPanelMutation.isPending}
-        error={panelError}
-        onClose={() => {
-          setCreateMode(null);
-          setPanelError("");
-        }}
-        onSubmit={async (body) => {
-          setPanelError("");
-          await objectPanelMutation.mutateAsync(body);
-        }}
-      />
+      {createMode === "object" && (
+        <Suspense fallback={null}>
+          <CreateObjectBucketPanel
+            mode="create"
+            open
+            busy={objectPanelMutation.isPending}
+            error={panelError}
+            onClose={() => {
+              setCreateMode(null);
+              setPanelError("");
+            }}
+            onSubmit={async (body) => {
+              setPanelError("");
+              await objectPanelMutation.mutateAsync(body);
+            }}
+          />
+        </Suspense>
+      )}
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}

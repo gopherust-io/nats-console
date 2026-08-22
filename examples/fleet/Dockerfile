@@ -1,10 +1,9 @@
 # syntax=docker/dockerfile:1
-# Build from the nats-consol module root (sibling gopherust-io/nats for go.mod replace):
-#   docker build -f examples/fleet/Dockerfile --build-context nats=../nats -t nats-fleet:local .
+# Build from the nats-consol module root:
+#   docker build -f examples/fleet/Dockerfile -t nats-fleet:local .
 FROM golang:1.26.5-bookworm AS build
 WORKDIR /src
 ENV GOTOOLCHAIN=auto
-COPY --from=nats / /nats
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .

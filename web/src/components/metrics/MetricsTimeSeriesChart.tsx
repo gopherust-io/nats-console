@@ -26,6 +26,8 @@ type Props = {
   series: ChartSeries[];
   variant?: "line" | "area";
   emptyMessage?: string;
+  /** Skip outer panel chrome when the chart sits inside another card. */
+  embedded?: boolean;
 };
 
 function mergeSeries(series: ChartSeries[]) {
@@ -51,104 +53,111 @@ function MetricsTimeSeriesChart({
   series,
   variant = "line",
   emptyMessage = "Collecting historical data…",
+  embedded = false,
 }: Props) {
   const data = useMemo(() => mergeSeries(series), [series]);
   const hasData = data.length > 0;
+
+  const chart = !hasData ? (
+    <p className="text-muted metrics-chart__empty">{emptyMessage}</p>
+  ) : (
+    <div className="metrics-chart__canvas">
+      <ResponsiveContainer width="100%" height={240}>
+        {variant === "area" ? (
+          <AreaChart data={data}>
+            <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
+            <XAxis
+              dataKey="t"
+              tickFormatter={formatAxisTime}
+              stroke="var(--text-muted)"
+              fontSize={12}
+              tickLine={false}
+            />
+            <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} width={56} />
+            <Tooltip
+              labelFormatter={(value) => new Date(Number(value)).toLocaleString()}
+              formatter={(value, name) => {
+                const key = String(name);
+                const item = series.find((s) => s.key === key);
+                const num = typeof value === "number" ? value : Number(value);
+                return [item?.formatValue ? item.formatValue(num) : num, item?.label ?? key];
+              }}
+              contentStyle={{
+                background: "var(--bg-card)",
+                border: "1px solid var(--border)",
+                borderRadius: "8px",
+              }}
+            />
+            <Legend />
+            {series.map((item) => (
+              <Area
+                key={item.key}
+                type="monotone"
+                dataKey={item.key}
+                name={item.label}
+                stroke={item.color}
+                fill={item.color}
+                fillOpacity={0.12}
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+            ))}
+          </AreaChart>
+        ) : (
+          <LineChart data={data}>
+            <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
+            <XAxis
+              dataKey="t"
+              tickFormatter={formatAxisTime}
+              stroke="var(--text-muted)"
+              fontSize={12}
+              tickLine={false}
+            />
+            <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} width={56} />
+            <Tooltip
+              labelFormatter={(value) => new Date(Number(value)).toLocaleString()}
+              formatter={(value, name) => {
+                const key = String(name);
+                const item = series.find((s) => s.key === key);
+                const num = typeof value === "number" ? value : Number(value);
+                return [item?.formatValue ? item.formatValue(num) : num, item?.label ?? key];
+              }}
+              contentStyle={{
+                background: "var(--bg-card)",
+                border: "1px solid var(--border)",
+                borderRadius: "8px",
+              }}
+            />
+            <Legend />
+            {series.map((item) => (
+              <Line
+                key={item.key}
+                type="monotone"
+                dataKey={item.key}
+                name={item.label}
+                stroke={item.color}
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+            ))}
+          </LineChart>
+        )}
+      </ResponsiveContainer>
+    </div>
+  );
+
+  if (embedded) {
+    return <div className="metrics-chart metrics-chart--embedded">{chart}</div>;
+  }
 
   return (
     <div className="panel metrics-chart">
       <div className="panel__header">
         <h3 className="panel__title">{title}</h3>
       </div>
-      {!hasData ? (
-        <p className="text-muted metrics-chart__empty">{emptyMessage}</p>
-      ) : (
-        <div className="metrics-chart__canvas">
-          <ResponsiveContainer width="100%" height={240}>
-            {variant === "area" ? (
-              <AreaChart data={data}>
-                <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="t"
-                  tickFormatter={formatAxisTime}
-                  stroke="var(--text-muted)"
-                  fontSize={12}
-                  tickLine={false}
-                />
-                <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} width={56} />
-                <Tooltip
-                  labelFormatter={(value) => new Date(Number(value)).toLocaleString()}
-                  formatter={(value, name) => {
-                    const key = String(name);
-                    const item = series.find((s) => s.key === key);
-                    const num = typeof value === "number" ? value : Number(value);
-                    return [item?.formatValue ? item.formatValue(num) : num, item?.label ?? key];
-                  }}
-                  contentStyle={{
-                    background: "var(--bg-card)",
-                    border: "1px solid var(--border)",
-                    borderRadius: "8px",
-                  }}
-                />
-                <Legend />
-                {series.map((item) => (
-                  <Area
-                    key={item.key}
-                    type="monotone"
-                    dataKey={item.key}
-                    name={item.label}
-                    stroke={item.color}
-                    fill={item.color}
-                    fillOpacity={0.12}
-                    strokeWidth={2}
-                    dot={false}
-                    isAnimationActive={false}
-                  />
-                ))}
-              </AreaChart>
-            ) : (
-              <LineChart data={data}>
-                <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="t"
-                  tickFormatter={formatAxisTime}
-                  stroke="var(--text-muted)"
-                  fontSize={12}
-                  tickLine={false}
-                />
-                <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} width={56} />
-                <Tooltip
-                  labelFormatter={(value) => new Date(Number(value)).toLocaleString()}
-                  formatter={(value, name) => {
-                    const key = String(name);
-                    const item = series.find((s) => s.key === key);
-                    const num = typeof value === "number" ? value : Number(value);
-                    return [item?.formatValue ? item.formatValue(num) : num, item?.label ?? key];
-                  }}
-                  contentStyle={{
-                    background: "var(--bg-card)",
-                    border: "1px solid var(--border)",
-                    borderRadius: "8px",
-                  }}
-                />
-                <Legend />
-                {series.map((item) => (
-                  <Line
-                    key={item.key}
-                    type="monotone"
-                    dataKey={item.key}
-                    name={item.label}
-                    stroke={item.color}
-                    strokeWidth={2}
-                    dot={false}
-                    isAnimationActive={false}
-                  />
-                ))}
-              </LineChart>
-            )}
-          </ResponsiveContainer>
-        </div>
-      )}
+      {chart}
     </div>
   );
 }

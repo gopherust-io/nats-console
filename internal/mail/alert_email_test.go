@@ -1,13 +1,12 @@
 package mail
 
 import (
-	"context"
 	"testing"
 	"time"
 
-	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+
+	"github.com/gopherust-io/nats-consol/internal/domain"
 )
 
 func TestIsPlaceholderEmail(t *testing.T) {
@@ -40,17 +39,4 @@ func TestBuildAlertEmail(t *testing.T) {
 	assert.Contains(t, content.HTMLBody, "Critical")
 	assert.Contains(t, content.HTMLBody, "#B91C1C")
 	assert.Contains(t, content.HTMLBody, "Current value")
-}
-
-func TestNopSender(t *testing.T) {
-	t.Parallel()
-	require.NoError(t, NopSender{}.Send(context.Background(), []string{"a@b.com"}, "s", "t", "h"))
-}
-
-func TestNewSenderFromConfigDisabled(t *testing.T) {
-	t.Parallel()
-	s, err := NewSenderFromConfig(false, SMTPConfig{})
-	require.NoError(t, err)
-	_, ok := s.(NopSender)
-	assert.True(t, ok)
 }

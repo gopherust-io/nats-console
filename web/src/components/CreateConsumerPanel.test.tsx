@@ -5,11 +5,6 @@ import CreateConsumerPanel from "./CreateConsumerPanel";
 import type { StreamConfig } from "../lib/api";
 import { TestProviders } from "../test/mocks";
 
-vi.mock("../lib/themeStyles", () => ({
-  loadThemeStyles: vi.fn(async () => undefined),
-  preloadThemeStyles: vi.fn(async () => undefined),
-}));
-
 const stream: StreamConfig = {
   name: "ORDERS",
   retention: "limits",

@@ -193,13 +193,26 @@ button:disabled {
 }
 
 .card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  position: relative;
+  overflow: hidden;
+  background: var(--card-surface, var(--bg-card));
+  border: var(--card-border, 1px solid color-mix(in srgb, var(--border) 55%, transparent));
+  border-radius: var(--card-radius, var(--radius-xl));
   padding: 20px;
   box-shadow: var(--shadow-sm);
   backdrop-filter: blur(var(--card-blur, 0px));
   transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: var(--card-top-glow, none);
+  box-shadow: 0 0 10px 1px rgba(255, 255, 255, 0.035);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .card-label {
@@ -1506,22 +1519,20 @@ tr:hover td {
 }
 
 .assistant-fab {
-  position: fixed;
+  /* !important: liquid-metal injected styles also set position/width and load later. */
+  position: fixed !important;
   /* Keep clear of right-side row actions (Delete/Creds) and panel footers. */
-  left: 28px;
-  right: auto;
-  bottom: 28px;
+  left: 28px !important;
+  right: auto !important;
+  bottom: 28px !important;
   z-index: 40;
-  width: 52px;
-  height: 52px;
+  display: inline-block !important;
+  width: fit-content !important;
+  height: auto !important;
   border: 0;
-  border-radius: 999px;
-  background: var(--btn-bg, var(--accent));
-  color: var(--btn-text, var(--accent-text));
-  font-size: var(--fs-sm);
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  box-shadow: var(--btn-shadow, 0 8px 24px rgba(0, 0, 0, 0.28));
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
   cursor: pointer;
 }
 
@@ -1533,8 +1544,8 @@ body:has(.nc-confirm-overlay) .assistant-fab {
 }
 
 .assistant-fab--setup {
-  opacity: 0.85;
-  border: 2px dashed rgba(255, 255, 255, 0.35);
+  opacity: 0.9;
+  filter: saturate(0.85);
 }
 
 .assistant-panel {
@@ -1598,7 +1609,8 @@ body:has(.nc-confirm-overlay) .assistant-fab {
 }
 
 .assistant-panel__icon-btn,
-.assistant-panel__close {
+.assistant-panel__close,
+.assistant-panel__clear {
   border: 0;
   background: transparent;
   color: var(--text-muted);
@@ -1612,8 +1624,21 @@ body:has(.nc-confirm-overlay) .assistant-fab {
   font-size: var(--fs-xl);
 }
 
-.assistant-panel__icon-btn:hover,
-.assistant-panel__close:hover {
+.assistant-panel__clear {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  padding: 4px 8px;
+}
+
+.assistant-panel__icon-btn:disabled,
+.assistant-panel__clear:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.assistant-panel__icon-btn:hover:not(:disabled),
+.assistant-panel__close:hover,
+.assistant-panel__clear:hover:not(:disabled) {
   color: var(--text-primary);
   background: rgba(255, 255, 255, 0.06);
 }
@@ -1862,6 +1887,7 @@ body:has(.nc-confirm-overlay) .assistant-fab {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 10px;
+  align-items: end;
   padding: 12px 16px 16px;
   border-top: 1px solid var(--border-subtle);
 }
@@ -1874,6 +1900,12 @@ body:has(.nc-confirm-overlay) .assistant-fab {
   background: var(--bg-input);
   color: var(--text-primary);
   padding: 10px 12px;
+}
+
+.assistant-panel__send.liquid-metal-btn {
+  display: inline-block;
+  width: auto;
+  flex-shrink: 0;
 }
 
 .assistant-panel__setup {
@@ -2083,6 +2115,21 @@ body:has(.nc-confirm-overlay) .assistant-fab {
   min-height: 240px;
 }
 
+.metrics-chart__canvas .recharts-wrapper,
+.metrics-chart__canvas .recharts-surface,
+.metrics-chart__canvas svg {
+  outline: none;
+}
+
+.metrics-chart__canvas .recharts-wrapper:focus,
+.metrics-chart__canvas .recharts-wrapper:focus-visible,
+.metrics-chart__canvas .recharts-surface:focus,
+.metrics-chart__canvas .recharts-surface:focus-visible,
+.metrics-chart__canvas svg:focus,
+.metrics-chart__canvas svg:focus-visible {
+  outline: none;
+}
+
 .metrics-chart__empty {
   padding: 24px 20px;
 }
@@ -2099,12 +2146,13 @@ body:has(.nc-confirm-overlay) .assistant-fab {
 
 /* Architecture review / score / refactor cards (Docs) — replicas nested-card language */
 .arch-review {
-  --raft-lift: 0 4px 12px color-mix(in srgb, var(--text, #000) 16%, transparent);
-  --raft-fill: color-mix(in srgb, var(--bg-card, var(--surface, #161616)) 82%, var(--bg, #070707));
-  --raft-inner: color-mix(in srgb, var(--bg, #070707) 92%, var(--bg-card, #161616));
-  --raft-radius: 8px;
-  --raft-border: 1px solid color-mix(in srgb, var(--border, #555) 72%, var(--text, #fff) 4%);
+  --raft-lift: none;
+  --raft-fill: var(--bg-card, #050505);
+  --raft-inner: color-mix(in srgb, #000 55%, var(--bg-card, #050505));
+  --raft-radius: var(--card-radius, 16px);
+  --raft-border: var(--card-border, 1px solid rgba(255, 255, 255, 0.09));
   --raft-ink: #fff;
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 1.1rem;
@@ -2113,20 +2161,19 @@ body:has(.nc-confirm-overlay) .assistant-fab {
   overflow: hidden;
   border-radius: var(--raft-radius);
   border: var(--raft-border);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--raft-ink) 3%, var(--raft-fill)) 0%,
-    var(--raft-fill) 100%
-  );
-  box-shadow: var(--raft-lift);
+  background: var(--card-surface, var(--raft-fill));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
-[data-theme="control-light"] .arch-review {
-  --raft-lift: none;
-  --raft-fill: var(--bg-card);
-  --raft-inner: var(--bg-input);
-  --raft-border: 1px solid var(--border);
-  --raft-ink: var(--text-primary);
+.arch-review::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: var(--card-top-glow, none);
+  box-shadow: 0 0 10px 1px rgba(255, 255, 255, 0.035);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .arch-review__header {
@@ -2753,5 +2800,4 @@ body:has(.nc-confirm-overlay) .assistant-fab {
   line-height: 1.45;
   overflow-x: auto;
 }
-
 

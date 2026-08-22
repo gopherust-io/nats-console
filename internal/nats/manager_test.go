@@ -4,9 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gopherust-io/nats-consol/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gopherust-io/nats-consol/internal/config"
 )
 
 func TestClientIsAlive(t *testing.T) {
@@ -72,4 +73,48 @@ func TestConnectionHooksMarkState(t *testing.T) {
 	status := m.stateSnapshot("cluster-1")
 	assert.False(t, status.Connected)
 	assert.Equal(t, assert.AnError.Error(), status.LastError)
+}
+
+func TestSubscribeStatusPublishesOnDisconnect(t *testing.T) {
+	t.Parallel()
+
+	m := NewManager(nil, config.Config{})
+	t.Cleanup(m.Stop)
+
+	updates, latest, unsub := m.SubscribeStatus("cluster-1")
+	defer unsub()
+	assert.Equal(t, "cluster-1", latest.ClusterID)
+	assert.False(t, latest.Connected)
+
+	hooks := m.connectionHooks("cluster-1")
+	hooks.OnDisconnect(nil, assert.AnError)
+
+	select {
+	case status := <-updates:
+		assert.False(t, status.Connected)
+		assert.Equal(t, assert.AnError.Error(), status.LastError)
+	case <-time.After(time.Second):
+		t.Fatal("expected status update on disconnect")
+	}
+}
+
+func TestSubscribeStatusStopsAfterUnsubscribe(t *testing.T) {
+	t.Parallel()
+
+	m := NewManager(nil, config.Config{})
+	t.Cleanup(m.Stop)
+
+	updates, _, unsub := m.SubscribeStatus("cluster-1")
+	unsub()
+
+	_, open := <-updates
+	assert.False(t, open)
+
+	hooks := m.connectionHooks("cluster-1")
+	hooks.OnDisconnect(nil, assert.AnError)
+
+	m.mu.RLock()
+	_, hasListeners := m.statusListeners["cluster-1"]
+	m.mu.RUnlock()
+	assert.False(t, hasListeners)
 }

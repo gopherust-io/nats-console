@@ -5,7 +5,7 @@ import (
 
 	"github.com/gopherust-io/nats-consol/internal/config"
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/repo"
 	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
@@ -25,7 +25,7 @@ type Service struct {
 	cfg     config.Config
 }
 
-func NewService(cfg config.Config, st *store.Store, nats *natsclient.Manager) (*Service, error) {
+func NewService(cfg config.Config, st *repo.DB, nats *natsclient.Manager) (*Service, error) {
 	if !cfg.AI.Enabled {
 		return nil, nil
 	}

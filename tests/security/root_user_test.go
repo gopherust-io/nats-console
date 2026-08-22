@@ -8,11 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gopherust-io/nats-consol/internal/store"
-	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
-	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gopherust-io/nats-consol/internal/repo"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
+	"github.com/gopherust-io/nats-consol/tests/testutil"
 )
 
 func TestRootUserSeededAtBootstrap(t *testing.T) {
@@ -23,7 +24,7 @@ func TestRootUserSeededAtBootstrap(t *testing.T) {
 
 	users, err := stack.Store.ListUsers(ctx)
 	require.NoError(t, err)
-	var root *store.User
+	var root *repo.User
 	for i := range users {
 		if users[i].IsRoot {
 			root = &users[i]
@@ -63,17 +64,17 @@ func TestDelegatedAdminCannotModifyRoot(t *testing.T) {
 	}
 	require.NotEmpty(t, rootID, "missing root user")
 
-	delegate, err := stack.Store.CreateUser(ctx, store.UserCreate{
+	delegate, err := stack.Store.CreateUser(ctx, repo.UserCreate{
 		Username: "delegate-admin",
 		Email:    "delegate@example.com",
 		Password: "delegate-pass",
-		Roles:    []string{store.RoleAdmin},
-		AccessRules: &store.AccessRules{
+		Roles:    []string{repo.RoleAdmin},
+		AccessRules: &repo.AccessRules{
 			ClusterIDs:      []string{stack.DefaultClusterID(t)},
 			ManageUsers:     true,
 			ViewAudit:       false,
 			DeleteClusters:  false,
-			AssignableRoles: []string{store.RoleOperator, store.RoleViewer},
+			AssignableRoles: []string{repo.RoleOperator, repo.RoleViewer},
 		},
 	})
 	require.NoError(t, err)
@@ -127,24 +128,24 @@ func TestDelegatedAdminCannotEscalateRoles(t *testing.T) {
 	stack := testutil.SetupStack(t)
 	ctx := context.Background()
 
-	_, err := stack.Store.CreateUser(ctx, store.UserCreate{
+	_, err := stack.Store.CreateUser(ctx, repo.UserCreate{
 		Username: "delegate-admin",
 		Email:    "delegate@example.com",
 		Password: "delegate-pass",
-		Roles:    []string{store.RoleAdmin},
-		AccessRules: &store.AccessRules{
+		Roles:    []string{repo.RoleAdmin},
+		AccessRules: &repo.AccessRules{
 			ClusterIDs:      []string{stack.DefaultClusterID(t)},
 			ManageUsers:     true,
-			AssignableRoles: []string{store.RoleViewer},
+			AssignableRoles: []string{repo.RoleViewer},
 		},
 	})
 	require.NoError(t, err)
 
-	target, err := stack.Store.CreateUser(ctx, store.UserCreate{
+	target, err := stack.Store.CreateUser(ctx, repo.UserCreate{
 		Username:    "target-viewer",
 		Email:       "target@example.com",
 		Password:    "target-pass",
-		Roles:       []string{store.RoleViewer},
+		Roles:       []string{repo.RoleViewer},
 		AccessRules: stack.ClusterAccessRules(t),
 	})
 	require.NoError(t, err)

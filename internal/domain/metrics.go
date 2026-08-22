@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 const (
@@ -169,7 +171,7 @@ func StreamRateMetricsCSV(streamName string) string {
 
 func ParseMetricsStep(raw string) (time.Duration, error) {
 	raw = strings.TrimSpace(strings.ToLower(raw))
-	if raw == "" {
+	if commonstrings.IsEmpty(raw) {
 		return 0, nil
 	}
 	switch raw {

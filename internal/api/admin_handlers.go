@@ -23,6 +23,19 @@ func NewAdminHandler(admin *app.AdminService) *AdminHandler {
 	return &AdminHandler{admin: admin}
 }
 
+// RotateEncryptionKey godoc
+//
+// @Summary Rotate Encryption Key
+// @Tags Admin
+// @Produce json
+// @Success 200 {object} RotateKeyEnvelope
+// @Failure 401 {object} ErrorEnvelope
+// @Failure 403 {object} ErrorEnvelope
+// @Failure 404 {object} ErrorEnvelope
+// @Security BasicAuth
+// @Security BearerAuth
+// @Security SessionCookie
+// @Router /api/v1/admin/rotate-encryption-key [post]
 func (h *AdminHandler) RotateEncryptionKey(ctx *fasthttp.RequestCtx) {
 	c := httpctx.FromRequest(ctx)
 	user, ok := auth.UserFromContext(c)

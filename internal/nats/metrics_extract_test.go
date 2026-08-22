@@ -3,12 +3,13 @@ package natsclient
 import (
 	"testing"
 
-	"github.com/gopherust-io/nats-consol/internal/domain"
-	"github.com/gopherust-io/nats-consol/internal/store"
-	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/repo"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 func TestExtractVarzMetrics(t *testing.T) {
@@ -33,7 +34,6 @@ func TestExtractVarzMetrics(t *testing.T) {
 func TestExtractJSZMetrics(t *testing.T) {
 	t.Parallel()
 
-	// Shape matches nats-server JSInfo monitor JSON (top-level counts; total is an int).
 	raw := strings.StringToBytes(`{"streams":3,"consumers":4,"messages":99,"total":1}`)
 	samples, err := ExtractJSZMetrics(raw)
 	require.NoError(t, err)
@@ -184,19 +184,17 @@ func TestExtractAccountMetrics(t *testing.T) {
 	t.Parallel()
 
 	info := &nats.AccountInfo{
-		Tier: nats.Tier{
-			Store:     2048,
-			Memory:    1024,
-			Streams:   2,
-			Consumers: 5,
-		},
+		Store:     2048,
+		Memory:    1024,
+		Streams:   2,
+		Consumers: 5,
 	}
 	samples := ExtractAccountMetrics(info)
 	assert.Equal(t, float64(2048), sampleValue(samples, domain.MetricJetStreamStorageBytes))
 	assert.Equal(t, float64(5), sampleValue(samples, domain.MetricJetStreamConsumers))
 }
 
-func sampleValue(samples []store.MetricSampleRow, metric string) float64 {
+func sampleValue(samples []repo.MetricSampleRow, metric string) float64 {
 	for _, s := range samples {
 		if s.Metric == metric {
 			return s.Value

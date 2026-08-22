@@ -7,7 +7,7 @@ import (
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
-// SubjectMatchesPattern reports whether subject matches a NATS subject pattern (including * and >).
+// SubjectMatchesPattern reports whether subject matches a NATS subject pattern (including * and >)
 func SubjectMatchesPattern(subject, pattern string) bool {
 	return subjectauth.MatchesPattern(subject, pattern)
 }

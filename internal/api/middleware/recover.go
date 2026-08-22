@@ -23,7 +23,7 @@ func (mw *MwHandler) ApplyRecover(next fasthttp.RequestHandler) fasthttp.Request
 				Bytes("stack", debug.Stack()).
 				Str("method", commonstrings.BytesToString(ctx.Method())).
 				Str("path", requestPath(ctx)).
-				Str("request_id", requestID(ctx)).
+				Str("requestID", requestID(ctx)).
 				Msg("http handler panic")
 			httpstatus.WriteErrorMessage(ctx, fasthttp.StatusInternalServerError, httpstatus.CodeInternal, "internal error")
 		}()

@@ -76,7 +76,12 @@ echo "==> smoke: openapi spec"
 # Download fully before grepping: pipefail + grep -q would SIGPIPE curl on large YAML.
 openapi_tmp="$(mktemp)"
 curl_sf "${BASE_URL}/api/openapi.yaml" -o "$openapi_tmp"
-grep -q 'openapi:' "$openapi_tmp"
+# swag emits OpenAPI 2 (swagger: "2.0"); accept either 2.x or 3.x docs.
+if ! grep -qE '^(openapi:|swagger:)' "$openapi_tmp"; then
+  echo "openapi/swagger document marker missing" >&2
+  rm -f "$openapi_tmp"
+  exit 1
+fi
 rm -f "$openapi_tmp"
 
 echo "All smoke checks passed."

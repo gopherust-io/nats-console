@@ -7,7 +7,7 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/ipset"
-	"github.com/gopherust-io/nats-consol/internal/store"
+	"github.com/gopherust-io/nats-consol/internal/repo"
 	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
@@ -31,13 +31,13 @@ func (mw *MwHandler) VerifyAudit(next fasthttp.RequestHandler) fasthttp.RequestH
 		resourceType, resourceName := audit.ParseResource(path)
 		trustedProxies := ipset.ParseTrustedProxies(mw.cfg.TrustedProxyList())
 
-		details := store.AuditRequestDetails{
+		details := repo.AuditRequestDetails{
 			Method: method,
 			Path:   path,
 			Status: ctx.Response.StatusCode(),
 		}
 
-		mw.auditWriter.Log(store.AuditCreate{
+		mw.auditWriter.Log(repo.AuditCreate{
 			Actor:        user.Username,
 			Action:       audit.ActionForMethod(method),
 			ClusterID:    audit.ClusterIDFromPath(path),

@@ -12,17 +12,18 @@ appears as a distinct `connz` client named `fleet-<service>`.
 Included by the root [`docker-compose.yml`](../../docker-compose.yml) under Compose
 profile **`fleet`** (same Docker Desktop project: `nats-consol`). Requires JetStream
 reachable on that network (default hostname `nats`) and a sibling checkout of
-`gopherust-io/nats` (this repo’s `go.mod` replace).
+`gopherust-io/nats` **v0.6.0** (see root `go.mod`).
 
 ```bash
-# From nats-consol: docker compose up -d   # postgres + nats + console
-
+# From nats-consol: 5-node lab + fleet
+make nats-cluster-up
 make fleet-up
 # or: docker compose -p nats-consol -f examples/fleet/docker-compose.yml --profile fleet up -d --build
 ```
 
 Then open Consol → Account → **Connections**. You should see names like
-`fleet-order-api`, `fleet-payment-processor`, `fleet-checkout-gateway`, …
+`fleet-order-api`, `fleet-payment-processor`, `fleet-checkout-gateway`, … spread
+across `nats-1`…`nats-5` (not all on the meta leader).
 
 ```bash
 curl -s 'http://127.0.0.1:8222/connz?limit=1024' | jq -r '.connections[].name' | grep '^fleet-' | sort
@@ -32,17 +33,18 @@ curl -s 'http://127.0.0.1:8222/connz?limit=1024' | jq -r '.connections[].name' |
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `NATS_URL` | `nats://nats:4222` | NATS URL on the `nats-consol` network |
+| `NATS_URL` / `FLEET_NATS_URL` | all 5 `nats-cluster-*` peers | Comma-separated URLs; clients randomize dial + reconnect |
+| `STREAM_REPLICAS` | `1` | JetStream stream/KV replica count |
 | `TEL_ENABLE` | `false` | OTLP on/off |
 
 Examples:
 
 ```bash
-# Consol single-node compose (service name "nats")
-NATS_URL=nats://nats:4222 make fleet-up
+# After make nats-cluster-up (default — balanced across all replicas)
+make fleet-up
 
-# After make nats-cluster-up (nodes share the project default network)
-FLEET_NATS_URL=nats://nats-cluster-1:4222 make fleet-up
+# Single-node compose broker (service name "nats")
+FLEET_NATS_URL=nats://nats:4222 make fleet-up
 ```
 
 Stop (removes fleet services only; leaves postgres/console/nats):
@@ -55,7 +57,10 @@ make fleet-down
 ## Local (one process)
 
 ```bash
-# All services, few connections (fleet-all + optional dedicated clients)
+# All services — defaults to all 5 cluster ports (4222–4226)
+TEL_ENABLE=false go run ./examples/fleet
+
+# Single broker
 TEL_ENABLE=false NATS_URL=nats://127.0.0.1:4222 go run ./examples/fleet
 
 # One service → one connection named fleet-<SERVICE>
@@ -84,7 +89,7 @@ Core NATS RPC subjects (`rpc.>`) are **not** on a JetStream stream.
 | Ops toolkit (DLQ, shadow, supervisor, soft liveness, flight recorder, fingerprint) | `order-fulfillment` |
 | Idempotency KV claim | `payment-processor` |
 | Worker pool + `BackpressureNak` | `media-transcoder`, `payment-processor`, `order-fulfillment` |
-| `ProdFanOut` / `BackpressureBlock` | `email-notifier` |
+| Fan-out + `BackpressureBlock` | `email-notifier` |
 | Supervise pull + concurrency | `order-projector` |
 | Shard publish/consume | `order-api` → `order-shard-0` / `order-shard-1` |
 | KV projection | `user-projector` → `fleet-users` |
@@ -112,7 +117,7 @@ In Docker / `SERVICE=<name>`, each process uses **one** NATS connection (`fleet-
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `NATS_URL` | `nats://127.0.0.1:4222` | NATS URL(s) |
+| `NATS_URL` | `nats://127.0.0.1:4222,…,4226` | Comma-separated NATS URLs (randomized dial) |
 | `SERVICE` | `all` | `all` or a single service name |
 | `RATE_SCALE` | `1` | Higher = faster publishers / RPC loops |
 | `TEL_ENABLE` | (tel default) | Force OTLP on/off |

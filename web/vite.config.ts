@@ -12,6 +12,9 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
         cookieDomainRewrite: "localhost",
+        // Long-lived EventSource (connz/replicas/overview); default timeouts break live UI.
+        timeout: 0,
+        proxyTimeout: 0,
       },
       "/debug": {
         target: process.env.VITE_API_PROXY_TARGET ?? "http://localhost:8081",

@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	libnats "github.com/gopherust-io/nats"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/rs/zerolog"
 )
 
@@ -50,11 +51,11 @@ func fleetServiceName() string {
 
 func multiServiceMode() bool {
 	s := fleetServiceName()
-	return s == "" || s == "all"
+	return commonstrings.IsEmpty(s) || s == "all"
 }
 
 func clientNameFor(service string) string {
-	if service == "" || service == "all" {
+	if commonstrings.IsEmpty(service) || service == "all" {
 		return "fleet-all"
 	}
 	return "fleet-" + service
@@ -79,11 +80,6 @@ func applyOpsWorker(cfg *libnats.Config) {
 }
 
 func applyFanOut(cfg *libnats.Config) {
-	addr := cfg.Conn.Address
-	name := cfg.Conn.ClientName
-	*cfg = libnats.ProdFanOutConfig()
-	cfg.Conn.Address = addr
-	cfg.Conn.ClientName = name
 	cfg.RuntimeConsumer.WorkerPoolEnabled = false
 	cfg.RuntimeConsumer.AckWait = ackWait
 	cfg.RuntimeConsumer.IdleHeartbeat = 0
@@ -91,6 +87,7 @@ func applyFanOut(cfg *libnats.Config) {
 	cfg.RuntimeConsumer.PendingMsgLimit = 0
 	cfg.RuntimeConsumer.PendingMsgBuffer = 0
 	cfg.Backpressure.Mode = libnats.BackpressureBlock
+	cfg.Backpressure.MaxAckPending = 500
 	cfg.Backpressure.PendingMsgLimit = 0
 	cfg.Backpressure.PendingMsgBuffer = 0
 }

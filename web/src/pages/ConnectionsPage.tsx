@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
@@ -13,18 +13,18 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { api, clusterPath } from "../lib/api";
 import { useCluster } from "../lib/cluster";
 import {
-  connectionTLSCipher,
   connectionUsername,
   formatConnectedSince,
   formatRttDisplay,
-  formatTLSVersion,
   isSlowConsumerConnection,
   parseRttMs,
 } from "../lib/connectionInspector";
-import { clusterQueryKey } from "../lib/query";
+import { clusterQueryKey, queryClient, visibilityAwareInterval } from "../lib/query";
+import "../styles/replicas.css";
+import "../styles/connections.css";
 
 const CONN_TABLE_MAX_HEIGHT = 720;
-const COL_NARROW = new Set(["published", "received", "tls", "account"]);
+const COL_NARROW = new Set(["published", "received"]);
 const COL_MEDIUM = new Set(["published", "received"]);
 
 type ConnzConnection = {
@@ -48,16 +48,13 @@ type ConnzConnection = {
   account?: string;
   user?: string;
   authorized_user?: string;
-  tls_version?: string;
-  tls_cipher?: string;
-  tls_cipher_suite?: string;
-  tls_first?: boolean;
   slow_consumer?: boolean;
   is_slow_consumer?: boolean;
   reason?: string;
 };
 
 type ConnzResponse = {
+  now?: string;
   connections?: ConnzConnection[];
   num_connections?: number;
   total?: number;
@@ -75,12 +72,13 @@ export default function ConnectionsPage() {
   const [groupBy, setGroupBy] = useState("none");
   const [sortBy, setSortBy] = useState("start");
   const [filter, setFilter] = useState("");
+  const deferredFilter = useDeferredValue(filter);
   const [offset, setOffset] = useState(0);
   const limit = DEFAULT_PAGE_SIZE;
   const isNarrow = useMediaQuery("(max-width: 720px)");
   const isCompact = useMediaQuery("(max-width: 1100px)");
 
-  useConnzEvents(clusterId);
+  const { live } = useConnzEvents(clusterId);
 
   useEffect(() => {
     setOffset(0);
@@ -88,20 +86,37 @@ export default function ConnectionsPage() {
 
   const connzQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "connz"),
-    queryFn: async () =>
-      (await api<ConnzResponse>(clusterPath(clusterId!, "/monitoring/connz?limit=1024&auth=1"))).data,
+    queryFn: async () => {
+      const next = (
+        await api<ConnzResponse>(
+          // Prefer hub/SSE cache; omit fresh=1 so monitoring hub can serve.
+          clusterPath(clusterId!, "/monitoring/connz?limit=1024&auth=1"),
+          { cache: "no-store" },
+        )
+      ).data;
+      const current = queryClient.getQueryData<ConnzResponse>(clusterQueryKey(clusterId, "connz"));
+      const curMs = current?.now ? Date.parse(current.now) : 0;
+      const nextMs = next?.now ? Date.parse(next.now) : 0;
+      // Do not let a slow REST response rewind a newer SSE connect/disconnect frame.
+      if (curMs > 0 && nextMs > 0 && nextMs < curMs) {
+        return current!;
+      }
+      return next;
+    },
     enabled: Boolean(clusterId),
-    staleTime: 5_000,
-    refetchOnWindowFocus: false,
+    staleTime: 1_000,
+    // While SSE is live, do not REST-poll — a slow response can overwrite a
+    // newer connect/disconnect frame. useConnzEvents resumes REST on SSE death.
+    refetchInterval: live ? false : visibilityAwareInterval(2_000),
+    refetchOnWindowFocus: !live,
     // Do not keepPreviousData across cluster keys — auth identities from the
     // prior cluster would flash under the new system URL.
   });
 
   const connections = useMemo(() => {
-    let list = [...(connzQuery.data?.connections ?? [])];
-    const q = filter.trim().toLowerCase();
-    if (q) {
-      list = list.filter((c) => {
+    const source = connzQuery.data?.connections ?? [];
+    const q = deferredFilter.trim().toLowerCase();
+    const list = q ? source.filter((c) => {
         const user = connectionUsername(c)?.toLowerCase() ?? "";
         return (
           c.name?.toLowerCase().includes(q) ||
@@ -111,8 +126,7 @@ export default function ConnectionsPage() {
           user.includes(q) ||
           String(c.cid ?? "").includes(q)
         );
-      });
-    }
+      }) : source.slice();
     list.sort((a, b) => {
       if (sortBy === "rtt") {
         const aMs = parseRttMs(a.rtt);
@@ -128,7 +142,7 @@ export default function ConnectionsPage() {
       return String(b.start ?? "").localeCompare(String(a.start ?? ""));
     });
     return list;
-  }, [connzQuery.data, filter, sortBy]);
+  }, [connzQuery.data, deferredFilter, sortBy]);
 
   const pageRows = useMemo(() => {
     if (groupBy !== "none") return connections;
@@ -159,31 +173,34 @@ export default function ConnectionsPage() {
 
   const columns = useMemo<VirtualTableColumn[]>(() => {
     const hide = isNarrow ? COL_NARROW : isCompact ? COL_MEDIUM : null;
+    // Share leftover width across tracks so columns stay evenly spaced (name alone
+    // must not absorb the whole free space as a single fr).
     const all: VirtualTableColumn[] = [
-      { id: "name", header: t("common.name"), width: "minmax(0, 1.4fr)", cellClassName: "virtual-table__truncate" },
-      { id: "slow", header: t("connections.status"), width: "104px" },
-      { id: "ip", header: t("connections.ip"), width: "192px", cellClassName: "mono" },
-      { id: "rtt", header: t("connections.rtt"), width: "88px", cellClassName: "mono nc-conn-rtt" },
-      { id: "tls", header: t("connections.tlsVersion"), width: "64px" },
-      { id: "user", header: t("common.username"), width: "minmax(0, 0.9fr)", cellClassName: "virtual-table__truncate" },
-      { id: "account", header: t("connections.account"), width: "minmax(0, 0.9fr)", cellClassName: "virtual-table__truncate" },
-      { id: "connected", header: t("connections.connectedSince"), width: "minmax(0, 140px)", cellClassName: "virtual-table__truncate" },
-      { id: "published", header: t("connections.messagesPublished"), width: "80px", align: "right", cellClassName: "mono" },
-      { id: "received", header: t("connections.messagesReceived"), width: "80px", align: "right", cellClassName: "mono" },
+      { id: "name", header: t("common.name"), width: "minmax(10rem, 1.35fr)", cellClassName: "virtual-table__truncate" },
+      { id: "slow", header: t("connections.status"), width: "minmax(5.5rem, 0.7fr)" },
+      { id: "ip", header: t("connections.ip"), width: "minmax(9.5rem, 1.1fr)", cellClassName: "mono" },
+      { id: "rtt", header: t("connections.rtt"), width: "minmax(4.5rem, 0.55fr)", cellClassName: "mono nc-conn-rtt" },
+      { id: "connected", header: t("connections.connectedSince"), width: "minmax(7rem, 0.9fr)", cellClassName: "virtual-table__truncate" },
+      { id: "published", header: t("connections.messagesPublished"), width: "minmax(4.75rem, 0.55fr)", align: "right", cellClassName: "mono" },
+      { id: "received", header: t("connections.messagesReceived"), width: "minmax(5rem, 0.55fr)", align: "right", cellClassName: "mono" },
     ];
     return hide ? all.filter((c) => !hide.has(c.id)) : all;
   }, [isCompact, isNarrow, t]);
 
   const renderCell = useCallback(
     (c: ConnzConnection, columnId: string) => {
-      const username = connectionUsername(c);
       switch (columnId) {
         case "slow": {
           const slow = isSlowConsumerConnection(c);
+          const label = slow ? t("connections.slow") : t("connections.healthy");
           return (
-            <span className={`nc-conn-status${slow ? " nc-conn-status--warn" : " nc-conn-status--ok"}`}>
-              <span className="nc-conn-status__dot" aria-hidden="true" />
-              {slow ? t("connections.slow") : t("connections.healthy")}
+            <span className="replicas-peer-name">
+              <span
+                className={`replicas-status-dot replicas-status-dot--${slow ? "warn" : "ok"}`}
+                title={label}
+                aria-label={label}
+              />
+              {label}
             </span>
           );
         }
@@ -210,26 +227,6 @@ export default function ConnectionsPage() {
         }
         case "rtt":
           return formatRttDisplay(c.rtt);
-        case "tls": {
-          const cipher = connectionTLSCipher(c);
-          return (
-            <span title={cipher || formatTLSVersion(c)}>
-              {c.tls_version || t("common.emDash")}
-            </span>
-          );
-        }
-        case "user":
-          return (
-            <span className="virtual-table__truncate" title={username}>
-              {username || t("common.emDash")}
-            </span>
-          );
-        case "account":
-          return (
-            <span className="virtual-table__truncate" title={c.account || undefined}>
-              {c.account || t("common.emDash")}
-            </span>
-          );
         case "connected":
           return (
             <span className="virtual-table__truncate" title={c.start ? new Date(c.start).toLocaleString() : undefined}>
@@ -237,9 +234,9 @@ export default function ConnectionsPage() {
             </span>
           );
         case "published":
-          return String(c.in_msgs ?? 0);
+          return <ClockNumber value={c.in_msgs ?? 0} />;
         case "received":
-          return String(c.out_msgs ?? 0);
+          return <ClockNumber value={c.out_msgs ?? 0} />;
         default:
           return null;
       }
@@ -253,7 +250,16 @@ export default function ConnectionsPage() {
   const fetched = connzQuery.data?.connections?.length ?? 0;
   const truncated = fetched > 0 && reported > fetched && !filter.trim();
   const healthyCount = Math.max(0, showing - slowCount);
-  const isLive = connzQuery.isFetching || connzQuery.isSuccess;
+  const healthyPct =
+    showing > 0 ? Math.min(100, Math.round((healthyCount / showing) * 100)) : 0;
+  const healthyTone =
+    showing === 0
+      ? "ok"
+      : slowCount === 0
+        ? "ok"
+        : slowCount >= showing / 2
+          ? "danger"
+          : "warn";
   const tableMaxHeight = Math.min(
     typeof window !== "undefined" ? Math.round(window.innerHeight * 0.7) : CONN_TABLE_MAX_HEIGHT,
     CONN_TABLE_MAX_HEIGHT,
@@ -264,12 +270,12 @@ export default function ConnectionsPage() {
   }
 
   return (
-    <div className="nc-conn-page">
-      <div className="nc-page-header nc-conn-header">
+    <div className="replicas-page connections-page">
+      <div className="nc-page-header">
         <div className="nc-page-header__text">
           <div className="nc-conn-header__title-row">
             <h1 className="nc-page-title">{t("connections.title")}</h1>
-            {isLive && !connzQuery.isError ? (
+            {live && !connzQuery.isError ? (
               <span className="nc-conn-live" title={t("connections.liveHint")}>
                 <span className="nc-conn-live__dot" aria-hidden="true" />
                 {t("connections.live")}
@@ -289,89 +295,127 @@ export default function ConnectionsPage() {
         </Alert>
       )}
 
-      <div className="nc-conn-toolbar">
-        <div className="nc-conn-telemetry" aria-label={t("connections.filters")}>
-          <div className="nc-conn-telemetry__cell">
-            <span className="nc-conn-telemetry__label">{t("connections.showing")}</span>
-            <span className="nc-conn-telemetry__value mono">
+      <div className="replicas-summary">
+        <div className="replicas-card replicas-online-card">
+          <span
+            className={`replicas-card__badge${healthyTone === "danger" ? " replicas-card__badge--down" : ""}`}
+          >
+            {healthyTone === "danger" ? t("connections.slow") : t("connections.healthy")}
+          </span>
+          <div className="replicas-card__body">
+            <div
+              className={`replicas-gauge replicas-gauge--${healthyTone}`}
+              style={{ ["--gauge-pct" as string]: healthyPct }}
+              role="img"
+              aria-label={t("connections.healthyGaugeAria", {
+                healthy: healthyCount,
+                total: showing,
+              })}
+            >
+              <span className="replicas-gauge__value mono">
+                <ClockNumber value={healthyCount} />
+                <span className="replicas-gauge__sep">/</span>
+                <ClockNumber value={showing} />
+              </span>
+            </div>
+            {showing > 0 && slowCount > 0 ? (
+              <p className="replicas-online-card__quorum mono">
+                {t("connections.slowLine", { slow: slowCount })}
+              </p>
+            ) : null}
+          </div>
+        </div>
+        <div className="replicas-card replicas-stat-card">
+          <span className="replicas-card__badge">{t("connections.showing")}</span>
+          <div className="replicas-card__body">
+            <div className="replicas-stat-card__value mono">
               <ClockNumber value={showing} />
-              <span className="nc-conn-telemetry__of">
+              <span className="connections-stat__of">
                 {" / "}
                 <ClockNumber value={reported} />
               </span>
-            </span>
-          </div>
-          <div className="nc-conn-telemetry__cell">
-            <span className="nc-conn-telemetry__label">{t("connections.healthy")}</span>
-            <span className="nc-conn-telemetry__value mono nc-conn-telemetry__value--ok">
-              <ClockNumber value={healthyCount} />
-            </span>
-          </div>
-          <div className="nc-conn-telemetry__cell">
-            <span className="nc-conn-telemetry__label">{t("connections.slow")}</span>
-            <span
-              className={`nc-conn-telemetry__value mono${slowCount > 0 ? " nc-conn-telemetry__value--warn" : ""}`}
-            >
-              <ClockNumber value={slowCount} />
-            </span>
+            </div>
           </div>
         </div>
-
-        <div className="nc-conn-controls">
-          <label>
-            {t("connections.groupBy")}
-            <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)}>
-              <option value="none">{t("connections.none")}</option>
-              <option value="lang">{t("connections.language")}</option>
-              <option value="account">{t("connections.account")}</option>
-              <option value="name">{t("common.name")}</option>
-            </select>
-          </label>
-          <label>
-            {t("connections.sortBy")}
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-              <option value="start">{t("connections.startTime")}</option>
-              <option value="rtt">{t("connections.rtt")}</option>
-              <option value="name">{t("common.name")}</option>
-              <option value="published">{t("connections.messagesPublished")}</option>
-              <option value="received">{t("connections.messagesReceived")}</option>
-            </select>
-          </label>
-          <label className="nc-conn-controls__search">
-            {t("connections.search")}
-            <input
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder={t("connections.searchPlaceholder")}
-            />
-          </label>
+        <div className="replicas-card replicas-stat-card">
+          <span className="replicas-card__badge">{t("connections.healthy")}</span>
+          <div className="replicas-card__body">
+            <div className="replicas-stat-card__value mono">
+              <ClockNumber value={healthyCount} />
+            </div>
+          </div>
+        </div>
+        <div className="replicas-card replicas-stat-card">
+          <span className="replicas-card__badge">{t("connections.slow")}</span>
+          <div className="replicas-card__body">
+            <div
+              className={`replicas-stat-card__value mono${slowCount > 0 ? " connections-stat__value--warn" : ""}`}
+            >
+              <ClockNumber value={slowCount} />
+            </div>
+          </div>
         </div>
       </div>
 
-      {connections.length === 0 ? (
-        <div className="nc-empty">{t("connections.empty")}</div>
-      ) : (
-        <>
-          {Object.entries(grouped).map(([group, rows]) => (
-            <div key={group} className="table-wrap table-wrap--fit nc-conn-table-wrap mt-16">
-              {groupBy !== "none" && <div className="card-label">{group}</div>}
-              <VirtualTable
-                columns={columns}
-                items={rows}
-                empty={t("connections.empty")}
-                getKey={getKey}
-                renderCell={renderCell}
-                rowHeight={64}
-                maxHeight={tableMaxHeight}
-                overflowX="hidden"
+      <div className="replicas-panel replicas-table-panel">
+        <div className="replicas-panel__head connections-panel__head">
+          <h2 className="replicas-panel__title">{t("connections.listTitle")}</h2>
+          <div className="nc-conn-controls connections-panel__controls">
+            <label>
+              {t("connections.groupBy")}
+              <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)}>
+                <option value="none">{t("connections.none")}</option>
+                <option value="lang">{t("connections.language")}</option>
+                <option value="account">{t("connections.account")}</option>
+                <option value="name">{t("common.name")}</option>
+              </select>
+            </label>
+            <label>
+              {t("connections.sortBy")}
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                <option value="start">{t("connections.connectedSince")}</option>
+                <option value="rtt">{t("connections.rtt")}</option>
+                <option value="name">{t("common.name")}</option>
+                <option value="published">{t("connections.messagesPublished")}</option>
+                <option value="received">{t("connections.messagesReceived")}</option>
+              </select>
+            </label>
+            <label className="nc-conn-controls__search">
+              {t("connections.search")}
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder={t("connections.searchPlaceholder")}
               />
-            </div>
-          ))}
-          {groupBy === "none" ? (
-            <Pager total={connections.length} offset={offset} limit={limit} onPageChange={setOffset} />
-          ) : null}
-        </>
-      )}
+            </label>
+          </div>
+        </div>
+
+        {connections.length === 0 ? (
+          <p className="text-muted">{t("connections.empty")}</p>
+        ) : (
+          <>
+            {Object.entries(grouped).map(([group, rows]) => (
+              <div key={group} className="table-wrap table-wrap--fit replicas-table-wrap nc-conn-table-wrap">
+                {groupBy !== "none" && <div className="card-label">{group}</div>}
+                <VirtualTable
+                  columns={columns}
+                  items={rows}
+                  empty={t("connections.empty")}
+                  getKey={getKey}
+                  renderCell={renderCell}
+                  rowHeight={64}
+                  maxHeight={tableMaxHeight}
+                  overflowX="hidden"
+                />
+              </div>
+            ))}
+            {groupBy === "none" ? (
+              <Pager total={connections.length} offset={offset} limit={limit} onPageChange={setOffset} />
+            ) : null}
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -9,11 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gopherust-io/nats-consol/internal/config"
-	"github.com/gopherust-io/nats-consol/internal/store"
-	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/domain"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 func testRSAConfig(t *testing.T) config.Config {
@@ -38,7 +39,7 @@ func TestInvalidateSessionRemovesCacheEntry(t *testing.T) {
 	svc, err := NewService(testRSAConfig(t), nil)
 	require.NoError(t, err)
 
-	user := store.User{ID: "user-1", Username: "alice", Roles: []string{store.RoleAdmin}}
+	user := domain.User{ID: "user-1", Username: "alice", Roles: []string{domain.RoleAdmin}}
 	const fph = "fp-invalidate-test"
 	token, err := svc.CreateSession(ctx, user, fph)
 	require.NoError(t, err)

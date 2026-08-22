@@ -17,9 +17,9 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/mail"
 	"github.com/gopherust-io/nats-consol/internal/metrics"
 	natsclient "github.com/gopherust-io/nats-consol/internal/nats"
-	"github.com/gopherust-io/nats-consol/internal/store"
-	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
+	"github.com/gopherust-io/nats-consol/internal/repo"
 	"github.com/gopherust-io/nats-consol/pkg/common/safe"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 type streamCounters struct {
@@ -33,11 +33,10 @@ type streamCounters struct {
 //nolint:govet // fieldalignment: config.Config is intentionally embedded by value
 type Collector struct {
 	mailer     mail.Sender
-	store      *store.Store
+	db         *repo.DB
 	manager    *natsclient.Manager
 	hub        *Hub
 	stop       chan struct{}
-	wg         sync.WaitGroup
 	cfg        config.Config
 	routeMu    sync.Mutex
 	lastRoutes map[string][]string
@@ -54,20 +53,11 @@ type fpCacheEntry struct {
 
 const fingerprintCacheTTL = 10 * time.Minute
 
-func Start(st *store.Store, manager *natsclient.Manager, cfg config.Config, mailer mail.Sender, hub *Hub) (*Collector, func()) {
-	if !cfg.MetricsSnapshot.Enabled {
-		return nil, nil
-	}
-	if mailer == nil {
-		mailer = mail.NopSender{}
-	}
-	if hub == nil {
-		hub = NewHub()
-	}
-	c := &Collector{
-		store:      st,
+func NewSnapshot(db *repo.DB, manager *natsclient.Manager, cfg config.Config, mailer mail.Sender) *Collector {
+	return &Collector{
+		db:         db,
 		manager:    manager,
-		hub:        hub,
+		hub:        NewHub(),
 		cfg:        cfg,
 		mailer:     mailer,
 		stop:       make(chan struct{}),
@@ -75,16 +65,9 @@ func Start(st *store.Store, manager *natsclient.Manager, cfg config.Config, mail
 		lastStream: make(map[string]map[string]streamCounters),
 		fpCache:    make(map[string]fpCacheEntry),
 	}
-	c.wg.Add(2)
-	go c.loop()
-	go c.cleanupLoop()
-	return c, c.Stop
 }
 
 func (c *Collector) Hub() *Hub {
-	if c == nil {
-		return nil
-	}
 	return c.hub
 }
 
@@ -93,12 +76,12 @@ func (c *Collector) Stop() {
 		return
 	}
 	close(c.stop)
-	c.wg.Wait()
 }
 
-func (c *Collector) loop() {
-	defer c.wg.Done()
-	safe.Run("metrics_snapshot", c.sample)
+func (c *Collector) Start(ctx context.Context) {
+	const metricSnapshot = "metrics_snapshot"
+
+	safe.Run(metricSnapshot, c.sample)
 
 	ticker := time.NewTicker(c.cfg.MetricsSnapshot.Interval)
 	defer ticker.Stop()
@@ -107,20 +90,23 @@ func (c *Collector) loop() {
 		select {
 		case <-c.stop:
 			return
+		case <-ctx.Done():
+			return
 		case <-ticker.C:
-			safe.Run("metrics_snapshot", c.sample)
+			safe.Run(metricSnapshot, c.sample)
 		}
 	}
 }
 
-func (c *Collector) cleanupLoop() {
-	defer c.wg.Done()
+func (c *Collector) StartCleanup(ctx context.Context) {
 	ticker := time.NewTicker(c.cfg.MetricsSnapshot.CleanupInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-c.stop:
+			return
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			safe.Run("metrics_snapshot", c.cleanup)
@@ -132,7 +118,7 @@ func (c *Collector) sample() {
 	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.RequestTimeout)
 	defer cancel()
 
-	clusters, err := c.store.ListClusters(ctx)
+	clusters, err := c.db.ListClusters(ctx)
 	if err != nil {
 		tel.Error().Err(err).Str("component", "metrics_snapshot").Msg("list clusters failed")
 		return
@@ -179,7 +165,7 @@ func (c *Collector) sampleCluster(ctx context.Context, clusterID string, capture
 	})
 
 	if len(result.ConsumerSamples) > 0 {
-		if err := c.store.InsertIncidentConsumerSamples(ctx, clusterID, capturedAt, result.ConsumerSamples); err != nil {
+		if err := c.db.InsertIncidentConsumerSamples(ctx, clusterID, capturedAt, result.ConsumerSamples); err != nil {
 			tel.Warn().Err(err).Str("component", "metrics_snapshot").Str("cluster_id", clusterID).Msg("insert incident consumer samples failed")
 		}
 	}
@@ -192,7 +178,7 @@ func (c *Collector) sampleCluster(ctx context.Context, clusterID string, capture
 		c.upsertArchitectureScore(ctx, clusterID, capturedAt, result.ArchitectureInputs, result.ConsumerSamples)
 		return
 	}
-	if err := c.store.InsertMetricSamples(ctx, clusterID, capturedAt, result.Samples); err != nil {
+	if err := c.db.InsertMetricSamples(ctx, clusterID, capturedAt, result.Samples); err != nil {
 		metrics.IncSnapshotErrors(clusterID)
 		tel.Warn().Err(err).Str("component", "metrics_snapshot").Str("cluster_id", clusterID).Msg("insert samples failed")
 		return
@@ -201,9 +187,13 @@ func (c *Collector) sampleCluster(ctx context.Context, clusterID string, capture
 	metrics.IncSnapshotSuccess(clusterID)
 	domainSamples := make([]domain.MetricSample, len(result.Samples))
 	for i, sample := range result.Samples {
-		domainSamples[i] = domain.MetricSample{Metric: sample.Metric, Value: sample.Value}
+		domainSamples[i] = domain.MetricSample{
+			Metric: sample.Metric,
+			Value:  sample.Value,
+		}
 	}
-	alerter.Evaluate(ctx, c.store, clusterID, domainSamples, alerter.Options{
+
+	alerter.New(c.db, clusterID).Evaluate(ctx, domainSamples, alerter.Options{
 		Mailer:        c.mailer,
 		PublicBaseURL: c.cfg.PublicBaseURL,
 	})
@@ -228,7 +218,7 @@ func (c *Collector) upsertArchitectureScore(
 		hints.HasLag = true
 	}
 	priorDay := capturedAt.UTC().AddDate(0, 0, -1)
-	if prior, ok, gerr := c.store.GetArchitectureScoreDaily(ctx, clusterID, priorDay); gerr == nil && ok {
+	if prior, ok, gErr := c.db.GetArchitectureScoreDaily(ctx, clusterID, priorDay); gErr == nil && ok {
 		hints.Prior = &domain.ArchitectureScorePrior{
 			Score:  prior.Score,
 			AvgLag: prior.AvgLag,
@@ -244,14 +234,14 @@ func (c *Collector) upsertArchitectureScore(
 		AvgLag:     hints.AvgLag,
 		CapturedAt: capturedAt.UTC(),
 	}
-	if err := c.store.UpsertArchitectureScoreDaily(ctx, row); err != nil {
+	if err := c.db.UpsertArchitectureScoreDaily(ctx, row); err != nil {
 		tel.Warn().Err(err).Str("component", "metrics_snapshot").Str("cluster_id", clusterID).Msg("upsert architecture score failed")
 	}
 }
 
 // appendAvgPayloadSamples derives stream:{name}:avg_payload_bytes from consecutive scrapes.
 // Returns current-scrape avg payload by stream (empty when first scrape / no delta).
-func (c *Collector) appendAvgPayloadSamples(clusterID string, samples *[]store.MetricSampleRow) map[string]float64 {
+func (c *Collector) appendAvgPayloadSamples(clusterID string, samples *[]repo.MetricSampleRow) map[string]float64 {
 	current := map[string]streamCounters{}
 	for _, s := range *samples {
 		stream, kind, ok := domain.ParseStreamMetric(s.Metric)
@@ -289,7 +279,7 @@ func (c *Collector) appendAvgPayloadSamples(clusterID string, samples *[]store.M
 			continue
 		}
 		out[stream] = avg
-		*samples = append(*samples, store.MetricSampleRow{
+		*samples = append(*samples, repo.MetricSampleRow{
 			Metric: domain.StreamMetric(stream, domain.StreamMetricKindAvgPayloadBytes),
 			Value:  avg,
 		})
@@ -338,7 +328,7 @@ func (c *Collector) upsertBottleneckRollups(
 	if len(rows) == 0 {
 		return
 	}
-	if err := c.store.UpsertBottleneckHourBuckets(ctx, rows); err != nil {
+	if err := c.db.UpsertBottleneckHourBuckets(ctx, rows); err != nil {
 		tel.Warn().Err(err).Str("component", "metrics_snapshot").Str("cluster_id", clusterID).Msg("upsert bottleneck rollups failed")
 	}
 }
@@ -441,8 +431,12 @@ func (c *Collector) persistRouteTransitions(ctx context.Context, clusterID strin
 	if len(events) == 0 {
 		return
 	}
-	if err := c.store.InsertIncidentNodeEvents(ctx, clusterID, events); err != nil {
-		tel.Warn().Err(err).Str("component", "metrics_snapshot").Str("cluster_id", clusterID).Msg("insert incident node events failed")
+	if err := c.db.InsertIncidentNodeEvents(ctx, clusterID, events); err != nil {
+		tel.Warn().
+			Err(err).
+			Str("component", "metricsSnapshot").
+			Str("clusterID", clusterID).
+			Msg("insert incident node events failed")
 	}
 }
 
@@ -455,30 +449,30 @@ func (c *Collector) cleanup() {
 		return
 	}
 	now := time.Now().UTC()
-	if err := c.store.EnsureSamplePartitions(ctx, now, retention); err != nil {
-		tel.Warn().Err(err).Str("component", "metrics_snapshot").Msg("ensure sample partitions failed")
+	if err := c.db.EnsureSamplePartitions(ctx, now, retention); err != nil {
+		tel.Warn().Err(err).Str("component", "metricsSnapshot").Msg("ensure sample partitions failed")
 	}
 	cutoff := now.Add(-retention)
-	deleted, err := c.store.DeleteMetricSamplesOlderThan(ctx, cutoff)
+	deleted, err := c.db.DeleteMetricSamplesOlderThan(ctx, cutoff)
 	if err != nil {
-		tel.Warn().Err(err).Str("component", "metrics_snapshot").Msg("cleanup failed")
+		tel.Warn().Err(err).Str("component", "metricsSnapshot").Msg("cleanup failed")
 		return
 	}
-	incidentDeleted, err := c.store.DeleteIncidentDataOlderThan(ctx, cutoff)
+	incidentDeleted, err := c.db.DeleteIncidentDataOlderThan(ctx, cutoff)
 	if err != nil {
-		tel.Warn().Err(err).Str("component", "metrics_snapshot").Msg("incident cleanup failed")
+		tel.Warn().Err(err).Str("component", "metricsSnapshot").Msg("incident cleanup failed")
 	} else {
 		deleted += incidentDeleted
 	}
-	auditDeleted, err := c.store.DeleteAuditOlderThan(ctx, cutoff)
+	auditDeleted, err := c.db.DeleteAuditOlderThan(ctx, cutoff)
 	if err != nil {
-		tel.Warn().Err(err).Str("component", "metrics_snapshot").Msg("audit cleanup failed")
+		tel.Warn().Err(err).Str("component", "metricsSnapshot").Msg("audit cleanup failed")
 	} else {
 		deleted += auditDeleted
 	}
-	alertsDeleted, err := c.store.DeleteClosedAlertsOlderThan(ctx, cutoff)
+	alertsDeleted, err := c.db.DeleteClosedAlertsOlderThan(ctx, cutoff)
 	if err != nil {
-		tel.Warn().Err(err).Str("component", "metrics_snapshot").Msg("closed alerts cleanup failed")
+		tel.Warn().Err(err).Str("component", "metricsSnapshot").Msg("closed alerts cleanup failed")
 	} else {
 		deleted += alertsDeleted
 	}
@@ -487,22 +481,22 @@ func (c *Collector) cleanup() {
 	if bottleneckRetention <= 0 {
 		bottleneckRetention = 672 * time.Hour
 	}
-	bottleneckDeleted, err := c.store.DeleteBottleneckHourBucketsOlderThan(ctx, now.Add(-bottleneckRetention))
+	bottleneckDeleted, err := c.db.DeleteBottleneckHourBucketsOlderThan(ctx, now.Add(-bottleneckRetention))
 	if err != nil {
-		tel.Warn().Err(err).Str("component", "metrics_snapshot").Msg("bottleneck rollup cleanup failed")
+		tel.Warn().Err(err).Str("component", "metricsSnapshot").Msg("bottleneck rollup cleanup failed")
 	} else {
 		deleted += bottleneckDeleted
 	}
 
 	const architectureScoreRetention = 180 * 24 * time.Hour
-	scoreDeleted, err := c.store.DeleteArchitectureScoreDailyOlderThan(ctx, now.Add(-architectureScoreRetention))
+	scoreDeleted, err := c.db.DeleteArchitectureScoreDailyOlderThan(ctx, now.Add(-architectureScoreRetention))
 	if err != nil {
-		tel.Warn().Err(err).Str("component", "metrics_snapshot").Msg("architecture score cleanup failed")
+		tel.Warn().Err(err).Str("component", "metricsSnapshot").Msg("architecture score cleanup failed")
 	} else {
 		deleted += scoreDeleted
 	}
 
 	if deleted > 0 {
-		tel.Info().Int64("deleted", deleted).Str("component", "metrics_snapshot").Msg("purged old samples")
+		tel.Info().Int64("deleted", deleted).Str("component", "metricsSnapshot").Msg("purged old samples")
 	}
 }

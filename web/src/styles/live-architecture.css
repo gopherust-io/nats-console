@@ -36,34 +36,6 @@
   box-shadow: 0 4px 12px color-mix(in srgb, var(--text, #000) 16%, transparent);
 }
 
-[data-theme="control-light"] .live-arch {
-  --la-bg0: var(--bg-input);
-  --la-bg1: var(--bg-card);
-  --la-ink: var(--text-primary);
-  --la-muted: var(--text-muted);
-  --la-teal: #0f766e;
-  --la-glow: rgba(15, 118, 110, 0.28);
-  --la-warn: #b45309;
-  --la-fail: #e11d48;
-  --la-fail-glow: rgba(225, 29, 72, 0.25);
-  --la-edge: rgba(15, 118, 110, 0.32);
-  --la-chrome: color-mix(in srgb, var(--bg-card) 88%, transparent);
-  --la-chrome-border: color-mix(in srgb, var(--accent) 22%, var(--border));
-  --la-kbd-border: var(--border);
-  --la-core-0: #5eead4;
-  --la-core-1: #14b8a6;
-  --la-core-2: #0f766e;
-  --la-glow-fill-opacity: 0.08;
-  --la-brand-shadow: none;
-  --la-pulse-rgb: 13, 148, 136;
-  --la-pulse-hot-rgb: 217, 119, 6;
-  --la-ripple-rgb: 15, 118, 110;
-  --la-wash-a: rgba(16, 185, 129, 0.1);
-  --la-wash-b: rgba(20, 184, 166, 0.07);
-  border: 1px solid var(--border);
-  box-shadow: none;
-}
-
 .live-arch:fullscreen {
   width: 100%;
   height: 100%;
@@ -314,6 +286,11 @@
   .live-arch__pulse {
     display: none;
   }
+
+  .live-arch__chrome,
+  .live-arch__hud {
+    backdrop-filter: none;
+  }
 }
 
 .live-arch-page__toolbar {
@@ -344,13 +321,6 @@
     border-color 0.15s ease,
     background-color 0.15s ease,
     color 0.15s ease;
-}
-
-[data-theme="control-light"] .live-arch-page__toolbar button {
-  --raft-fill: var(--bg-card);
-  --raft-ink: var(--text-primary);
-  border: 1px solid var(--border);
-  box-shadow: none;
 }
 
 .live-arch-page__toolbar button:hover {

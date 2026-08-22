@@ -5,7 +5,7 @@ import (
 )
 
 // seqExistsCache remembers which stream sequences were confirmed present/absent
-// during message navigation, avoiding repeated GetMsg probes in a session.
+// during message navigation, avoiding repeated GetMsg probes in a session
 type seqExistsCache struct {
 	byKey map[string]*streamSeqBits
 	mu    sync.Mutex
@@ -60,7 +60,6 @@ func (c *seqExistsCache) mark(stream string, seq uint64, exists bool) {
 		bits.absent[seq] = struct{}{}
 		delete(bits.present, seq)
 	}
-	// Soft bound per stream.
 	if len(bits.present)+len(bits.absent) > 4096 {
 		bits.present = make(map[uint64]struct{})
 		bits.absent = make(map[uint64]struct{})

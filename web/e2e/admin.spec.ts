@@ -26,7 +26,7 @@ test.describe("admin", () => {
     });
 
     await page.goto("/systems/clusters");
-    await expect(page.getByRole("heading", { name: "Clusters" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Cluster registry" })).toBeVisible();
     await expect(page.getByRole("cell", { name: CLUSTER.name, exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Check availability" }).click();
     await expect(page.getByText("Available")).toBeVisible();

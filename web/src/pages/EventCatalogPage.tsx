@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -6,10 +6,10 @@ import Alert from "../components/ui/Alert";
 import EmptyState from "../components/ui/EmptyState";
 import PageHeader from "../components/ui/PageHeader";
 import QueryErrorState from "../components/ui/QueryErrorState";
+import VirtualCatalogList from "../components/VirtualCatalogList";
 import { useAccount } from "../lib/account";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
-import { MONITORING_POLL_MS } from "../lib/constants";
 import {
   deleteEventCatalogEntry,
   eventCatalogConsumerHref,
@@ -23,7 +23,7 @@ import {
   upsertEventCatalogEntry,
   type EventCatalogEntry,
 } from "../lib/eventCatalog";
-import { clusterQueryKey, visibilityAwareInterval } from "../lib/query";
+import { clusterQueryKey } from "../lib/query";
 
 export default function EventCatalogPage() {
   const { t } = useTranslation();
@@ -35,6 +35,7 @@ export default function EventCatalogPage() {
 
   const [searchParams] = useSearchParams();
   const [search, setSearch] = useState(() => searchParams.get("q")?.trim() ?? "");
+  const deferredSearch = useDeferredValue(search);
   const [selectedSubject, setSelectedSubject] = useState<string | null>(() => {
     const q = searchParams.get("q")?.trim();
     return q || null;
@@ -50,16 +51,17 @@ export default function EventCatalogPage() {
 
   const catalogQuery = useQuery({
     queryKey: clusterQueryKey(clusterId, "event-catalog"),
-    queryFn: () => fetchEventCatalog(clusterId!, { fresh: true }),
+    queryFn: () => fetchEventCatalog(clusterId!),
     enabled: Boolean(clusterId),
-    refetchInterval: visibilityAwareInterval(MONITORING_POLL_MS),
+    staleTime: 5 * 60_000,
+    refetchInterval: false,
   });
 
   const entries = useMemo(
     () => sortEventCatalogEntries(catalogQuery.data?.entries ?? []),
     [catalogQuery.data?.entries],
   );
-  const filtered = useMemo(() => filterEventCatalogEntries(entries, search), [entries, search]);
+  const filtered = useMemo(() => filterEventCatalogEntries(entries, deferredSearch), [entries, deferredSearch]);
   const totals = catalogQuery.data?.totals;
 
   const selected: EventCatalogEntry | null = useMemo(() => {
@@ -198,36 +200,35 @@ export default function EventCatalogPage() {
           {filtered.length === 0 ? (
             <EmptyState title={t("catalog.empty")} />
           ) : (
-            <ul className="nc-catalog-entries">
-              {filtered.map((entry) => {
-                const active = selected?.subject === entry.subject;
-                return (
-                  <li key={entry.subject}>
-                    <button
-                      type="button"
-                      className={`nc-catalog-entry${active ? " is-active" : ""}`}
-                      onClick={() => setSelectedSubject(entry.subject)}
-                    >
-                      <span className="nc-catalog-entry__subject">{entry.subject}</span>
-                      <span className="nc-catalog-entry__meta">
-                        {entry.owner || t("catalog.noOwner")}
-                      </span>
-                      <span className="nc-catalog-entry__badges">
-                        {entry.deprecated && (
-                          <span className="badge">{t("catalog.badgeDeprecated")}</span>
-                        )}
-                        {!entry.documented && (
-                          <span className="badge">{t("catalog.badgeUndocumented")}</span>
-                        )}
-                        {entry.orphan && (
-                          <span className="badge badge--muted">{t("catalog.badgeOrphan")}</span>
-                        )}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <VirtualCatalogList
+              items={filtered}
+              empty={t("catalog.empty")}
+              getKey={(entry) => entry.subject}
+              isActive={(entry) => selected?.subject === entry.subject}
+              renderItem={(entry, active) => (
+                <button
+                  type="button"
+                  className={`nc-catalog-entry${active ? " is-active" : ""}`}
+                  onClick={() => setSelectedSubject(entry.subject)}
+                >
+                  <span className="nc-catalog-entry__subject">{entry.subject}</span>
+                  <span className="nc-catalog-entry__meta">
+                    {entry.owner || t("catalog.noOwner")}
+                  </span>
+                  <span className="nc-catalog-entry__badges">
+                    {entry.deprecated && (
+                      <span className="badge">{t("catalog.badgeDeprecated")}</span>
+                    )}
+                    {!entry.documented && (
+                      <span className="badge">{t("catalog.badgeUndocumented")}</span>
+                    )}
+                    {entry.orphan && (
+                      <span className="badge badge--muted">{t("catalog.badgeOrphan")}</span>
+                    )}
+                  </span>
+                </button>
+              )}
+            />
           )}
         </aside>
 

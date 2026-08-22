@@ -51,6 +51,7 @@ services:
       HTTP_ADDR: ":8080"
       STATIC_DIR: /app/web
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      PROJECT_NAME: ${PROJECT_NAME:-nats-console}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env}
@@ -60,11 +61,12 @@ services:
       AI_ENABLED: ${AI_ENABLED:-false}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_MODEL: ${AI_MODEL:-gemini-2.5-flash}
-      PPROF_ENABLED: ${PPROF_ENABLED:-true}
+      PPROF_ENABLED: ${PPROF_ENABLED:-false}
       PPROF_AUTH_ENABLED: ${PPROF_AUTH_ENABLED:-true}
       SMTP_ENABLED: ${SMTP_ENABLED:-false}
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST in .env}
+      SMTP_PORT: ${SMTP_PORT:?set SMTP_PORT in .env}
+      SMTP_TIMEOUT: ${SMTP_TIMEOUT:-15s}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
@@ -79,8 +81,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # Optional: omit when using profile `cluster` (ports clash with this service).
       nats:
         condition: service_started
+        required: false
 
   web-dev:
     profiles: ["web"]

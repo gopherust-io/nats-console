@@ -22,6 +22,7 @@ Quick links: [Architecture](ARCHITECTURE.md) · [Getting started](docs/getting-s
 - **Multi-cluster registry** with PostgreSQL persistence
 - **Multi-tenant RBAC** — operator/viewer/admin scoped by `accessRules.clusterIds`
 - **Slow consumer detection** — pending/lag/ack-pending thresholds, UI badges, Topology warnings, alert metrics
+- **Incident Capsule Studio** — capture/list/load forensic packs via `gopherust-io/nats` `Incidents()` (Object Store + KV index); DLQ “Capture capsule” + consumer panel with dry-run replay. Distinct from Audit **incident reconstruction** (Postgres timeline annotations).
 - **Historical metrics** — Postgres snapshots + Dashboard trend charts
 - **Message publish** — publish to JetStream streams from UI and API
 - **Encryption key rotation** — root API to re-encrypt stored credentials
@@ -138,7 +139,7 @@ export ENCRYPTION_KEY=dev-encryption-key-min-16-chars
 export SESSION_PRIVATE_KEY="$(awk 'NF {sub(/\r/,""); printf "%s\\n",$0}' session.pem)"
 export SESSION_PUBLIC_KEY="$(awk 'NF {sub(/\r/,""); printf "%s\\n",$0}' session.pub.pem)"
 go generate ./...      # after changing internal/config/config.go
-go run ./cmd/server
+go run ./cmd
 ```
 
 Config is loaded via [gopherust-io/env](https://github.com/gopherust-io/env) (`envgen` codegen). Install the generator once:
@@ -305,7 +306,7 @@ Run `make test-security` for automated checks (headers, cookies, CSRF, rate limi
 
 ## API
 
-See [`api/openapi.yaml`](api/openapi.yaml) or live spec at `GET /api/openapi.yaml`.
+See [`api/swagger.yaml`](api/swagger.yaml) (regenerate with `make openapi`) or live spec at `GET /api/openapi.yaml`.
 
 Key endpoints:
 

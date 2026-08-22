@@ -23,7 +23,7 @@ test.describe("auth", () => {
     await page.getByRole("button", { name: "Sign in" }).click();
 
     await expect(page).toHaveURL(/\/systems/);
-    await expect(page.getByRole("heading", { name: "Systems" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Clusters" })).toBeVisible({ timeout: 15_000 });
   });
 
   test("unauthenticated visit to /systems redirects to login", async ({ page }) => {
@@ -47,7 +47,7 @@ test.describe("auth", () => {
     await page.getByRole("button", { name: "Set password and sign in" }).click();
 
     await expect(page).toHaveURL(/\/systems/);
-    await expect(page.getByRole("heading", { name: "Systems" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Clusters" })).toBeVisible({ timeout: 15_000 });
   });
 
   test("invite rejects short password", async ({ page }) => {

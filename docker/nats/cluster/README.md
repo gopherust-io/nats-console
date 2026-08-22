@@ -33,6 +33,9 @@ NATS_MONITORING_URL=http://127.0.0.1:8222
 From the console container on the compose network, prefer `nats://nats-cluster-1:4222,…`
 (or `host.docker.internal` for host-published monitors).
 
+Fleet clients default to the same multi-URL list (`make fleet-up`) so connections
+spread across replicas and reconnect to survivors when a node drops.
+
 Tear down cluster nodes only (wipes JetStream volumes); then restart single `nats` if needed:
 
 ```bash

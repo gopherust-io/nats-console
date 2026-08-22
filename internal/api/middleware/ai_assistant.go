@@ -19,8 +19,9 @@ func (mw *MwHandler) ApplyAITimeout(next fasthttp.RequestHandler) fasthttp.Reque
 			reqTimeout = mw.cfg.AI.RequestTimeout
 		}
 
-		ctxTimeout, cancel := context.WithTimeout(context.Background(), reqTimeout)
+		ctxTimeout, cancel := context.WithTimeout(ctx, reqTimeout)
 		defer cancel()
+
 		ctx.SetUserValue(ctxKey, ctxTimeout)
 		next(ctx)
 	}

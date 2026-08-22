@@ -2,6 +2,8 @@
 
 Work on the NATS Consol codebase locally — backend (Go), frontend (React), and tests.
 
+Depends on [`gopherust-io/nats`](https://github.com/gopherust-io/nats) **v0.6.0** (Incident Capsule Studio, compression, no named config presets). For local library development you can temporarily add `replace github.com/gopherust-io/nats => ../nats`.
+
 ---
 
 ## Prerequisites
@@ -20,7 +22,7 @@ Work on the NATS Consol codebase locally — backend (Go), frontend (React), and
 
 ```text
 nats-consol/
-├── cmd/server/          # Main entrypoint
+├── cmd/                 # Main entrypoint (./cmd)
 ├── internal/
 │   ├── api/             # HTTP routes, handlers, middleware
 │   ├── app/             # Application services
@@ -37,7 +39,7 @@ nats-consol/
 
 ### Database migrations
 
-SQL files under `migrations/` are applied on startup via `goose.UpContext` (see `internal/store/store.go`). Use goose annotations only — do not add Go `migration.Up` / `AddMigration`.
+SQL files under `migrations/` are **embedded into the binary** (`//go:embed`) and applied on startup via `goose.NewProvider` (see `internal/store/store.go`). Edit the `.sql` files in the repo; a rebuild picks them up — no runtime migrations directory is required. Use goose annotations only — do not add Go `migration.Up` / `AddMigration`.
 
 - Always include `-- +goose Up` and `-- +goose Down` (and `StatementBegin` / `StatementEnd` for multi-statement blocks).
 - Prefer goose’s **default transactional Up** so DDL/DML and the version row commit or roll back together.
@@ -68,7 +70,7 @@ export ENCRYPTION_KEY=dev-encryption-key-min-16-chars
 export SESSION_PRIVATE_KEY="$(awk 'NF {sub(/\r/,""); printf "%s\\n",$0}' session.pem)"
 export SESSION_PUBLIC_KEY="$(awk 'NF {sub(/\r/,""); printf "%s\\n",$0}' session.pub.pem)"
 
-go run ./cmd/server
+go run ./cmd
 ```
 
 API listens on **http://localhost:8080**.
@@ -158,14 +160,30 @@ Commit both `config.go` and `config_env_gen.go` when adding env vars.
 
 ---
 
+## OpenAPI (swag)
+
+The REST spec is generated from Go annotations with [swag](https://github.com/swaggo/swag):
+
+```bash
+go install github.com/swaggo/swag/cmd/swag@v1.16.4   # or: make openapi (installs if missing)
+make openapi
+```
+
+- General API metadata: `cmd/main.go` (`@title`, `@securityDefinitions`, …)
+- Per-route: `// @Summary` / `@Router` comments on handlers under `internal/api`
+- Output: [`api/swagger.yaml`](../api/swagger.yaml) (committed; embedded via `api/spec.go`)
+- Served at: `GET /api/openapi.yaml` (stable URL; file on disk is `swagger.yaml`)
+
+CI fails if `api/swagger.yaml` drifts from annotations (`make openapi` + `git diff --exit-code`).
+
+---
+
 ## API conventions
 
 - REST under `/api/v1/…`  
 - **camelCase** JSON on all frontend-facing responses  
 - Typed DTOs in `internal/domain/` and `internal/api/responses.go` — avoid `map[string]any` for API output  
 - NATS monitoring passthrough uses server-native snake_case; console API DTOs use camelCase  
-
-OpenAPI: [`api/openapi.yaml`](../api/openapi.yaml)
 
 ---
 
@@ -228,12 +246,12 @@ CI runs on every pull request to `main` (`.github/workflows/test.yml`): Go lint/
 
 | Target | Description |
 |--------|-------------|
-| `make dev` | `go run ./cmd/server` |
+| `make dev` | `go run ./cmd` |
 | `make dev-web` | Vite dev server |
 | `make docker-up` | `docker compose up --build -d` (core lab) |
 | `make dev-web-docker` | Profile `web`: Vite on `:8080`, console on `:8081` |
 | `make seed-demo` | Sample streams for topology demo |
-| `make fleet-up` / `fleet-down` | Profile `fleet`: 32 workers; image build needs sibling `../nats` |
+| `make fleet-up` / `fleet-down` | Profile `fleet`: 32 workers (uses module `gopherust-io/nats` v0.6.0) |
 | `make nats-cluster-up` / `nats-cluster-down` | Profile `cluster`: 5-node lab (stops single `nats` first) |
 | `make tidy` | `go mod tidy` |
 
@@ -244,7 +262,7 @@ CI runs on every pull request to `main` (`.github/workflows/test.yml`): Go lint/
 ### Enable pprof locally
 
 ```bash
-PPROF_ENABLED=true go run ./cmd/server
+PPROF_ENABLED=true go run ./cmd
 ```
 
 On-demand profiles: `GET /api/v1/pprof/profile/{heap|cpu|goroutine|...}` (admin auth when enabled). Non-prod also exposes `/debug/pprof`.
@@ -252,7 +270,7 @@ On-demand profiles: `GET /api/v1/pprof/profile/{heap|cpu|goroutine|...}` (admin 
 ### Structured logs
 
 ```bash
-LOG_LEVEL=debug go run ./cmd/server   # console logs by default; set LOG_JSON=true for JSON
+LOG_LEVEL=debug go run ./cmd   # console logs by default; set LOG_JSON=true for JSON
 ```
 
 ### NATS connection issues

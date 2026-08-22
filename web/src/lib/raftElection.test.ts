@@ -6,6 +6,8 @@ import {
   pickCandidate,
   pickSimulateTarget,
   planElectionSequence,
+  planOptimisticElection,
+  planSettleFromCandidate,
 } from "./raftElection";
 
 const peers = [
@@ -60,6 +62,30 @@ describe("planElectionSequence", () => {
   });
 });
 
+describe("planOptimisticElection", () => {
+  it("holds at candidate without inventing a winner", () => {
+    const steps = planOptimisticElection(peers, "nats-1");
+    expect(steps?.map((s) => s.phase)).toEqual(["demoting", "candidate"]);
+    expect(steps?.[1]?.toLeader).toBeUndefined();
+    expect(steps?.[1]?.optimistic).toBe(true);
+  });
+
+  it("returns null when no online standby exists", () => {
+    expect(
+      planOptimisticElection([{ name: "nats-1", online: false, leader: true }], "nats-1"),
+    ).toBeNull();
+  });
+});
+
+describe("planSettleFromCandidate", () => {
+  it("promotes the real meta leader", () => {
+    const steps = planSettleFromCandidate("nats-1", "nats-5");
+    expect(steps.map((s) => s.phase)).toEqual(["promoting", "settled"]);
+    expect(steps[0]?.toLeader).toBe("nats-5");
+    expect(steps[1]?.toLeader).toBe("nats-5");
+  });
+});
+
 describe("pickSimulateTarget", () => {
   it("picks an online non-leader", () => {
     expect(pickSimulateTarget(peers, "nats-1")).toEqual({ from: "nats-1", to: "nats-2" });
@@ -71,14 +97,14 @@ describe("pickSimulateTarget", () => {
 });
 
 describe("applyVisualRoles", () => {
-  it("marks leader, hot standby, and offline in stable state", () => {
+  it("marks leader, follower, and offline in stable state", () => {
     const roles = applyVisualRoles(peers, "nats-1");
     expect(roles["nats-1"]).toBe("leader");
-    expect(roles["nats-2"]).toBe("hotStandby");
+    expect(roles["nats-2"]).toBe("follower");
     expect(roles["nats-4"]).toBe("offline");
   });
 
-  it("marks lagging peers as follower instead of hot standby", () => {
+  it("keeps lagging peers as followers (lag shown via Status not current)", () => {
     const lagging = [
       { name: "nats-1", online: true, leader: true, current: true },
       { name: "nats-2", online: true, current: false },
@@ -86,7 +112,7 @@ describe("applyVisualRoles", () => {
     ];
     const roles = applyVisualRoles(lagging, "nats-1");
     expect(roles["nats-2"]).toBe("follower");
-    expect(roles["nats-3"]).toBe("hotStandby");
+    expect(roles["nats-3"]).toBe("follower");
   });
 
   it("shows candidate during candidate phase", () => {
@@ -96,7 +122,7 @@ describe("applyVisualRoles", () => {
       toLeader: "nats-3",
       candidate: "nats-3",
     });
-    expect(roles["nats-1"]).toBe("hotStandby");
+    expect(roles["nats-1"]).toBe("follower");
     expect(roles["nats-3"]).toBe("candidate");
   });
 
@@ -108,7 +134,7 @@ describe("applyVisualRoles", () => {
       candidate: "nats-3",
     });
     expect(roles["nats-3"]).toBe("leader");
-    expect(roles["nats-1"]).toBe("hotStandby");
+    expect(roles["nats-1"]).toBe("follower");
   });
 
   it("does not invent a candidate when leader is unreachable", () => {
@@ -122,21 +148,11 @@ describe("applyVisualRoles", () => {
       fromLeader: "nats-1",
     });
     expect(roles["nats-1"]).toBe("offline");
-    expect(roles["nats-2"]).toBe("hotStandby");
-    expect(roles["nats-3"]).toBe("hotStandby");
+    expect(roles["nats-2"]).toBe("follower");
+    expect(roles["nats-3"]).toBe("follower");
     expect(Object.values(roles)).not.toContain("candidate");
   });
-
-  it("treats unknown current as hot standby", () => {
-    const unknown = [
-      { name: "nats-1", online: true, leader: true },
-      { name: "nats-2", online: true },
-    ];
-    const roles = applyVisualRoles(unknown, "nats-1");
-    expect(roles["nats-2"]).toBe("hotStandby");
-  });
 });
-
 describe("electionCaptionKey", () => {
   it("uses leader-unreachable caption", () => {
     expect(

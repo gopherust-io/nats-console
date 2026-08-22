@@ -4,6 +4,28 @@ All notable changes to NATS Consol are documented in this file.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-22
+
+### Fixed
+
+- Pre-release bug sweep: auth sessionError no longer infinite-spins; stream lists paginate fully; Live Tail reconnect + error detail; Jsz query sanitization; production `ENV` security gates; live WS error sanitization; Access/Consumer/Invite/KV/Capsule error UX; architecture pages no longer auto-fallback to sample on live errors.
+- Dockerfile Go **1.27.0**; drop local `replace` for `gopherust-io/nats` (published v0.6.0); sonic Go 1.27-capable pin; pprof off by default in compose/`.env.example`.
+- Docs: `go run ./cmd` (not `./cmd/server`); OpenAPI/`web` package version **0.14.0**.
+- golangci `modernize` / errcheck cleanups so CI stays green on golangci-lint v2.13+.
+- Skip SMTP dial when `SMTP_ENABLED=false` so compose smoke works without the `mail` profile.
+
+### Changed
+
+- OpenAPI is generated with **swag** (`make openapi` → `api/swagger.yaml`, embedded and served at `GET /api/openapi.yaml`). All router-registered API routes are annotated; CI checks for drift.
+- Depend on [nats](https://github.com/gopherust-io/nats) **v0.6.0** (capsules, RR/pub compression, removed config presets). Dropped local `replace => ../nats`.
+- Removed system **Usage** tab (limits already on Account Overview and JetStream hub).
+- Replicas RAFT labels: rename Hot standby → **Follower** (lag still via Status “not current”).
+- Dependency bumps: nats.go 1.53.1, x/crypto 0.55.0, testify 1.12.1, testcontainers 0.44.0, vite 8.2.1, motion 13.1.0, eslint group, Dompurify, GitHub Actions.
+
+### Added
+
+- **Incident Capsule Studio** — capture/list/load/dry-run via `Incidents()`; DLQ capture CTA + consumer panel.
+
 ## [0.13.0] - 2026-08-02
 
 ### Added

@@ -28,7 +28,7 @@ Sidebar
 ├── Overview
 │   ├── Dashboard      ← account usage & health
 │   └── Systems        ← systems + Clusters entrance card
-│       └── System tabs: Overview · Usage · Replicas · Access
+│       └── System tabs: Overview · Replicas · Access
 ├── JetStream
 │   ├── Topology       ← stream/consumer map
 │   ├── Streams        ← core JetStream work
@@ -139,6 +139,8 @@ The page lists NATS server peers projected from monitoring (`varz`, `routez`, Je
 - Per-peer role (`monitored` / `route` / `meta`), online status, uptime, RTT, and route traffic  
 
 **Note:** Full `varz` stats (CPU, memory, connections, version) apply only to the node behind `NATS_MONITORING_URL`. Other peers are derived from routes and JetStream meta.
+
+Replicas is **intra-cluster** only (routes + JetStream meta). It does **not** show NATS **gateways** or leaf nodes. For supercluster / gateway mesh behavior and the restore checklist, see [Supercluster](./supercluster.md).
 
 For a local 5-node JetStream lab (supports stream `Replicas: 5`), run `make nats-cluster-up` ([`docker/nats/cluster/`](../docker/nats/cluster/); [local Docker](./local-docker.md); ports `4222–4226`, monitor `8222`). Stop the root compose `nats` service first. Point Consol at:
 
@@ -288,6 +290,8 @@ Use for files, artifacts, or anything too big for KV.
 
 A visual tree of streams and their consumers — helpful when onboarding or debugging complex setups. Consumers that exceed slow-consumer thresholds show a **warning** status and a **slow** chip (same thresholds as alerts).
 
+This is **not** a NATS supercluster / gateway mesh view. Legacy `/supercluster` URLs redirect here for bookmarks only. See [Supercluster](./supercluster.md).
+
 - Stream nodes show name and basic stats  
 - Consumer nodes hang under their stream  
 - Refresh to pick up changes  
@@ -417,6 +421,6 @@ In JetStream on the NATS server — the console only reads them through the API.
 
 ## Need the API?
 
-Integrate automation via **REST**: see [OpenAPI](../api/openapi.yaml) or `GET /api/openapi.yaml` on your server. There is no GraphQL surface — use the REST API (or a future OpenAPI-generated CLI) for scripts and CI.
+Integrate automation via **REST**: see [OpenAPI](../api/swagger.yaml) (`make openapi`) or `GET /api/openapi.yaml` on your server. There is no GraphQL surface — use the REST API (or a future OpenAPI-generated CLI) for scripts and CI.
 
 All JSON uses **camelCase** field names to match the frontend.

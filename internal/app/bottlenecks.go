@@ -10,19 +10,16 @@ import (
 
 type BottleneckService struct {
 	metrics  port.MetricsRepository
-	lookback time.Duration
+	lookBack time.Duration
 }
 
-func NewBottleneckService(metrics port.MetricsRepository, lookback time.Duration) *BottleneckService {
-	if lookback <= 0 {
-		lookback = 672 * time.Hour
-	}
-	return &BottleneckService{metrics: metrics, lookback: lookback}
+func NewBottleneckService(metrics port.MetricsRepository, lookBack time.Duration) *BottleneckService {
+	return &BottleneckService{metrics: metrics, lookBack: lookBack}
 }
 
 func (s *BottleneckService) Discover(ctx context.Context, clusterID string) (domain.HiddenBottleneckSnapshot, error) {
 	to := time.Now().UTC()
-	from := to.Add(-s.lookback)
+	from := to.Add(-s.lookBack)
 	buckets, err := s.metrics.ListBottleneckHourBuckets(ctx, clusterID, from, to)
 	if err != nil {
 		return domain.HiddenBottleneckSnapshot{}, err

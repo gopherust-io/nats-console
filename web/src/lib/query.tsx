@@ -1,13 +1,20 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { QUERY_GC_TIME_MS, QUERY_STALE_TIME_MS } from "./constants";
+import { isSnapshotBackedQueryKey, isSnapshotSSELive } from "./snapshotSSE";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: QUERY_STALE_TIME_MS,
       gcTime: QUERY_GC_TIME_MS,
-      refetchOnWindowFocus: true,
+      // Snapshot SSE already invalidates monitoring keys — skip focus stampede while live.
+      refetchOnWindowFocus: (query) => {
+        if (isSnapshotSSELive() && isSnapshotBackedQueryKey(query.queryKey)) {
+          return false;
+        }
+        return true;
+      },
       refetchIntervalInBackground: false,
       retry: 1,
     },

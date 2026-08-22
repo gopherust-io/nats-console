@@ -1,8 +1,11 @@
-.PHONY: dev dev-web dev-web-docker reload-front build run docker-up docker-down \
-	nats-up nats-down nats-auth-up nats-cluster-up nats-cluster-down nats-down-all tidy generate \
-	fleet-up fleet-down \
+.PHONY: align generate openapi tidy \
+	dev dev-web dev-web-docker reload-api build run \
+	docker-up docker-down \
+	nats-up nats-down nats-auth-up nats-cluster-up nats-cluster-down nats-down-all \
+	fleet-up fleet-down seed-demo \
 	test test-unit test-integration test-contract test-security test-regression \
-	test-e2e test-smoke test-performance test-stress test-web ci lint lint-go lint-go-fix lint-web lint-web-docker lint-web-local align reload-api
+	test-e2e test-smoke test-performance test-stress test-web ci \
+	lint lint-go lint-go-fix lint-web lint-web-docker
 
 NATS_COMPOSE := docker/nats/single/docker-compose.yml
 NATS_CLUSTER_COMPOSE := docker/nats/cluster/docker-compose.yml
@@ -16,18 +19,38 @@ WEB_DIR := web
 GOALIGN_VERSION := v1.4.0
 GOALIGN_BIN := $(HOME)/go/bin/goalign
 GOALIGN_FLAGS := analyze -r --arch=amd64 --fail-on-findings --min-waste=1 -e web/,bin/,node_modules/ .
+SWAG_VERSION := v1.16.4
+SWAG_BIN := $(HOME)/go/bin/swag
+UNIT_PKGS := $(shell go list ./... | grep -v '/tests/integration\|/tests/contract\|/tests/security\|/web/node_modules')
+FLEET_COMPOSE ?= examples/fleet/docker-compose.yml
+FLEET_NATS_URL ?= nats://nats-cluster-1:4222,nats://nats-cluster-2:4222,nats://nats-cluster-3:4222,nats://nats-cluster-4:4222,nats://nats-cluster-5:4222
+FLEET_STREAM_REPLICAS ?= 1
 
 $(GOALIGN_BIN):
 	go install github.com/gopherust-io/goalign@$(GOALIGN_VERSION)
 
+$(SWAG_BIN):
+	go install github.com/swaggo/swag/cmd/swag@$(SWAG_VERSION)
+
 align: $(GOALIGN_BIN)
 	$(GOALIGN_BIN) $(GOALIGN_FLAGS)
 
-# Packages for unit tests (exclude tagged integration suites and vendored paths).
-UNIT_PKGS := $(shell go list ./... | grep -v '/tests/integration' | grep -v '/tests/contract' | grep -v '/tests/security' | grep -v '/web/node_modules')
+# Generate api/swagger.yaml from swag annotations (cmd + internal/api handlers).
+# -g is relative to the first -d directory (./cmd).
+openapi: $(SWAG_BIN)
+	$(SWAG_BIN) init \
+		-g main.go \
+		-d ./cmd,./internal/api,./internal/app,./internal/domain,./internal/live \
+		--parseInternal \
+		-o ./api \
+		--ot yaml
 
 generate:
 	go generate ./...
+	$(MAKE) openapi
+
+tidy:
+	go mod tidy
 
 dev:
 	go run ./cmd
@@ -39,19 +62,8 @@ dev-web-docker:
 	-docker rm -f nats-consol-web-dev 2>/dev/null || true
 	CONSOLE_PORT=8081 NODE_IMAGE=$(NODE_IMAGE) docker compose --profile web up -d --build --force-recreate console web-dev
 
-reload-front: dev-web-docker
-
-# Rebuild the Linux API binary and hot-swap it into the running compose console
-# (useful when Dockerfile build can't resolve the local nats replace).
-# Migrations are copied too: the server reads them from disk at startup, so a
-# binary with new endpoints would otherwise run against a stale schema.
 reload-api:
-	CGO_ENABLED=0 GOOS=linux GOARCH=$$(docker exec nats-consol-console-1 uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
-		go build -o bin/nats-consol-linux ./cmd
-	docker cp bin/nats-consol-linux nats-consol-console-1:/app/nats-consol
-	docker exec nats-consol-console-1 sh -c 'rm -f /app/migrations/*.sql'
-	docker cp migrations/. nats-consol-console-1:/app/migrations/
-	docker restart nats-consol-console-1
+	./scripts/reload-api.sh
 
 build:
 	cd $(WEB_DIR) && npm install && npm run build
@@ -69,18 +81,8 @@ docker-down:
 
 nats-up:
 	docker compose -f $(NATS_COMPOSE) up -d
-	@echo "Waiting for JetStream healthz..."
-	@i=0; \
-	while [ $$i -lt 30 ]; do \
-		if curl -sf $(NATS_HEALTHZ) >/dev/null 2>&1; then \
-			echo "NATS ready: nats://127.0.0.1:4222  monitor $(NATS_HEALTHZ)"; \
-			exit 0; \
-		fi; \
-		i=$$((i+1)); \
-		sleep 1; \
-	done; \
-	echo "Timed out waiting for $(NATS_HEALTHZ)"; \
-	exit 1
+	curl --retry 30 --retry-delay 1 --retry-connrefused -sf $(NATS_HEALTHZ) >/dev/null
+	@echo "NATS ready: nats://127.0.0.1:4222  monitor $(NATS_HEALTHZ)"
 
 nats-down:
 	docker compose -f $(NATS_COMPOSE) down
@@ -92,12 +94,11 @@ nats-auth-up:
 nats-cluster-up:
 	docker compose stop nats
 	docker compose --profile cluster up -d $(CLUSTER_SERVICES)
-	@echo "Cluster lab up (ports 4222-4226 / 8222-8226) in project nats-consol. See docker/nats/cluster/README.md"
-	@echo "Restart single broker later with: docker compose up -d nats"
+	@echo "Cluster lab up (4222-4226 / 8222-8226). Restore single: docker compose up -d nats"
 
 nats-cluster-down:
 	docker compose -p nats-consol -f $(NATS_CLUSTER_COMPOSE) --profile cluster down -v
-	@echo "Cluster nodes removed. Restart single broker with: docker compose up -d nats"
+	@echo "Cluster removed. Restore single: docker compose up -d nats"
 
 nats-down-all:
 	-docker compose -f $(NATS_COMPOSE) down -v
@@ -105,45 +106,28 @@ nats-down-all:
 	-docker compose -f $(NATS_AUTH_COMPOSE) down -v
 	-docker compose -f $(NATS_SUPERCLUSTER_COMPOSE) down -v
 
-seed-demo:
-	chmod +x scripts/seed-demo-topology.sh
-	./scripts/seed-demo-topology.sh
-
-# Fleet profile on root compose (uses published gopherust-io/nats; optional sibling for docker build-context).
-FLEET_COMPOSE ?= examples/fleet/docker-compose.yml
-FLEET_NATS_URL ?= nats://nats:4222
-
 fleet-up:
-	@test -d ../nats || (echo "missing sibling ../nats (docker build-context for examples/fleet image)" >&2; exit 1)
-	NATS_URL=$(FLEET_NATS_URL) docker compose -p nats-consol -f $(FLEET_COMPOSE) --profile fleet up -d --build
+	NATS_URL=$(FLEET_NATS_URL) STREAM_REPLICAS=$(FLEET_STREAM_REPLICAS) \
+		docker compose -p nats-consol -f $(FLEET_COMPOSE) --profile fleet up -d --build --force-recreate
 
 fleet-down:
 	docker compose -p nats-consol -f $(FLEET_COMPOSE) --profile fleet down
 
-tidy:
-	go mod tidy
+seed-demo:
+	./scripts/seed-demo-topology.sh
 
 test: test-unit
 
 test-unit:
 	go test $(UNIT_PKGS) -count=1 -p $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
-test-integration:
-	go test -tags=integration ./tests/integration/... -count=1
-
-test-contract:
-	go test -tags=integration ./tests/contract/... -count=1
-
-test-security:
-	go test -tags=integration ./tests/security/... -count=1
+test-integration test-contract test-security:
+	go test -tags=integration ./tests/$(patsubst test-%,%,$@)/... -count=1
 
 test-regression: test-integration test-contract test-security
 
 test-e2e test-smoke:
 	./tests/e2e/smoke.sh
-
-test-web:
-	cd $(WEB_DIR) && npm ci && npm test && npm run build && npx playwright install --with-deps chromium && npm run test:e2e
 
 test-performance:
 	./tests/performance/load.sh
@@ -151,9 +135,9 @@ test-performance:
 test-stress:
 	./tests/performance/stress.sh
 
-# Targets run on every pull request in GitHub Actions (.github/workflows/test.yml).
-# Smoke needs a running compose stack (CI starts it); run `make test-smoke` separately locally.
-# HTTPS/HTTP/3: BASE_URL=https://localhost HTTP3_INSECURE=1 make test-smoke
+test-web:
+	cd $(WEB_DIR) && npm ci && npm test && npm run build && npx playwright install --with-deps chromium && npm run test:e2e
+
 ci: lint-go lint-web test-unit test-regression
 
 lint: lint-go lint-web
@@ -163,11 +147,7 @@ lint-go: align
 
 lint-go-fix: align
 	golangci-lint run ./... --fix
-	@if command -v fieldalignment >/dev/null 2>&1; then \
-		fieldalignment -fix ./...; \
-	elif [ -x "$(HOME)/go/bin/fieldalignment" ]; then \
-		"$(HOME)/go/bin/fieldalignment" -fix ./...; \
-	fi
+	@fieldalignment -fix ./... 2>/dev/null || "$(HOME)/go/bin/fieldalignment" -fix ./... 2>/dev/null || true
 
 lint-web:
 	@if command -v npm >/dev/null 2>&1; then \
@@ -177,7 +157,5 @@ lint-web:
 	fi
 
 lint-web-docker:
-	docker run --rm -v "$(CURDIR)/$(WEB_DIR):/web" -w /web $(NODE_IMAGE) sh -c "npm install && npm run lint && npm run typecheck && npm test"
-
-lint-web-local:
-	cd $(WEB_DIR) && npm install && npm run lint && npm run typecheck && npm test
+	docker run --rm -v "$(CURDIR)/$(WEB_DIR):/web" -w /web $(NODE_IMAGE) \
+		sh -c "npm install && npm run lint && npm run typecheck && npm test"

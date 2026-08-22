@@ -15,20 +15,23 @@ import (
 var (
 	initOnce sync.Once
 
-	httpRequests   *tel.FastCounter
-	httpDuration   *tel.FastHistogram
-	wsActive       *tel.FastGauge
-	natsActive     *tel.FastGauge
-	natsDialErrors *tel.FastCounter
-	natsReconnects *tel.FastCounter
-	snapSuccess    *tel.FastCounter
-	snapErrors     *tel.FastCounter
-	wsFramesDrop   *tel.FastCounter
-	snapHubHit     *tel.FastCounter
-	snapHubMiss    *tel.FastCounter
-	viewCacheHit   *tel.FastCounter
-	viewCacheMiss  *tel.FastCounter
-	liveMuxFanout  *tel.FastCounter
+	httpRequests         *tel.FastCounter
+	httpDuration         *tel.FastHistogram
+	wsActive             *tel.FastGauge
+	natsActive           *tel.FastGauge
+	natsDialErrors       *tel.FastCounter
+	natsReconnects       *tel.FastCounter
+	natsDialLatency      *tel.FastHistogram
+	natsExecutorErrors   *tel.FastCounter
+	natsMonitoringErrors *tel.FastCounter
+	snapSuccess          *tel.FastCounter
+	snapErrors           *tel.FastCounter
+	wsFramesDrop         *tel.FastCounter
+	snapHubHit           *tel.FastCounter
+	snapHubMiss          *tel.FastCounter
+	viewCacheHit         *tel.FastCounter
+	viewCacheMiss        *tel.FastCounter
+	liveMuxFanout        *tel.FastCounter
 )
 
 // Common HTTP status codes as static strings to avoid strconv on the hot path.
@@ -59,6 +62,9 @@ func ensure() {
 		natsActive, _ = r.Gauge("nats_consol_nats_connections_active")
 		natsDialErrors, _ = r.Counter("nats_consol_nats_dial_errors_total")
 		natsReconnects, _ = r.Counter("nats_consol_nats_reconnects_total")
+		natsDialLatency, _ = r.Histogram("nats_consol_nats_dial_duration_seconds")
+		natsExecutorErrors, _ = r.Counter("nats_consol_nats_executor_errors_total")
+		natsMonitoringErrors, _ = r.Counter("nats_consol_nats_monitoring_proxy_errors_total")
 		snapSuccess, _ = r.Counter("nats_consol_metrics_snapshot_success_total")
 		snapErrors, _ = r.Counter("nats_consol_metrics_snapshot_errors_total")
 		wsFramesDrop, _ = r.Counter("nats_consol_live_ws_frames_dropped_total")
@@ -154,6 +160,27 @@ func IncNATSReconnect(clusterID string) {
 	ensure()
 	if natsReconnects != nil {
 		natsReconnects.AddWith(context.Background(), 1, clusterID)
+	}
+}
+
+func ObserveNATSDialLatency(clusterID string, duration time.Duration) {
+	ensure()
+	if natsDialLatency != nil && duration >= 0 {
+		natsDialLatency.RecordWith(context.Background(), duration.Seconds(), clusterID)
+	}
+}
+
+func IncNATSExecutorError(clusterID string) {
+	ensure()
+	if natsExecutorErrors != nil {
+		natsExecutorErrors.AddWith(context.Background(), 1, clusterID)
+	}
+}
+
+func IncNATSMonitoringProxyError(clusterID string) {
+	ensure()
+	if natsMonitoringErrors != nil {
+		natsMonitoringErrors.AddWith(context.Background(), 1, clusterID)
 	}
 }
 

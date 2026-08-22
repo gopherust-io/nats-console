@@ -13,9 +13,9 @@ import (
 	"github.com/gopherust-io/nats-consol/internal/audit"
 	"github.com/gopherust-io/nats-consol/internal/auth"
 	"github.com/gopherust-io/nats-consol/internal/config"
+	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/internal/httpctx/httpstatus"
 	"github.com/gopherust-io/nats-consol/internal/metrics"
-	"github.com/gopherust-io/nats-consol/internal/store"
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
@@ -54,7 +54,7 @@ func (mw *MwHandler) ApplyRequestID(next fasthttp.RequestHandler) fasthttp.Reque
 func (mw *MwHandler) ApplySecurityHeaders(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
 		h := &ctx.Response.Header
-		h.Set(HeaderContentType, "nosniff")
+		h.Set(HeaderNATSContentType, "nosniff")
 		h.Set(HeaderFrameOptions, "DENY")
 		h.Set(HeaderReferrerPolicy, "strict-origin-when-cross-origin")
 		h.Set(HeaderPermissionPolicy, "geolocation=(), microphone=(), camera=()")
@@ -72,11 +72,11 @@ func (mw *MwHandler) CheckBodySizeLimit(next fasthttp.RequestHandler) fasthttp.R
 		if maxBytes <= 0 {
 			maxBytes = 1 << 20
 		}
-		if cl := ctx.Request.Header.ContentLength(); cl > 0 && int64(cl) > maxBytes {
+		if cl := ctx.Request.Header.ContentLength(); cl > 0 && cl > maxBytes {
 			httpstatus.WriteErrorMessage(ctx, fasthttp.StatusRequestEntityTooLarge, httpstatus.CodeValidation, "request body too large")
 			return
 		}
-		if int64(len(ctx.Request.Body())) > maxBytes {
+		if len(ctx.Request.Body()) > maxBytes {
 			httpstatus.WriteErrorMessage(ctx, fasthttp.StatusRequestEntityTooLarge, httpstatus.CodeValidation, "request body too large")
 			return
 		}
@@ -105,7 +105,7 @@ func routeLabel(ctx *fasthttp.RequestCtx) string {
 }
 
 func requestID(ctx *fasthttp.RequestCtx) string {
-	if id, ok := ctx.UserValue("request_id").(string); ok {
+	if id, ok := ctx.UserValue(requestIDCtxKey).(string); ok {
 		return id
 	}
 	return ""
@@ -186,7 +186,7 @@ var staticClusterPathSegments = map[string]struct{}{
 func isJetStreamResourcePath(path string) bool {
 	seg := clusterSubResource(path)
 	switch seg {
-	case "streams", "kv", "objects", "request-reply", "zombies", "subject-naming", "event-genome", "event-catalog", "event-wikipedia":
+	case "streams", "kv", "objects", "request-reply", "zombies", "subject-naming", "event-genome", "event-catalog", "event-wikipedia", "incident-capsules":
 		return true
 	default:
 		return false
@@ -216,7 +216,7 @@ func clusterSubResource(path string) string {
 // (system, account, or nats-user); cluster-wide sub-resources (JetStream
 // data, monitoring, topology, live tail, etc.) require full cluster-wide
 // (system-level) access via auth.CanAccessCluster.
-func canReadClusterPath(user store.User, clusterID, path string) bool {
+func canReadClusterPath(user domain.User, clusterID, path string) bool {
 	if isAccountScopedClusterPath(path) {
 		return auth.CanAccessClusterOrAccount(user, clusterID)
 	}
@@ -227,7 +227,7 @@ func canReadClusterPath(user store.User, clusterID, path string) bool {
 // /api/v1/clusters/{clusterId}/... . Account-scoped sub-resources accept any
 // grant touching the cluster; handlers enforce finer authz. Cluster-wide
 // sub-resources require system-level access plus JetStream manage or write.
-func canMutateClusterPath(user store.User, clusterID, path string) bool {
+func canMutateClusterPath(user domain.User, clusterID, path string) bool {
 	if isAccountScopedClusterPath(path) {
 		return auth.CanAccessClusterOrAccount(user, clusterID)
 	}

@@ -8,10 +8,11 @@ import (
 	"time"
 
 	libnats "github.com/gopherust-io/nats"
+	"github.com/nats-io/nats.go"
+
 	"github.com/gopherust-io/nats-consol/internal/domain"
 	"github.com/gopherust-io/nats-consol/pkg/common/b64util"
 	"github.com/gopherust-io/nats-consol/pkg/common/strings"
-	"github.com/nats-io/nats.go"
 )
 
 func kvBucketInfoFromStatus(st nats.KeyValueStatus) domain.KVBucketInfo {
@@ -25,12 +26,9 @@ func kvBucketInfoFromStatus(st nats.KeyValueStatus) domain.KVBucketInfo {
 		TTLNs:        int64(cfg.TTL),
 		MaxValueSize: cfg.MaxValueSize,
 		MaxBytes:     cfg.MaxBytes,
-		Replicas:     cfg.Replicas,
+		Replicas:     max(cfg.Replicas, 1),
 		Compressed:   st.IsCompressed() || cfg.Compression,
 		Storage:      domain.StorageTypeString(cfg.Storage),
-	}
-	if info.Replicas <= 0 {
-		info.Replicas = 1
 	}
 	if info.History <= 0 {
 		info.History = int64(cfg.History)
@@ -93,13 +91,13 @@ func cloneStringMap(in map[string]string) map[string]string {
 }
 
 func (c *Client) ListKVBuckets(ctx context.Context) ([]domain.KVBucketInfo, error) {
-	buckets, err := c.inner.KV().ListBuckets(ctx)
+	buckets, err := c.natsCl.KV().ListBuckets(ctx)
 	if err != nil {
 		return nil, err
 	}
+
 	out := make([]domain.KVBucketInfo, 0, len(buckets))
 	for _, b := range buckets {
-		// List metadata only — avoid N+1 GetKVBucket/Status calls. Detail loads on open.
 		out = append(out, domain.KVBucketInfo{
 			Bucket:  b.Bucket,
 			Values:  b.Values,
@@ -110,7 +108,7 @@ func (c *Client) ListKVBuckets(ctx context.Context) ([]domain.KVBucketInfo, erro
 }
 
 func (c *Client) CreateKVBucket(ctx context.Context, cfg *nats.KeyValueConfig, opts domain.KVBucketWriteOpts) (*domain.KVBucketInfo, error) {
-	if _, err := c.inner.KV().CreateRaw(ctx, cfg); err != nil {
+	if _, err := c.natsCl.KV().CreateRaw(ctx, cfg); err != nil {
 		return nil, err
 	}
 	if err := c.applyKVStreamExtras(ctx, cfg, time.Duration(opts.LimitMarkerTTLNs), opts.Metadata); err != nil {
@@ -133,9 +131,9 @@ func (c *Client) UpdateKVBucket(ctx context.Context, cfg *nats.KeyValueConfig, o
 		Compression: cfg.Compression,
 	}
 	if cfg.Storage != 0 {
-		libCfg.Storage = libnats.StorageType(cfg.Storage)
+		libCfg.Storage = cfg.Storage
 	}
-	if _, err := c.inner.KV().CreateOrUpdate(ctx, libCfg); err != nil {
+	if _, err := c.natsCl.KV().CreateOrUpdate(ctx, libCfg); err != nil {
 		return nil, err
 	}
 	if err := c.applyKVStreamExtras(ctx, cfg, time.Duration(opts.LimitMarkerTTLNs), opts.Metadata); err != nil {
@@ -145,7 +143,8 @@ func (c *Client) UpdateKVBucket(ctx context.Context, cfg *nats.KeyValueConfig, o
 }
 
 func (c *Client) applyKVStreamExtras(ctx context.Context, cfg *nats.KeyValueConfig, limitMarkerTTL time.Duration, metadata map[string]string) error {
-	streamName := "KV_" + cfg.Bucket
+	const kvPrefix = "KV_"
+	streamName := kvPrefix + cfg.Bucket
 	info, err := c.StreamInfo(ctx, streamName)
 	if err != nil {
 		return fmt.Errorf("kv bucket %q backing stream: %w", cfg.Bucket, err)
@@ -190,7 +189,7 @@ func (c *Client) applyKVStreamExtras(ctx context.Context, cfg *nats.KeyValueConf
 }
 
 func (c *Client) GetKVBucket(ctx context.Context, bucket string) (*domain.KVBucketInfo, error) {
-	kv, err := c.inner.KV().Open(ctx, bucket)
+	kv, err := c.natsCl.KV().Open(ctx, bucket)
 	if err != nil {
 		return nil, err
 	}
@@ -203,15 +202,15 @@ func (c *Client) GetKVBucket(ctx context.Context, bucket string) (*domain.KVBuck
 }
 
 func (c *Client) DeleteKVBucket(ctx context.Context, bucket string) error {
-	return c.inner.KV().Delete(ctx, bucket)
+	return c.natsCl.KV().Delete(ctx, bucket)
 }
 
 func (c *Client) ListKVKeys(ctx context.Context, bucket string, offset, limit int) ([]string, int, error) {
-	return c.inner.KVKeys().ListKeys(ctx, bucket, offset, limit)
+	return c.natsCl.KVKeys().ListKeys(ctx, bucket, offset, limit)
 }
 
 func (c *Client) GetKVEntry(ctx context.Context, bucket, key string) (*domain.KVEntry, error) {
-	entry, err := c.inner.KVKeys().Get(ctx, bucket, key)
+	entry, err := c.natsCl.KVKeys().Get(ctx, bucket, key)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +218,7 @@ func (c *Client) GetKVEntry(ctx context.Context, bucket, key string) (*domain.KV
 }
 
 func (c *Client) PutKVEntry(ctx context.Context, bucket, key string, value []byte) (*domain.KVEntry, error) {
-	entry, err := c.inner.KVKeys().Put(ctx, bucket, key, value)
+	entry, err := c.natsCl.KVKeys().Put(ctx, bucket, key, value)
 	if err != nil {
 		return nil, err
 	}
@@ -227,11 +226,11 @@ func (c *Client) PutKVEntry(ctx context.Context, bucket, key string, value []byt
 }
 
 func (c *Client) DeleteKVEntry(ctx context.Context, bucket, key string) error {
-	return c.inner.KVKeys().DeleteKey(ctx, bucket, key)
+	return c.natsCl.KVKeys().DeleteKey(ctx, bucket, key)
 }
 
 func (c *Client) KVHistory(ctx context.Context, bucket, key string) ([]domain.KVEntry, error) {
-	entries, err := c.inner.KVKeys().History(ctx, bucket, key)
+	entries, err := c.natsCl.KVKeys().History(ctx, bucket, key)
 	if err != nil {
 		return nil, err
 	}

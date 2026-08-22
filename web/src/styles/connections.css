@@ -1,0 +1,139 @@
+/* Connections — same dark nested-card language as Replicas */
+
+.connections-page {
+  --raft-lift: none;
+  --raft-fill: var(--bg-card, #050505);
+  --raft-inner: color-mix(in srgb, #000 55%, var(--bg-card, #050505));
+  --raft-radius: var(--card-radius, 16px);
+  --raft-border: var(--card-border, 1px solid rgba(255, 255, 255, 0.09));
+  --raft-ink: #fff;
+}
+
+.connections-page .replicas-summary .replicas-stat-card__value {
+  font-size: var(--fs-xl, 1.125rem);
+}
+
+.connections-page .nc-page-sub {
+  margin: 0.35rem 0 0;
+  max-width: 36rem;
+}
+
+.connections-page .replicas-stat-card__value:has(.connections-stat__of) {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.05em;
+}
+
+.connections-stat__of {
+  font-size: var(--fs-md, 0.875rem);
+  font-weight: 500;
+  color: var(--text-muted, #6b7280);
+}
+
+.connections-stat__value--warn {
+  color: var(--warning, #d97706);
+}
+
+.connections-panel__head {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.connections-panel__controls {
+  flex: 1 1 16rem;
+  margin: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  justify-content: flex-end;
+}
+
+.connections-page .replicas-table-wrap.nc-conn-table-wrap {
+  overflow-x: hidden;
+  max-width: 100%;
+  margin-top: 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--border, #555) 55%, transparent);
+  border-radius: var(--raft-radius);
+  background: var(--raft-inner);
+}
+
+/* Replicas panels clip for RAFT chrome; Connections stacks many group tables — don't crop the last ones. */
+.connections-page .replicas-table-panel {
+  overflow: visible;
+}
+
+.connections-page .replicas-table-wrap + .replicas-table-wrap {
+  margin-top: 0.75rem;
+}
+
+.connections-page .virtual-table,
+.connections-page .virtual-table__row,
+.connections-page .virtual-table__block,
+.connections-page .virtual-table__body,
+.connections-page .virtual-table__viewport {
+  background: var(--raft-inner);
+}
+
+.connections-page .virtual-table__th,
+.connections-page .virtual-table__td {
+  padding: 12px 14px;
+}
+
+.connections-page .virtual-table__header {
+  background: var(--raft-fill);
+  border-bottom: 1px solid color-mix(in srgb, var(--border, #555) 60%, transparent);
+}
+
+.connections-page .virtual-table__th {
+  letter-spacing: 0.06em;
+  color: var(--text-secondary, #9ca3af);
+}
+
+/* Virtual rows stack absolutely; child backgrounds cover parent inset shadows.
+   Draw the divider on the row (leaf) so it stays visible like Replicas <td> lines. */
+.connections-page .virtual-table__block {
+  border-bottom: none;
+  box-shadow: none;
+}
+
+.connections-page .virtual-table__block .virtual-table__row {
+  border-bottom: 1px solid color-mix(in srgb, #fff 14%, transparent);
+}
+
+.connections-page .virtual-table__block:last-child .virtual-table__row {
+  border-bottom: none;
+}
+
+.connections-page .virtual-table__row:hover,
+.connections-page .virtual-table__block:hover {
+  background: color-mix(in srgb, var(--success, #10b981) 14%, var(--raft-inner));
+}
+
+.connections-page .virtual-table__block:hover .virtual-table__row {
+  background: transparent;
+}
+
+.connections-page .nc-conn-rtt {
+  font-weight: 650;
+}
+
+.connections-page .card-label {
+  margin: 0.35rem 0 0.55rem;
+}
+
+.connections-page .text-muted {
+  margin: 0.55rem 0 0.25rem;
+}
+
+.connections-page .pager {
+  margin-top: 0.75rem;
+}
+
+@media (max-width: 900px) {
+  .connections-panel__controls {
+    justify-content: stretch;
+    width: 100%;
+  }
+}

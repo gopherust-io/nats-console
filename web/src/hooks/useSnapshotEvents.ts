@@ -1,30 +1,16 @@
 import { useEffect, useRef } from "react";
 import { getSnapshotEventsURL } from "../lib/api";
 import { queryClient } from "../lib/query";
+import { isSnapshotBackedQueryKey, setSnapshotSSELive } from "../lib/snapshotSSE";
 
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 const INVALIDATE_DEBOUNCE_MS = 1_500;
 
-const SNAPSHOT_SUFFIXES = new Set([
-  "topology",
-  "account",
-  "streams",
-  "kv",
-  "objects",
-  "object-buckets",
-  "varz-lite",
-]);
-
 function shouldInvalidateOnSnapshot(queryKey: readonly unknown[], clusterId: string): boolean {
-  // Connz / alerts: freshness is owned elsewhere (SSE pages or alert polling).
+  if (!isSnapshotBackedQueryKey(queryKey)) return false;
   if (queryKey[0] === "clusters" && queryKey[1] === "connections") return true;
-  if (queryKey[0] !== "cluster" || queryKey[1] !== clusterId) return false;
-  const suffix = String(queryKey[2] ?? "");
-  if (suffix === "connz" || suffix === "connz-subs") return false;
-  if (SNAPSHOT_SUFFIXES.has(suffix)) return true;
-  if (suffix.startsWith("metrics-history:")) return true;
-  return false;
+  return queryKey[0] === "cluster" && queryKey[1] === clusterId;
 }
 
 function invalidateSnapshotQueries(clusterId: string) {
@@ -44,7 +30,10 @@ export function useSnapshotEvents(clusterId: string | null) {
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!clusterId) return;
+    if (!clusterId) {
+      setSnapshotSSELive(false);
+      return;
+    }
 
     let cancelled = false;
 
@@ -67,6 +56,7 @@ export function useSnapshotEvents(clusterId: string | null) {
         esRef.current.close();
         esRef.current = null;
       }
+      setSnapshotSSELive(false);
     };
 
     const scheduleInvalidate = () => {
@@ -87,11 +77,13 @@ export function useSnapshotEvents(clusterId: string | null) {
 
       es.addEventListener("snapshot", () => {
         attemptRef.current = 0;
+        setSnapshotSSELive(true);
         scheduleInvalidate();
       });
 
       es.onopen = () => {
         attemptRef.current = 0;
+        setSnapshotSSELive(true);
       };
 
       es.onerror = () => {

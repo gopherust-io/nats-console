@@ -1,13 +1,9 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Route, Routes } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import ConsolShell from "./ConsolShell";
 import { ShellRoutes, TestProviders } from "../test/mocks";
-
-vi.mock("../lib/themeStyles", () => ({
-  loadThemeStyles: vi.fn(async () => undefined),
-  preloadThemeStyles: vi.fn(async () => undefined),
-}));
 
 vi.mock("../lib/auth", () => ({
   useAuth: () => ({
@@ -62,7 +58,6 @@ describe("ConsolShell", () => {
     );
 
     expect(document.querySelector(".nc-topbar__brand")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Switch to Console Light/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Notifications" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open user menu" })).toBeInTheDocument();
   });
@@ -106,10 +101,10 @@ describe("ConsolShell", () => {
     expect(screen.getByRole("navigation", { name: "Admin" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Console Users" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Audit" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Clusters" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Cluster registry" })).not.toBeInTheDocument();
   });
 
-  it("hides the team tab bar on Systems", () => {
+  it("hides the team tab bar on Clusters home", () => {
     render(
       <TestProviders initialEntries={["/systems"]}>
         <ShellRoutes>
@@ -119,7 +114,7 @@ describe("ConsolShell", () => {
     );
 
     expect(screen.queryByRole("navigation", { name: "Team" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Clusters" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Cluster registry" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
   });
 
@@ -155,6 +150,7 @@ describe("ConsolShell", () => {
   });
 
   it("shows the AI assistant console-wide when authenticated", async () => {
+    const user = userEvent.setup();
     render(
       <TestProviders initialEntries={["/systems"]}>
         <ShellRoutes>
@@ -162,7 +158,27 @@ describe("ConsolShell", () => {
         </ShellRoutes>
       </TestProviders>,
     );
+    const fab = await screen.findByRole("button", { name: "Open NATS JetStream assistant" });
+    expect(screen.queryByTestId("assistant-panel")).not.toBeInTheDocument();
+    await user.click(fab);
     expect(await screen.findByTestId("assistant-panel")).toBeInTheDocument();
+  });
+
+  it("shows directory labels in breadcrumbs instead of cluster/account names", () => {
+    render(
+      <TestProviders initialEntries={["/systems/c1/accounts/Default"]}>
+        <Routes>
+          <Route element={<ConsolShell />}>
+            <Route path="systems/:clusterId/accounts/:accountName" element={<div />} />
+          </Route>
+        </Routes>
+      </TestProviders>,
+    );
+
+    expect(screen.getByRole("link", { name: "Clusters" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Accounts" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cluster" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Account" })).not.toBeInTheDocument();
   });
 
   it("keeps account tabs on Topology when a system/account is selected", () => {

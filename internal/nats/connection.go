@@ -4,10 +4,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/gopherust-io/nats-consol/internal/domain"
-	"github.com/gopherust-io/nats-consol/internal/metrics"
 	"github.com/gopherust-io/tel"
 	"github.com/nats-io/nats.go"
+
+	"github.com/gopherust-io/nats-consol/internal/domain"
+	"github.com/gopherust-io/nats-consol/internal/metrics"
+	"github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
 // goalign:ignore
@@ -24,30 +26,32 @@ type connectionState struct {
 
 func (m *Manager) connectionHooks(clusterID string) ConnectionHooks {
 	return ConnectionHooks{
-		OnDisconnect: func(_ *nats.Conn, err error) {
+		OnDisconnect: func(nc *nats.Conn, err error) {
 			m.markDisconnected(clusterID, err)
 			tel.Warn().
-				Str("component", "nats").
-				Str("cluster_id", clusterID).
-				Err(err).
-				Msg("nats disconnected")
+				Str("component", "NATS").
+				Str("clusterID", clusterID).
+				Errs("disconnected errors", []error{err, nc.LastError()}).
+				Msg("NATS disconnected")
 		},
 		OnReconnect: func(nc *nats.Conn) {
 			m.markReconnected(clusterID, nc)
 			metrics.IncNATSReconnect(clusterID)
 			tel.Info().
 				Str("component", "nats").
-				Str("cluster_id", clusterID).
+				Str("clusterID", clusterID).
 				Str("server", nc.ConnectedServerName()).
-				Msg("nats reconnected")
+				Err(nc.LastError()).
+				Msg("NATS reconnected")
 		},
-		OnClosed: func(_ *nats.Conn) {
+		OnClosed: func(nc *nats.Conn) {
 			m.evict(clusterID)
 			metrics.SetNATSConnectionsActive(m.activeConnectionCount())
 			tel.Info().
 				Str("component", "nats").
-				Str("cluster_id", clusterID).
-				Msg("nats connection closed")
+				Str("clusterID", clusterID).
+				Err(nc.LastError()).
+				Msg("NATS connection closed")
 		},
 	}
 }
@@ -62,6 +66,7 @@ func (m *Manager) markDisconnected(clusterID string, err error) {
 	if err != nil {
 		st.lastError = err.Error()
 	}
+	m.publishStatusLocked(clusterID, m.snapshotLocked(clusterID))
 }
 
 func (m *Manager) markReconnected(clusterID string, nc *nats.Conn) {
@@ -75,6 +80,7 @@ func (m *Manager) markReconnected(clusterID string, nc *nats.Conn) {
 	st.lastCheckedAt = now
 	st.lastError = ""
 	st.reconnects++
+	m.publishStatusLocked(clusterID, m.snapshotLocked(clusterID))
 }
 
 func (m *Manager) markConnected(clusterID string, client *Client) {
@@ -88,16 +94,19 @@ func (m *Manager) markConnected(clusterID string, client *Client) {
 	if timeout <= 0 {
 		timeout = 2 * time.Second
 	}
+
 	probeCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	if _, err := client.AccountInfo(probeCtx); err == nil {
-		jsOK = true
-	} else if err != nil {
+
+	if _, err := client.AccountInfo(probeCtx); err != nil {
 		jsErr = err.Error()
+	} else {
+		jsOK = true
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	st := m.ensureState(clusterID)
 	st.cached = true
 	st.connected = alive
@@ -106,6 +115,7 @@ func (m *Manager) markConnected(clusterID string, client *Client) {
 	st.lastCheckedAt = now
 	st.jetStreamOK = jsOK
 	st.lastError = jsErr
+	m.publishStatusLocked(clusterID, m.snapshotLocked(clusterID))
 }
 
 func (m *Manager) ensureState(clusterID string) *connectionState {
@@ -120,9 +130,7 @@ func (m *Manager) ensureState(clusterID string) *connectionState {
 	return st
 }
 
-func (m *Manager) stateSnapshot(clusterID string) domain.NATSConnectionStatus {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (m *Manager) snapshotLocked(clusterID string) domain.NATSConnectionStatus {
 	st := m.ensureState(clusterID)
 	_, cached := m.cache[clusterID]
 	out := domain.NATSConnectionStatus{
@@ -142,7 +150,65 @@ func (m *Manager) stateSnapshot(clusterID string) domain.NATSConnectionStatus {
 	return out
 }
 
-// Status returns the current connection status for a cluster (live probe).
+func (m *Manager) stateSnapshot(clusterID string) domain.NATSConnectionStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.snapshotLocked(clusterID)
+}
+
+func (m *Manager) publishStatusLocked(clusterID string, status domain.NATSConnectionStatus) {
+	listeners := m.statusListeners[clusterID]
+	if len(listeners) == 0 {
+		return
+	}
+	for ch := range listeners {
+		select {
+		case ch <- status:
+		default:
+		}
+	}
+}
+
+// SubscribeStatus streams connection status updates for clusterID.
+// latest is the current snapshot (might be zero-valued if never probed).
+func (m *Manager) SubscribeStatus(clusterID string) (<-chan domain.NATSConnectionStatus, domain.NATSConnectionStatus, func()) {
+	if m == nil || strings.IsEmpty(clusterID) {
+		ch := make(chan domain.NATSConnectionStatus)
+		close(ch)
+		return ch, domain.NATSConnectionStatus{}, func() {}
+	}
+
+	ch := make(chan domain.NATSConnectionStatus, statusSubscriberBuffer)
+
+	m.mu.Lock()
+	if m.statusListeners == nil {
+		m.statusListeners = make(map[string]map[chan domain.NATSConnectionStatus]struct{})
+	}
+	if m.statusListeners[clusterID] == nil {
+		m.statusListeners[clusterID] = make(map[chan domain.NATSConnectionStatus]struct{})
+	}
+	m.statusListeners[clusterID][ch] = struct{}{}
+	latest := m.snapshotLocked(clusterID)
+	m.mu.Unlock()
+
+	return ch, latest, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		listeners := m.statusListeners[clusterID]
+		if listeners == nil {
+			return
+		}
+		if _, ok := listeners[ch]; !ok {
+			return
+		}
+		delete(listeners, ch)
+		close(ch)
+		if len(listeners) == 0 {
+			delete(m.statusListeners, clusterID)
+		}
+	}
+}
+
 func (m *Manager) Status(ctx context.Context, clusterID string) (domain.NATSConnectionStatus, error) {
 	if _, err := m.clusterCredentials(ctx, clusterID); err != nil {
 		return domain.NATSConnectionStatus{}, err
@@ -156,9 +222,10 @@ func (m *Manager) Status(ctx context.Context, clusterID string) (domain.NATSConn
 		st.jetStreamOK = false
 		st.lastCheckedAt = time.Now()
 		st.lastError = err.Error()
+		out := m.snapshotLocked(clusterID)
+		m.publishStatusLocked(clusterID, out)
 		m.mu.Unlock()
 		metrics.IncNATSDialError(clusterID)
-		out := m.stateSnapshot(clusterID)
 		return out, nil
 	}
 
@@ -167,7 +234,6 @@ func (m *Manager) Status(ctx context.Context, clusterID string) (domain.NATSConn
 	return m.stateSnapshot(clusterID), nil
 }
 
-// ListStatuses returns connection status for all currently cached clusters.
 func (m *Manager) ListStatuses() []domain.NATSConnectionStatus {
 	m.mu.Lock()
 	ids := make([]string, 0, len(m.cache))
@@ -195,34 +261,40 @@ func (m *Manager) activeConnectionCount() int {
 	return count
 }
 
-func (m *Manager) startSweeper() {
+func (m *Manager) StartSweeper(ctx context.Context) {
 	if m.sweepRunning.Swap(true) {
 		return
 	}
+	m.mu.Lock()
 	m.sweepStop = make(chan struct{})
-	go m.runSweeper()
-}
+	stopCh := m.sweepStop
+	m.mu.Unlock()
+	const defaultSweepInterval = 30 * time.Second
 
-func (m *Manager) runSweeper() {
 	interval := m.clientCacheTTL() / 2
-	interval = max(interval, 30*time.Second)
+	interval = max(interval, defaultSweepInterval)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
 	for {
 		select {
+		case <-stopCh:
+			return
+		case <-ctx.Done():
+			return
 		case <-ticker.C:
 			m.sweepExpired()
-		case <-m.sweepStop:
-			return
 		}
 	}
 }
 
 func (m *Manager) sweepExpired() {
-	now := time.Now()
-	ttl := m.clientCacheTTL()
-	var expired []string
-	var toClose []*Client
+	var (
+		now     = time.Now()
+		ttl     = m.clientCacheTTL()
+		expired []string
+		toClose []*Client
+	)
 
 	m.mu.Lock()
 	for id, entry := range m.cache {
@@ -230,9 +302,17 @@ func (m *Manager) sweepExpired() {
 			expired = append(expired, id)
 			toClose = append(toClose, entry.client)
 			delete(m.cache, id)
+			m.bumpSessionGenerationLocked(id)
+			if st, ok := m.status[id]; ok {
+				st.connected = false
+				st.jetStreamOK = false
+				st.lastCheckedAt = now
+				m.publishStatusLocked(id, m.snapshotLocked(id))
+			}
 			delete(m.status, id)
 		}
 	}
+
 	for id, entry := range m.credCache {
 		if now.Sub(entry.fetchedAt) >= ttl {
 			delete(m.credCache, id)
@@ -241,14 +321,20 @@ func (m *Manager) sweepExpired() {
 	m.mu.Unlock()
 
 	for _, client := range toClose {
-		client.Close()
+		if err := client.Close(); err != nil {
+			tel.Error().
+				Str("component", "NATS").
+				Any("client", client).
+				Err(err).
+				Msg("failed to close NATS client")
+		}
 	}
 
 	if len(expired) > 0 {
 		metrics.SetNATSConnectionsActive(m.activeConnectionCount())
 		tel.Debug().
-			Str("component", "nats").
-			Strs("cluster_ids", expired).
-			Msg("swept stale nats connections")
+			Str("component", "NATS").
+			Strs("clusterIDs", expired).
+			Msg("swept stale NATS connections")
 	}
 }

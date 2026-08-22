@@ -12,8 +12,7 @@ import (
 )
 
 const (
-	// minResponseCompressBytes: compress only when the body is strictly larger
-	// than 32 KiB.
+	// minResponseCompressBytes: compress only when the body is strictly larger than 32 KB
 	minResponseCompressBytes = 32 << 10
 	defaultMaxBytes          = 1 << 20
 )
@@ -63,16 +62,16 @@ func (mw *MwHandler) DecompressRequestBody(next fasthttp.RequestHandler) fasthtt
 		if maxBytes <= 0 {
 			maxBytes = defaultMaxBytes
 		}
-		if cl := ctx.Request.Header.ContentLength(); cl > 0 && int64(cl) > maxBytes {
+		if cl := ctx.Request.Header.ContentLength(); cl > 0 && cl > maxBytes {
 			httpstatus.WriteErrorMessage(ctx, fasthttp.StatusRequestEntityTooLarge, httpstatus.CodeValidation, "request body too large")
 			return
 		}
-		if int64(len(ctx.Request.Body())) > maxBytes {
+		if len(ctx.Request.Body()) > maxBytes {
 			httpstatus.WriteErrorMessage(ctx, fasthttp.StatusRequestEntityTooLarge, httpstatus.CodeValidation, "request body too large")
 			return
 		}
 
-		body, err := ctx.Request.BodyUncompressedWithLimit(int(maxBytes))
+		body, err := ctx.Request.BodyUncompressedWithLimit(maxBytes)
 		if err != nil {
 			if errors.Is(err, fasthttp.ErrBodyTooLarge) {
 				httpstatus.WriteErrorMessage(ctx, fasthttp.StatusRequestEntityTooLarge, httpstatus.CodeValidation, "request body too large")
@@ -117,7 +116,7 @@ func skipResponseCompressionAfter(ctx *fasthttp.RequestCtx) bool {
 	}
 	// Do not call Body() on streams — it would consume the reader.
 	if ctx.Response.IsBodyStream() {
-		return false
+		return true
 	}
 	n := len(ctx.Response.Body())
 	return n == 0 || n <= minResponseCompressBytes

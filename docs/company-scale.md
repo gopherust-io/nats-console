@@ -57,7 +57,7 @@ flowchart TB
 ### Playbook
 
 1. **Deploy once** — Helm, managed Postgres, 2+ consol replicas, strong `ENCRYPTION_KEY` and RSA session keys ([DevOps setup](./devops-setup.md)).
-2. **Register each NATS deployment** as a system (DevOps: env bootstrap when the registry is empty, then Postgres / ops tooling — cluster CRUD is not exposed as a public product API; see [Connecting to NATS clusters](./devops-setup.md#connecting-to-nats-clusters)).
+2. **Register each NATS deployment** as a system (DevOps: env bootstrap when the registry is empty, then Postgres / ops tooling — cluster CRUD is not exposed as a public product API; see [Connecting to NATS clusters](./devops-setup.md#connecting-to-nats-clusters)). For a **NATS supercluster**, register each gateway region (e.g. east and west) as its own Consol cluster — see [Supercluster](./supercluster.md).
 3. **Invite teams** with scoped `clusterIds` (only systems they own).
 4. **Isolate services on NATS** — subject/stream naming (`payments.>`, `orders.>`) and/or real NATS accounts; do not expect consol “projects.”
 5. **Tune as systems grow** — `METRICS_SNAPSHOT_INTERVAL=120s`, retention, `DB_MAX_CONNS`; metrics scrapes fan out across clusters (bounded concurrency).

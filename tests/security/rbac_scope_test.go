@@ -8,11 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gopherust-io/nats-consol/internal/store"
-	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
-	"github.com/gopherust-io/nats-consol/tests/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gopherust-io/nats-consol/internal/repo"
+	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
+	"github.com/gopherust-io/nats-consol/tests/testutil"
 )
 
 func TestScopedViewerCannotAccessOtherCluster(t *testing.T) {
@@ -20,12 +21,12 @@ func TestScopedViewerCannotAccessOtherCluster(t *testing.T) {
 	ctx := context.Background()
 	clusterID := stack.DefaultClusterID(t)
 
-	_, err := stack.Store.CreateUser(ctx, store.UserCreate{
+	_, err := stack.Store.CreateUser(ctx, repo.UserCreate{
 		Username: "scoped-viewer",
 		Email:    "scoped@example.com",
 		Password: "scoped-pass",
-		Roles:    []string{store.RoleViewer},
-		AccessRules: &store.AccessRules{
+		Roles:    []string{repo.RoleViewer},
+		AccessRules: &repo.AccessRules{
 			ClusterIDs: []string{clusterID},
 		},
 	})
@@ -87,15 +88,15 @@ func TestScopedAdminCannotCreateCluster(t *testing.T) {
 	stack := testutil.SetupStack(t)
 	ctx := context.Background()
 
-	_, err := stack.Store.CreateUser(ctx, store.UserCreate{
+	_, err := stack.Store.CreateUser(ctx, repo.UserCreate{
 		Username: "scoped-admin",
 		Email:    "scoped@example.com",
 		Password: "scoped-pass",
-		Roles:    []string{store.RoleAdmin},
-		AccessRules: &store.AccessRules{
+		Roles:    []string{repo.RoleAdmin},
+		AccessRules: &repo.AccessRules{
 			ClusterIDs:      []string{stack.DefaultClusterID(t)},
 			ManageUsers:     true,
-			AssignableRoles: []string{store.RoleViewer},
+			AssignableRoles: []string{repo.RoleViewer},
 		},
 	})
 	require.NoError(t, err)
@@ -119,12 +120,12 @@ func TestViewerWithoutClusterAccessGetsEmptyList(t *testing.T) {
 	stack := testutil.SetupStack(t)
 	ctx := context.Background()
 
-	_, err := stack.Store.CreateUser(ctx, store.UserCreate{
+	_, err := stack.Store.CreateUser(ctx, repo.UserCreate{
 		Username: "no-cluster-viewer",
 		Email:    "none@example.com",
 		Password: "none-pass",
-		Roles:    []string{store.RoleViewer},
-		AccessRules: &store.AccessRules{
+		Roles:    []string{repo.RoleViewer},
+		AccessRules: &repo.AccessRules{
 			ClusterIDs: []string{},
 		},
 	})

@@ -362,15 +362,33 @@ func isPlural(tok string) bool {
 	return singularize(tok) != tok
 }
 
+// looksLikeAction reports whether tok is a past-tense / event action token
+// rather than an entity noun (e.g. "created" vs "invoice").
+func looksLikeAction(tok string) bool {
+	switch tok {
+	case "created", "updated", "deleted", "cancelled", "canceled",
+		"settled", "failed", "shipped", "paid", "received", "completed",
+		"started", "stopped", "published", "requested", "approved", "rejected":
+		return true
+	}
+	return len(tok) > 3 && strings.HasSuffix(tok, "ed")
+}
+
 func expandShallow(tokens []string) string {
 	if len(tokens) != 2 {
 		return strings.Join(tokens, ".")
 	}
-	first, action := tokens[0], tokens[1]
-	if isPlural(first) {
-		return first + "." + singularize(first) + "." + action
+	first, second := tokens[0], tokens[1]
+	if looksLikeAction(second) {
+		if isPlural(first) {
+			// domain.action → domain.entity.action (orders.created → orders.order.created)
+			return first + "." + singularize(first) + "." + second
+		}
+		// singular domain.action → domain.domain.action (order.created → order.order.created)
+		return first + "." + first + "." + second
 	}
-	return first + "." + first + "." + action
+	// domain.entity missing action → domain.entity.created
+	return first + "." + second + ".created"
 }
 
 func uniqueLiterals(members []namingOccurrence) []string {

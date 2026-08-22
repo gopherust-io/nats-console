@@ -41,6 +41,38 @@ const WIRE_32BIT = 5;
 
 const PREVIEW_CHARS = 160;
 
+/** Cache compact previews on host objects (e.g. live message rows) across virtualizer paints. */
+const previewByHost = new WeakMap<object, string>();
+
+/**
+ * Cheap row preview: truncated UTF-8 when printable, otherwise truncated base64.
+ * Does not sniff or load msgpack/cbor.
+ * When `cacheHost` is provided, the preview is computed once per host object.
+ */
+export function compactPayloadPreview(
+  data: string,
+  maxChars = PREVIEW_CHARS,
+  cacheHost?: object,
+): string {
+  if (!data) return "";
+  if (cacheHost) {
+    const hit = previewByHost.get(cacheHost);
+    if (hit !== undefined) return hit;
+  }
+  const bytes = messageDataToBytes(data);
+  const text = tryDecodeUtf8(bytes);
+  let preview: string;
+  if (text !== null && isMostlyPrintableAscii(bytes)) {
+    preview = text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+  } else {
+    const b64 = data.replace(/\s+/g, "");
+    preview = b64.length > maxChars ? `${b64.slice(0, maxChars)}…` : b64;
+  }
+  if (cacheHost) previewByHost.set(cacheHost, preview);
+  return preview;
+}
+
+
 function contentTypeOf(headers?: Record<string, string>): string {
   if (!headers) return "";
   const raw =
@@ -273,21 +305,6 @@ export async function detectPayloadFormat(
   if (fromHeader) return fromHeader;
   if (bytes) return detectPayloadFormatFromBytes(bytes);
   return "bytes";
-}
-
-/**
- * Cheap row preview: truncated UTF-8 when printable, otherwise truncated base64.
- * Does not sniff or load msgpack/cbor.
- */
-export function compactPayloadPreview(data: string, maxChars = PREVIEW_CHARS): string {
-  if (!data) return "";
-  const bytes = messageDataToBytes(data);
-  const text = tryDecodeUtf8(bytes);
-  if (text !== null && isMostlyPrintableAscii(bytes)) {
-    return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
-  }
-  const b64 = data.replace(/\s+/g, "");
-  return b64.length > maxChars ? `${b64.slice(0, maxChars)}…` : b64;
 }
 
 export function bytesToHexDump(bytes: Uint8Array, bytesPerLine = 16): string {

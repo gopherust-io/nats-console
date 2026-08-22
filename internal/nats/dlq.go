@@ -13,11 +13,10 @@ import (
 	commonstrings "github.com/gopherust-io/nats-consol/pkg/common/strings"
 )
 
-func (c *Client) DeleteMessage(ctx context.Context, stream string, seq uint64) error {
-	_ = ctx
+func (c *Client) DeleteMessage(_ context.Context, stream string, seq uint64) error {
 	js := c.JetStream()
 	if js == nil {
-		return errors.New("jetstream not available")
+		return errors.New("JetStream not available")
 	}
 	return js.DeleteMsg(stream, seq)
 }
@@ -66,7 +65,7 @@ func (c *Client) ListDLQMessages(ctx context.Context, stream string, startSeq ui
 		lastSeq = msg.Seq
 	}
 	// Prefer Truncated from the range helper, but also advance when a full page
-	// was returned before LastSeq (some range backends omit Truncated).
+	// was returned before LastSeq (some range backends omit Truncated)
 	moreRemain := lastSeq > 0 && lastSeq < info.State.LastSeq
 	fullPage := len(rangeRes.Messages) >= limit
 	if moreRemain && (rangeRes.Truncated || fullPage) {
@@ -86,11 +85,14 @@ func (c *Client) RetryDLQMessages(ctx context.Context, stream string, req domain
 		return nil, err
 	}
 
-	seqs := req.Seqs
-	truncated := false
-	var remaining *int
+	var (
+		remaining *int
+		truncated bool
+		sequences = req.Seqs
+	)
+
 	if req.All {
-		seqs, truncated, remaining, err = c.collectDLQRetryAllSeqs(ctx, stream, info, req.NormalizedLimit())
+		sequences, truncated, remaining, err = c.collectDLQRetryAllSequences(ctx, stream, info, req.NormalizedLimit())
 		if err != nil {
 			return nil, err
 		}
@@ -101,7 +103,7 @@ func (c *Client) RetryDLQMessages(ctx context.Context, stream string, req domain
 		Truncated: truncated,
 		Remaining: remaining,
 	}
-	for _, seq := range seqs {
+	for _, seq := range sequences {
 		if err := c.retryOneDLQMessage(ctx, stream, seq); err != nil {
 			result.Failed = append(result.Failed, domain.DLQRetryFailure{
 				Seq:   seq,
@@ -114,24 +116,26 @@ func (c *Client) RetryDLQMessages(ctx context.Context, stream string, req domain
 	return result, nil
 }
 
-func (c *Client) collectDLQRetryAllSeqs(
+func (c *Client) collectDLQRetryAllSequences(
 	ctx context.Context,
 	stream string,
 	info *nats.StreamInfo,
 	safetyMax int,
-) (seqs []uint64, truncated bool, remaining *int, err error) {
+) (sequences []uint64, truncated bool, remaining *int, err error) {
 	if safetyMax <= 0 {
 		safetyMax = domain.DefaultDLQRetryAllLimit
 	}
 	capHint := safetyMax
-	if msgs := info.State.Msgs; msgs <= uint64(^uint(0)>>1) && int(msgs) < capHint { //nolint:gosec // G115: msgs clamped to int range
-		capHint = int(msgs)
+	if messages := info.State.Msgs; messages > 0 && messages < uint64(capHint) { //nolint:gosec // G115: capHint is positive int bound
+		capHint = int(messages) //nolint:gosec // G115: messages < uint64(capHint)
 	}
-	seqs = make([]uint64, 0, capHint)
-	var startSeq uint64
-	for len(seqs) < safetyMax {
+
+	sequences = make([]uint64, 0, capHint)
+	startSeq := uint64(0)
+
+	for len(sequences) < safetyMax {
 		pageLimit := domain.MaxDLQListLimit
-		if left := safetyMax - len(seqs); left < pageLimit {
+		if left := safetyMax - len(sequences); left < pageLimit {
 			pageLimit = left
 		}
 		listed, listErr := c.ListDLQMessages(ctx, stream, startSeq, pageLimit)
@@ -142,26 +146,25 @@ func (c *Client) collectDLQRetryAllSeqs(
 			break
 		}
 		for _, msg := range listed.Messages {
-			seqs = append(seqs, msg.Seq)
+			sequences = append(sequences, msg.Seq)
 		}
 		if listed.NextSeq == nil {
 			break
 		}
 		startSeq = *listed.NextSeq
-		if len(seqs) >= safetyMax {
-			// More may remain beyond the safety max.
+		if len(sequences) >= safetyMax {
 			if listed.NextSeq != nil || (len(listed.Messages) > 0 && listed.Messages[len(listed.Messages)-1].Seq < info.State.LastSeq) {
 				truncated = true
 				left := 0
-				if msgs := info.State.Msgs; msgs <= uint64(^uint(0)>>1) { //nolint:gosec // G115: msgs clamped to int range
-					left = max(int(msgs)-len(seqs), 0)
+				if messages := info.State.Msgs; messages <= uint64(^uint(0)>>1) { //nolint:gosec
+					left = max(int(messages)-len(sequences), 0)
 				}
 				remaining = &left
 			}
 			break
 		}
 	}
-	return seqs, truncated, remaining, nil
+	return sequences, truncated, remaining, nil
 }
 
 func (c *Client) retryOneDLQMessage(ctx context.Context, stream string, seq uint64) error {
@@ -182,7 +185,7 @@ func (c *Client) retryOneDLQMessage(ctx context.Context, stream string, seq uint
 	}
 
 	headers := domain.RetryPublishHeaders(msg.Headers, stream, seq)
-	if _, err := c.inner.PublishRaw(ctx, original, data, headers); err != nil {
+	if _, err := c.natsCl.PublishRaw(ctx, original, data, headers); err != nil {
 		return fmt.Errorf("republish subject=%q: %w", original, err)
 	}
 	if err := c.DeleteMessage(ctx, stream, seq); err != nil {

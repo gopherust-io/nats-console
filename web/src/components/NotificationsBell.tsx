@@ -6,6 +6,8 @@ import { fetchAlertOpenSummary } from "../lib/alerts";
 import { ALERTS_POLL_MS } from "../lib/constants";
 import { visibilityAwareInterval } from "../lib/query";
 
+const ALERTS_BADGE_POLL_MS = 60_000;
+
 function formatWhen(iso: string) {
   try {
     return new Date(iso).toLocaleString();
@@ -28,7 +30,8 @@ export default function NotificationsBell() {
   const summaryQuery = useQuery({
     queryKey: ["alerts", "open-summary"],
     queryFn: fetchAlertOpenSummary,
-    refetchInterval: visibilityAwareInterval(ALERTS_POLL_MS),
+    // Badge-only when closed; faster while the panel is open.
+    refetchInterval: visibilityAwareInterval(open ? ALERTS_POLL_MS : ALERTS_BADGE_POLL_MS),
   });
 
   const clearCloseTimer = useCallback(() => {

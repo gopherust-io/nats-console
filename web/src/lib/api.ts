@@ -299,6 +299,58 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<ApiR
   return { data: body as T };
 }
 
+/** Authenticated fetch for non-JSON bodies (zip/blob) with the same 401→refresh path as api(). */
+export async function apiBinary(
+  path: string,
+  init: RequestInit = {},
+): Promise<{ response: Response; blob: Blob }> {
+  const req = await buildAPIRequest(init);
+
+  let response: Response;
+  try {
+    response = await fetch(path, { ...init, headers: req.headers, body: req.body, credentials: "include" });
+  } catch {
+    throw new ApiError("Network request failed. Check your connection and try again.", {
+      status: 0,
+      code: "network",
+    });
+  }
+
+  if (response.status === 401 && !isAuthBootstrapPath(path)) {
+    const refreshed = await tryRefreshSession();
+    if (refreshed) {
+      const retry = await buildAPIRequest(init);
+      try {
+        response = await fetch(path, { ...init, headers: retry.headers, body: retry.body, credentials: "include" });
+      } catch {
+        throw new ApiError("Network request failed. Check your connection and try again.", {
+          status: 0,
+          code: "network",
+        });
+      }
+    }
+  }
+
+  if (response.status === 401) {
+    clearAuth();
+    if (!window.location.pathname.startsWith("/login")) {
+      window.location.href = "/login";
+    }
+    throw new UnauthorizedError();
+  }
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as ErrorBody;
+    const nested = body.error;
+    throw new ApiError(nested?.message ?? `Request failed (${response.status})`, {
+      status: response.status,
+      code: normalizeCode(nested?.code, response.status),
+      retryable: nested?.retryable === true || response.status === 429 || response.status >= 500,
+      retryAfterSeconds: nested?.retryAfterSeconds,
+    });
+  }
+  return { response, blob: await response.blob() };
+}
+
 export function errorMessage(err: unknown, fallback = "Request failed"): string {
   if (err instanceof Error && err.message) return err.message;
   return fallback;
@@ -498,6 +550,61 @@ export type DLQRetryResult = {
   failed?: { seq: number; error: string }[];
   truncated?: boolean;
   remaining?: number;
+};
+
+export type IncidentCapsuleCaptureRequest = {
+  consumer: string;
+  failingSeq?: number;
+  window?: number;
+  subject?: string;
+  reason?: string;
+  trigger?: string;
+};
+
+export type IncidentCapsuleSummary = {
+  id: string;
+  stream?: string;
+  consumer?: string;
+  trigger?: string;
+  reason?: string;
+  failingSeq?: number;
+  createdAt?: string;
+};
+
+export type IncidentCapsuleMessage = {
+  sequence: number;
+  subject: string;
+  time: string;
+  data: string;
+  headers?: Record<string, string>;
+  truncated?: boolean;
+};
+
+export type IncidentCapsuleDetail = {
+  id: string;
+  stream: string;
+  consumer: string;
+  trigger: string;
+  subject?: string;
+  reason?: string;
+  failingSeq?: number;
+  createdAt: string;
+  schemaVersion: number;
+  messageCount: number;
+  hasFingerprint?: boolean;
+  messages: IncidentCapsuleMessage[];
+  flightTimeline?: { at: string; kind: string; subject?: string; detail?: string }[];
+};
+
+export type IncidentCapsuleDryRun = {
+  id: string;
+  stream: string;
+  consumer: string;
+  failingSeq?: number;
+  messageCount: number;
+  invoked: number;
+  subjects: string[];
+  preview: IncidentCapsuleMessage[];
 };
 
 export type ConsumerConfig = {
@@ -733,6 +840,11 @@ export function getSnapshotEventsURL(clusterId: string): string {
   return `/api/v1/clusters/${encodeURIComponent(clusterId)}/snapshots/events`;
 }
 
+/** Demand-driven Account Overview SSE; session cookie is sent automatically by EventSource. */
+export function getAccountOverviewEventsURL(clusterId: string): string {
+  return `/api/v1/clusters/${encodeURIComponent(clusterId)}/account/events`;
+}
+
 /** Demand-driven connz SSE; session cookie is sent automatically by EventSource. */
 export function getConnzEventsURL(clusterId: string): string {
   return `/api/v1/clusters/${encodeURIComponent(clusterId)}/monitoring/connz/events`;
@@ -742,3 +854,20 @@ export function getConnzEventsURL(clusterId: string): string {
 export function getReplicasEventsURL(clusterId: string): string {
   return `/api/v1/clusters/${encodeURIComponent(clusterId)}/replicas/events`;
 }
+
+/** Connection status SSE; session cookie is sent automatically by EventSource. */
+export function getConnectionEventsURL(clusterId: string): string {
+  return `/api/v1/clusters/${encodeURIComponent(clusterId)}/connection/events`;
+}
+
+export type NATSConnectionStatus = {
+  clusterId: string;
+  connected: boolean;
+  cached?: boolean;
+  jetstreamOk?: boolean;
+  serverName?: string;
+  lastError?: string;
+  reconnects?: number;
+  lastCheckedAt?: string;
+  lastConnectedAt?: string | null;
+};

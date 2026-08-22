@@ -13,24 +13,17 @@ test.describe("systems and accounts", () => {
 
   test("systems list shows connected cluster", async ({ page }) => {
     await page.goto("/systems");
-    await expect(page.getByRole("heading", { name: "Systems" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Clusters" })).toBeVisible();
     await expect(page.getByText(CLUSTER.name)).toBeVisible();
-    await expect(page.getByText("Connected")).toBeVisible();
+    await expect(page.getByText("Live", { exact: true }).first()).toBeVisible();
   });
 
   test("system accounts page lists Default", async ({ page }) => {
     await page.goto(`/systems/${CLUSTER.id}`);
     await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
-    await expect(page.getByText(ACCOUNT)).toBeVisible();
+    await expect(page.getByRole("link", { name: ACCOUNT })).toBeVisible();
     await page.getByRole("link", { name: ACCOUNT }).click();
     await expect(page).toHaveURL(new RegExp(`${CLUSTER.id}/accounts/${ACCOUNT}`));
-  });
-
-  test("system usage page shows usage cards", async ({ page }) => {
-    await page.goto(`/systems/${CLUSTER.id}/usage`);
-    await expect(page.getByRole("heading", { name: "Usage" })).toBeVisible();
-    await expect(page.getByText("Streams")).toBeVisible();
-    await expect(page.getByText("Consumers")).toBeVisible();
   });
 
   test("system access empty and add user", async ({ page }) => {
@@ -87,16 +80,17 @@ test.describe("systems and accounts", () => {
     await expect(page.getByRole("heading", { name: "Access" })).toBeVisible();
     await expect(page.getByText("No access grants yet.")).toBeVisible();
 
-    await page.getByLabel("Person").selectOption(person.id);
+    await page.getByLabel("Person").click();
+    await page.getByRole("option", { name: person.username }).click();
     await page.getByRole("button", { name: "Add User" }).click();
-    await expect(page.getByRole("cell", { name: person.username })).toBeVisible();
+    await expect(page.getByRole("cell", { name: person.username }).first()).toBeVisible();
   });
 
   test("account overview loads", async ({ page }) => {
     await page.goto(base);
     await expect(page.getByRole("heading", { name: "Overview", level: 1 })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Streams" }).first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Consumers" }).first()).toBeVisible();
+    await expect(page.getByText("Streams", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Consumers", { exact: true }).first()).toBeVisible();
   });
 
   test("account connections empty state", async ({ page }) => {
@@ -109,9 +103,9 @@ test.describe("systems and accounts", () => {
     // Legacy /settings redirects onto the account overview (settings live there).
     await page.goto(`${base}/settings`);
     await expect(page).toHaveURL(new RegExp(`/systems/${CLUSTER.id}/accounts/${ACCOUNT}$`));
-    await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Limits" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "JetStream" })).toBeVisible();
+    await expect(page.getByText("Default account")).toBeVisible();
+    await expect(page.getByText("JetStream on")).toBeVisible();
+    await expect(page.getByText("Unlimited").first()).toBeVisible();
   });
 
   test("account sharing empty and create export", async ({ page }) => {

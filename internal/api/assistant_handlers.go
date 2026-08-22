@@ -1,10 +1,9 @@
 package api
 
 import (
-	"errors"
-
 	"github.com/valyala/fasthttp"
 
+	"github.com/gopherust-io/nats-consol/internal/api/apikit"
 	"github.com/gopherust-io/nats-consol/internal/assistant"
 	"github.com/gopherust-io/nats-consol/internal/httpctx"
 	"github.com/gopherust-io/nats-consol/internal/httpctx/httpstatus"
@@ -19,6 +18,16 @@ func NewAssistantHandler(svc *assistant.Service) *AssistantHandler {
 	return &AssistantHandler{svc: svc}
 }
 
+// Config godoc
+//
+// @Summary Config
+// @Tags Assistant
+// @Produce json
+// @Success 200 {object} AssistantConfigEnvelope
+// @Failure 401 {object} ErrorEnvelope
+// @Failure 403 {object} ErrorEnvelope
+// @Failure 404 {object} ErrorEnvelope
+// @Router /api/v1/assistant/config [get]
 func (h *AssistantHandler) Config(ctx *fasthttp.RequestCtx) {
 	if h.svc == nil || !h.svc.Enabled() {
 		httpstatus.WriteJSON(ctx, fasthttp.StatusOK, AssistantConfigResponse{
@@ -33,38 +42,36 @@ func (h *AssistantHandler) Config(ctx *fasthttp.RequestCtx) {
 	})
 }
 
+// Chat godoc
+//
+// @Summary Chat
+// @Tags Assistant
+// @Param clusterId path string true "clusterId"
+// @Produce json
+// @Success 200 {object} DataMetaEnvelope
+// @Failure 401 {object} ErrorEnvelope
+// @Failure 403 {object} ErrorEnvelope
+// @Failure 404 {object} ErrorEnvelope
+// @Security BasicAuth
+// @Security BearerAuth
+// @Security SessionCookie
+// @Router /api/v1/clusters/{clusterId}/assistant/chat [post]
 func (h *AssistantHandler) Chat(ctx *fasthttp.RequestCtx) {
 	if h.svc == nil || !h.svc.Enabled() {
-		writeAssistantError(ctx, assistant.WrapError(assistant.ErrNotEnabled))
+		apikit.WriteAssistantError(ctx, assistant.WrapError(assistant.ErrNotEnabled))
 		return
 	}
 
 	var req assistant.ChatRequest
 	if err := serializer.Unmarshal(ctx.PostBody(), &req); err != nil {
-		writeAssistantError(ctx, assistant.WrapError(err))
+		apikit.WriteAssistantError(ctx, assistant.WrapError(err))
 		return
 	}
 
-	resp, err := h.svc.Chat(httpctx.FromRequest(ctx), clusterID(ctx), req)
+	resp, err := h.svc.Chat(httpctx.FromRequest(ctx), apikit.ClusterID(ctx), req)
 	if err != nil {
-		writeAssistantError(ctx, assistant.WrapError(err))
+		apikit.WriteAssistantError(ctx, assistant.WrapError(err))
 		return
 	}
 	httpstatus.WriteJSON(ctx, fasthttp.StatusOK, resp)
-}
-
-func writeAssistantError(ctx *fasthttp.RequestCtx, err *assistant.Error) {
-	if err == nil {
-		httpstatus.WriteError(ctx, fasthttp.StatusInternalServerError, errors.New("assistant request failed"))
-		return
-	}
-	body := httpstatus.ErrorBody{
-		Message:   err.Message,
-		Code:      err.Code,
-		Retryable: err.Retryable,
-	}
-	if err.RetryAfter > 0 {
-		body.RetryAfterSeconds = err.RetryAfter
-	}
-	httpstatus.WriteErrorBody(ctx, err.HTTPStatus(), body)
 }

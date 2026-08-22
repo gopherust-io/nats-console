@@ -1,15 +1,18 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Alert from "../components/ui/Alert";
 import QueryErrorState from "../components/ui/QueryErrorState";
-import CreateNatsUserPanel, { NatsUserConfigPayload } from "../components/CreateNatsUserPanel";
+import VirtualTable, { type VirtualTableColumn } from "../components/VirtualTable";
+import type { NatsUserConfigPayload } from "../components/CreateNatsUserPanel";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { api, clusterPath } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCluster } from "../lib/cluster";
 import { clusterQueryKey } from "../lib/query";
+
+const CreateNatsUserPanel = lazy(() => import("../components/CreateNatsUserPanel"));
 
 type NATSUser = {
   id: string;
@@ -583,22 +586,24 @@ export default function NatsUsersPage() {
             </div>
           </div>
         )}
-        <CreateNatsUserPanel
-          mode="edit"
-          open={Boolean(editUser)}
-          groups={groups}
-          initial={panelInitial}
-          busy={panelBusy}
-          error={panelError}
-          onClose={() => {
-            setEditUser(null);
-            setPanelError("");
-          }}
-          onSubmit={async (body) => {
-            setPanelError("");
-            await updateMutation.mutateAsync(body);
-          }}
-        />
+        <Suspense fallback={null}>
+          <CreateNatsUserPanel
+            mode="edit"
+            open={Boolean(editUser)}
+            groups={groups}
+            initial={panelInitial}
+            busy={panelBusy}
+            error={panelError}
+            onClose={() => {
+              setEditUser(null);
+              setPanelError("");
+            }}
+            onSubmit={async (body) => {
+              setPanelError("");
+              await updateMutation.mutateAsync(body);
+            }}
+          />
+        </Suspense>
       </div>
     );
   }
@@ -861,21 +866,23 @@ export default function NatsUsersPage() {
         </>
       ) : (
         <>
-      <CreateNatsUserPanel
-        mode="create"
-        open={panelOpen && !editUser}
-        groups={groups}
-        busy={panelBusy}
-        error={panelError}
-        onClose={() => {
-          setShowCreate(false);
-          setPanelError("");
-        }}
-        onSubmit={async (body) => {
-          setPanelError("");
-          await createMutation.mutateAsync(body);
-        }}
-      />
+      <Suspense fallback={null}>
+        <CreateNatsUserPanel
+          mode="create"
+          open={panelOpen && !editUser}
+          groups={groups}
+          busy={panelBusy}
+          error={panelError}
+          onClose={() => {
+            setShowCreate(false);
+            setPanelError("");
+          }}
+          onSubmit={async (body) => {
+            setPanelError("");
+            await createMutation.mutateAsync(body);
+          }}
+        />
+      </Suspense>
 
       {creds && (
         <div className="nc-settings-section">
@@ -896,28 +903,35 @@ export default function NatsUsersPage() {
           <p className="nc-settings-section__empty">{t("natsUsers.empty")}</p>
         ) : (
           <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>{t("common.name")}</th>
-                  <th>{t("common.created")}</th>
-                  <th>{t("natsUsers.signingGroup")}</th>
-                  <th>{t("natsUsers.jwtIssued")}</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => (
-                  <tr key={u.id}>
-                    <td>
+            <VirtualTable
+              columns={[
+                { id: "name", header: t("common.name"), width: "minmax(120px, 1.4fr)" },
+                { id: "created", header: t("common.created"), width: "minmax(140px, 1.1fr)" },
+                { id: "signing", header: t("natsUsers.signingGroup"), width: "minmax(100px, 1fr)" },
+                { id: "jwt", header: t("natsUsers.jwtIssued"), width: "88px" },
+                { id: "actions", header: "", width: "minmax(160px, 1.2fr)" },
+              ] satisfies VirtualTableColumn[]}
+              items={users}
+              rowHeight={52}
+              maxHeight={560}
+              empty={t("natsUsers.empty")}
+              getKey={(u) => u.id}
+              renderCell={(u, columnId) => {
+                switch (columnId) {
+                  case "name":
+                    return (
                       <button type="button" className="link-btn" onClick={() => setDetailId(u.id)}>
                         {u.name}
                       </button>
-                    </td>
-                    <td>{u.createdAt ? new Date(u.createdAt).toLocaleString() : t("common.emDash")}</td>
-                    <td>{u.signingGroup}</td>
-                    <td>{u.jwtIssued ? t("common.yes") : "--"}</td>
-                    <td>
+                    );
+                  case "created":
+                    return u.createdAt ? new Date(u.createdAt).toLocaleString() : t("common.emDash");
+                  case "signing":
+                    return u.signingGroup;
+                  case "jwt":
+                    return u.jwtIssued ? t("common.yes") : "--";
+                  case "actions":
+                    return (
                       <div className="actions">
                         {canCreds(u.id) && (
                           <button type="button" className="btn secondary btn--small" onClick={() => downloadMutation.mutate(u.id)}>
@@ -930,11 +944,12 @@ export default function NatsUsersPage() {
                           </button>
                         )}
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    );
+                  default:
+                    return null;
+                }
+              }}
+            />
           </div>
         )}
       </div>

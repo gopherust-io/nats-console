@@ -96,9 +96,12 @@ type sharedSub struct {
 	// attempting the underlying JetStream subscribe (success or failure),
 	// so concurrent late-arriving attach calls wait for that single attempt
 	// instead of racing to subscribe themselves.
-	ready      chan struct{}
-	mu         sync.Mutex
-	subStarted bool
+	ready chan struct{}
+	// viewerScratch is reused across fanout calls. nats.go invokes the
+	// subscription callback sequentially, so only one fanout runs at a time.
+	viewerScratch []*muxViewer
+	mu            sync.Mutex
+	subStarted    bool
 }
 
 type subMux struct {
@@ -223,7 +226,7 @@ func (ss *sharedSub) fanout(msg *nats.Msg) {
 	now := time.Now()
 
 	ss.mu.Lock()
-	viewers := make([]*muxViewer, 0, len(ss.viewers))
+	viewers := ss.viewerScratch[:0]
 	truncate := 0
 	for v := range ss.viewers {
 		if v.closed.Load() || v.paused.Load() {
@@ -234,6 +237,7 @@ func (ss *sharedSub) fanout(msg *nats.Msg) {
 			truncate = v.truncate
 		}
 	}
+	ss.viewerScratch = viewers
 	ss.mu.Unlock()
 
 	if len(viewers) == 0 {
@@ -244,8 +248,7 @@ func (ss *sharedSub) fanout(msg *nats.Msg) {
 	if truncate > 0 && len(payload) > truncate {
 		payload = payload[:truncate]
 	}
-	headers := headerMapFromNATS(msg.Header)
-	frame, err := encodeMessageFrame(seq, msg.Subject, payload, headers, now)
+	frame, err := encodeMessageFrameFromNATS(seq, msg.Subject, payload, msg.Header, now)
 	if err != nil {
 		return
 	}
