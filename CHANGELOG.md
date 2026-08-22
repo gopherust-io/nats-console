@@ -4,6 +4,10 @@ All notable changes to NATS Consol are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Scorecard / Dependabot: pin `examples/fleet` images by digest; override `brace-expansion` **5.0.9** and `uuid` **11.1.1**.
+
 ## [0.14.0] - 2026-08-22
 
 ### Fixed
