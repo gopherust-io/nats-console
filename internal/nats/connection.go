@@ -265,7 +265,10 @@ func (m *Manager) StartSweeper(ctx context.Context) {
 	if m.sweepRunning.Swap(true) {
 		return
 	}
+	m.mu.Lock()
 	m.sweepStop = make(chan struct{})
+	stopCh := m.sweepStop
+	m.mu.Unlock()
 	const defaultSweepInterval = 30 * time.Second
 
 	interval := m.clientCacheTTL() / 2
@@ -275,7 +278,7 @@ func (m *Manager) StartSweeper(ctx context.Context) {
 
 	for {
 		select {
-		case <-m.sweepStop:
+		case <-stopCh:
 			return
 		case <-ctx.Done():
 			return

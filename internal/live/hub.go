@@ -180,9 +180,9 @@ func (h *Hub) Handle(ctx *fasthttp.RequestCtx) {
 	}
 
 	err = upgrader.Upgrade(ctx, func(conn *websocket.Conn) {
-		// Use reqCtx, not *fasthttp.RequestCtx: Upgrade releases/resets the
-		// RequestCtx, and serving the conn on it races with fasthttp pooling.
-		h.serveConn(reqCtx, conn, client, clusterID, stream, subjectFilter, fromSeq)
+		// Never retain *fasthttp.RequestCtx after Upgrade — it is pooled/reset
+		// and races under -race. Long-lived session uses an independent context.
+		h.serveConn(context.Background(), conn, client, clusterID, stream, subjectFilter, fromSeq)
 	})
 	if err != nil {
 		tel.Error().Err(err).Str("component", "live").Msg("websocket upgrade failed")

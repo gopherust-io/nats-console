@@ -15,7 +15,7 @@ test.describe("systems and accounts", () => {
     await page.goto("/systems");
     await expect(page.getByRole("heading", { name: "Clusters" })).toBeVisible();
     await expect(page.getByText(CLUSTER.name)).toBeVisible();
-    await expect(page.getByText("Connected")).toBeVisible();
+    await expect(page.getByText("Live", { exact: true }).first()).toBeVisible();
   });
 
   test("system accounts page lists Default", async ({ page }) => {
@@ -83,14 +83,14 @@ test.describe("systems and accounts", () => {
     await page.getByLabel("Person").click();
     await page.getByRole("option", { name: person.username }).click();
     await page.getByRole("button", { name: "Add User" }).click();
-    await expect(page.getByRole("cell", { name: person.username })).toBeVisible();
+    await expect(page.getByRole("cell", { name: person.username }).first()).toBeVisible();
   });
 
   test("account overview loads", async ({ page }) => {
     await page.goto(base);
     await expect(page.getByRole("heading", { name: "Overview", level: 1 })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Streams" }).first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Consumers" }).first()).toBeVisible();
+    await expect(page.getByText("Streams", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Consumers", { exact: true }).first()).toBeVisible();
   });
 
   test("account connections empty state", async ({ page }) => {

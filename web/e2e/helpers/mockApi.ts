@@ -64,6 +64,9 @@ export async function mockClusterApis(page: Page) {
     data: connectedStatus,
     meta: { total: connectedStatus.length },
   });
+  await mockJson(page, "**/api/v1/clusters/*/connection", {
+    data: connectedStatus[0],
+  });
   await mockJson(page, "**/api/v1/clusters/*/account", { data: emptyAccount });
   await mockJson(page, "**/api/v1/clusters/*/streams**", emptyStreams);
   await mockJson(page, "**/api/v1/clusters/*/kv/buckets**", emptyBuckets);
