@@ -22,7 +22,7 @@
     "@tanstack/react-virtual": "^3.14.9",
     "cbor-x": "^1.6.5",
     "exceljs": "^4.4.0",
-    "i18next": "^26.3.6",
+    "i18next": "^26.4.0",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.33.0",
     "motion": "^13.1.0",
