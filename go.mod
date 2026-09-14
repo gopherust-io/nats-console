@@ -14,7 +14,7 @@ require (
 	github.com/gopherust-io/env v0.6.0
 	github.com/gopherust-io/nats v0.6.0
 	github.com/gopherust-io/tel v0.4.0
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/nats-io/jwt/v2 v2.8.2
 	github.com/nats-io/nats.go v1.53.1
 	github.com/nats-io/nkeys v0.4.16
