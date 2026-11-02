@@ -3,7 +3,7 @@ module github.com/gopherust-io/nats-consol
 go 1.27
 
 require (
-	github.com/bytedance/sonic v1.15.3-0.20260730064818-2a36d6da63e2
+	github.com/bytedance/sonic v1.15.5
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/cloudwego/base64x v0.1.7
 	github.com/fasthttp/router v1.5.4
@@ -35,7 +35,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/bytedance/gopkg v0.1.4 // indirect
-	github.com/bytedance/sonic/loader v0.5.2 // indirect
+	github.com/bytedance/sonic/loader v0.5.3 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
